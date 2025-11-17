@@ -1,0 +1,13 @@
+# Reference folder (old frontend for migration)
+frontend_old/
+
+# IDE
+.idea/
+*.iml
+
+# Environment variables
+.env
+.env.local
+
+# Dependencies
+node_modules/
