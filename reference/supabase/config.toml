@@ -1,0 +1,28 @@
+project_id = "qqhuwvveovmfyihjnanx"
+
+[functions.quick-login]
+verify_jwt = false
+
+[functions.dadata-api-inn]
+verify_jwt = true
+
+[functions.telegram-webhook]
+verify_jwt = false
+
+[functions.telegram-send]
+verify_jwt = true
+
+[functions.telegram-health]
+verify_jwt = false
+
+[functions.telegram-verify-topics]
+verify_jwt = false
+
+[functions.telegram-group-create]
+verify_jwt = false
+
+[functions.telegram-backfill-media]
+verify_jwt = true
+
+[functions.telegram-file-proxy]
+verify_jwt = false

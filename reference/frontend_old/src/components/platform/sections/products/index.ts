@@ -1,0 +1,1 @@
+// Products components removed - only admin sections remain

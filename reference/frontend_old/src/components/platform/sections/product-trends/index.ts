@@ -1,0 +1,1 @@
+// Product trends components removed - only admin sections remain

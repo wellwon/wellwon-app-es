@@ -1,0 +1,1 @@
+-- No database changes needed for this feature, just setting up for the edge function

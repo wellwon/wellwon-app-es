@@ -1,6 +1,3 @@
-# Reference folder (old frontend for migration)
-frontend_old/
-
 # IDE
 .idea/
 *.iml
