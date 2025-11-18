@@ -2,8 +2,6 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import * as authAPI from "@/api/user_account";
-import { useBrokerConnectionStore } from "@/stores/useBrokerConnectionStore";
-import { useBrokerAccountStore } from "@/stores/useBrokerAccountStore";
 
 export interface User {
   user_id: string;
@@ -64,9 +62,6 @@ export function useUserAccount() {
   const refreshTimerRef = useRef<NodeJS.Timeout | null>(null);
   const expiryWarningTimerRef = useRef<NodeJS.Timeout | null>(null);
   const mountedRef = useRef(true);
-
-  const resetBrokers = useBrokerConnectionStore((s) => s.reset);
-  const resetAccounts = useBrokerAccountStore((s) => s.reset);
 
   // Event Dispatcher
   const dispatchAuthEvent = useCallback((type: string, detail: any) => {
@@ -329,12 +324,6 @@ export function useUserAccount() {
   ): Promise<User | null> => {
     console.log('[useAuth] Login attempt for:', username);
 
-    // CRITICAL: Clear persist state BEFORE login to prevent phantom connections
-    // Old connections from previous session must not interfere with fresh login
-    localStorage.removeItem('broker-connections-storage');
-    localStorage.removeItem('broker-accounts-storage');
-    console.log('[useAuth] Cleared persist state before login');
-
     setState(prev => ({ ...prev, loading: true, error: null }));
 
     try {
@@ -456,19 +445,6 @@ export function useUserAccount() {
 
     setState(prev => ({ ...prev, loading: true }));
 
-    // CRITICAL FIX: Clear broker disconnection state BEFORE resetting stores
-    // This ensures the store doesn't reload from localStorage during reset
-    sessionStorage.removeItem('tradecore_disconnected_brokers');
-    localStorage.removeItem('tradecore_permanently_disconnected');
-
-    // Clear Zustand persist state to prevent phantom connections
-    localStorage.removeItem('broker-connections-storage');
-    localStorage.removeItem('broker-accounts-storage');
-
-    // Reset stores AFTER clearing storage
-    resetBrokers();
-    resetAccounts();
-
     try {
       await authAPI.logout();
       console.log('[useAuth] Logout API successful');
@@ -490,7 +466,7 @@ export function useUserAccount() {
     setState(createInitialState());
 
     console.log('[useAuth] Logout complete');
-  }, [state.user, resetBrokers, resetAccounts, dispatchAuthEvent]);
+  }, [state.user, dispatchAuthEvent]);
 
   // Helpers
   const getAccessToken = useCallback((): string | null => {

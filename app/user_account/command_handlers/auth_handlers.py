@@ -194,41 +194,18 @@ class DeleteUserHandler(ICommandHandler):
         # TRUE SAGA PATTERN: Enrich event with owned resource IDs
         # This eliminates the need for query_bus in saga (performance + reliability)
 
-        # Check for virtual broker connection
-        has_virtual_broker = False
-        from app.broker_connection.queries import GetBrokerConnectionsForUserQuery
-        try:
-            connections = await self.query_bus.query(
-                GetBrokerConnectionsForUserQuery(user_id=command.user_id)
-            )
-            has_virtual_broker = any(conn.broker_id == "virtual_broker" for conn in connections)
+        # TODO: Query owned resources from WellWon domains when implemented
+        # (companies, shipments, documents, etc.)
+        owned_resource_ids = []
+        owned_entity_ids = []
 
-            # Collect owned resource IDs
-            owned_connection_ids = [conn.id for conn in connections]
-        except Exception as e:
-            log.warning(f"Could not fetch broker connections for user {command.user_id}: {e}")
-            owned_connection_ids = []
-
-        # Collect owned broker account IDs
-        owned_account_ids = []
-        try:
-            from app.broker_account.queries import GetAccountsForUserQuery
-            accounts = await self.query_bus.query(
-                GetAccountsForUserQuery(user_id=command.user_id)
-            )
-            owned_account_ids = [acc.id for acc in accounts]
-        except Exception as e:
-            log.warning(f"Could not fetch broker accounts for user {command.user_id}: {e}")
-
-        # ENRICHED EVENT with all owned resource IDs
+        # Simplified event for WellWon
         event = UserAccountDeleted(
             user_id=command.user_id,
             reason=command.reason,
             grace_period=command.grace_period,
-            has_virtual_broker=has_virtual_broker,
-            owned_connection_ids=owned_connection_ids,
-            owned_account_ids=owned_account_ids,
-            owned_automation_ids=[],  # TODO: Add when automation domain exists
+            owned_resource_ids=owned_resource_ids,
+            owned_entity_ids=owned_entity_ids,
         )
 
         await self.event_bus.publish(

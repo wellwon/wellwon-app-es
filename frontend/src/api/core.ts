@@ -1,5 +1,5 @@
 // =============================================================================
-// File: src/api/core.ts — TradeCore v0.3 — Axios Client (Synapse Layer)
+// File: src/api/core.ts — Axios Client for REST API
 // =============================================================================
 // • Axios instance with JWT Bearer injection from localStorage
 // • Handles Authorization on each request

@@ -50,7 +50,7 @@ export function useWSEContext(): ExtendedWSEReturn {
 export function WSEProvider({
   children,
   config,
-  initialTopics = ['broker_connection_events', 'broker_account_events', 'system_events']
+  initialTopics = ['user_account_events', 'system_events']
 }: WSEProviderProps) {
   const userAccountHook = useUserAccount();
   const { isAuthenticated, sessionReady, user } = userAccountHook;

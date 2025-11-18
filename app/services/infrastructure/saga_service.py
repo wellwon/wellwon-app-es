@@ -1395,7 +1395,7 @@ class SagaService:
                             log.debug(f"Error checking lock duration: {e}")
 
                     # Check current connection status
-                    from app.broker_connection.queries import GetBrokerConnectionDetailsQuery
+                    # from app.broker_connection.queries import GetBrokerConnectionDetailsQuery
 
                     broker_connection_id = event_dict.get('broker_connection_id') or event_dict.get('aggregate_id')
                     if broker_connection_id:

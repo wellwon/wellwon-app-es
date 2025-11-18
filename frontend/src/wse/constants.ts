@@ -91,19 +91,9 @@ export const DIAGNOSTICS_STORAGE_KEY = `${STORAGE_KEY_PREFIX}diagnostics`;
 // Default Topics
 // ─────────────────────────────────────────────────────────────────────────────
 
-// UPDATED (Nov 13, 2025): Added broker_health, renamed broker_streaming
 export const DEFAULT_TOPICS = [
-    // DOMAIN EVENTS (lifecycle - what happened)
-    'broker_connection_events',
-    'broker_account_events',
     'user_account_events',
     'system_events',
-
-    // MONITORING STATE (runtime - current state)
-    'broker_health',          // NEW: REST API health checks
-    'broker_streaming',       // RENAMED: WebSocket/streaming health (was: broker_streaming_events)
-
-    // OTHER
     'monitoring_events'
 ];
 
@@ -146,80 +136,27 @@ export const FEATURES = {
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Event Type Mappings (matching backend) - UPDATED Nov 13, 2025
+// Event Type Mappings (matching backend)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const INTERNAL_TO_WS_EVENT_TYPE_MAP: Record<string, string> = {
-    // =========================================================================
-    // DOMAIN EVENTS → broker_connection_events topic
-    // =========================================================================
-    // Broker connection lifecycle (OAuth, credentials, saga completion)
-    'BrokerConnectionInitiated': 'broker_connection_update',
-    'BrokerConnectionEstablished': 'broker_connection_update',
-    'BrokerConnectionEstablishedSagaCompleted': 'broker_connection_update',
-    'BrokerConnectionRestored': 'broker_connection_update',
-    'BrokerConnectionAttemptFailed': 'broker_connection_update',
-    'BrokerDisconnected': 'broker_connection_update',
-    'BrokerTokensSuccessfullyStored': 'broker_connection_update',
-    'BrokerTokensSuccessfullyRefreshed': 'broker_connection_update',
-    'BrokerOAuthClientCredentialsStored': 'broker_connection_update',
-    'BrokerApiEndpointConfigured': 'broker_connection_update',
-    'BrokerApiCredentialsStored': 'broker_connection_update',
-    'BrokerConnectionPurged': 'broker_status_remove',
+    // User account events
+    'UserAccountUpdated': 'user_account_update',
+    'UserAccountDeleted': 'user_account_remove',
 
-    // =========================================================================
-    // MONITORING EVENTS → broker_health topic (NEW! Nov 13, 2025)
-    // =========================================================================
-    // REST API health checks and module health
-    'BrokerConnectionHealthUpdated': 'broker_health_update',
-    'BrokerConnectionHealthChecked': 'broker_health_update',
-    'BrokerConnectionModuleHealthChanged': 'broker_health_update',
-
-    // =========================================================================
-    // MONITORING EVENTS → broker_streaming topic (Nov 13, 2025)
-    // =========================================================================
-    // WebSocket/HTTP Chunked streaming lifecycle
-    'streaming_connection_status': 'broker_streaming_update',
-    'streaming_subscription_started': 'broker_streaming_update',
-    'streaming_subscription_stopped': 'broker_streaming_update',
-    'streaming_error': 'broker_streaming_update',
-
-    // =========================================================================
-    // REAL-TIME DATA → market_data topic (Nov 13, 2025)
-    // =========================================================================
-    // Market data streams (quotes, trades, bars, orderbook)
-    'quote_update': 'quote_update',
-    'trade_update': 'trade_update',
-    'bar_update': 'bar_update',
-    'orderbook_update': 'orderbook_update',
-
-    // Account events
-    'AccountDataFromBrokerUpdated': 'account_update',
-    'BrokerAccountLinked': 'account_update',
-    'UserSetAccountDetailsChanged': 'account_update',
-    'UserAccountMarkedDeleted': 'account_remove',
-    'BrokerAccountDeleted': 'account_remove',
-    'BrokerAccountsDeleted': 'accounts_bulk_remove',
-    'BrokerAccountBatchDeleted': 'accounts_bulk_remove',
-    'BrokerAccountRecovered': 'account_update',
-    'AccountDeleted': 'account_remove',
-
-    // Trading events
-    'PositionUpdated': 'position_update',
-    'OrderExecuted': 'order_update',
-    'OrderStatusChanged': 'order_update',
-    'OrderRejected': 'order_update',
-    'OrderCancelled': 'order_update',
-    'OrderPartiallyFilled': 'order_update',
-
-    // Strategy events
-    'AutomationUpdated': 'automation_update',
-    'AutomationExecutionStarted': 'automation_update',
-    'AutomationExecutionCompleted': 'automation_update',
+    // Generic entity events
+    'EntityUpdated': 'entity_update',
+    'EntityCreated': 'entity_create',
+    'EntityDeleted': 'entity_remove',
 
     // System events
     'SystemAnnouncement': 'system_announcement',
-    'MarketDataUpdate': 'market_data_update',
+    'SystemHealthUpdate': 'system_health_update',
+    'ComponentHealthUpdate': 'component_health',
+    'PerformanceMetricsUpdate': 'performance_metrics',
+
+    // Notification events
+    'NotificationCreated': 'notification',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

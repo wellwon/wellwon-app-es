@@ -64,10 +64,10 @@ const DEFAULT_CONFIG: Partial<WSEConfig> = {
 };
 
 const CRITICAL_HANDLERS = [
-  'broker_connection_snapshot',
-  'broker_connection_update',
-  'broker_account_snapshot',
-  'account_update'
+  'user_account_update',
+  'entity_update',
+  'system_announcement',
+  'system_status'
 ];
 
 const SNAPSHOT_DEBOUNCE_TIME = 2000; // 2 seconds
@@ -627,47 +627,7 @@ export function useWSE(
         let throttleMs = EVENT_THROTTLE_MS;
 
         // Less aggressive throttling to ensure real-time updates
-        if (eventType === 'broker_connection_update' || eventType === 'broker_status_update' || eventType === 'broker_health_update') {
-          // Check if this is a state change by comparing with last known state
-          const brokerId = parsed.p?.broker_connection_id;
-          const status = parsed.p?.status || parsed.p?.is_healthy?.toString();
-          const stateKey = `broker_${brokerId}_${status}`;
-          const lastStateTime = window.__wseLastStates?.[stateKey] || 0;
-
-          if (!window.__wseLastStates) window.__wseLastStates = {};
-
-          // Allow health updates every 30 seconds (match backend interval)
-          // Allow connection/status updates every 2 seconds
-          const throttleInterval = eventType === 'broker_health_update' ? 30000 : 2000;
-
-          if (now - lastStateTime < throttleInterval) {
-            logger.debug(`Throttling duplicate ${eventType} for ${brokerId} (interval: ${throttleInterval}ms)`);
-            return;
-          }
-
-          window.__wseLastStates[stateKey] = now;
-          throttleMs = 0; // No additional throttling
-        } else if (eventType === 'broker_module_health_update') {
-          // Special handling for module health updates
-          const brokerConnId = parsed.p?.broker_connection_id;
-          const moduleUpdates = parsed.p?.module_updates || {};
-
-          // Create a composite key for module health
-          const moduleKeys = Object.keys(moduleUpdates).sort().join(',');
-          const dedupeKey = `module_health_${brokerConnId}_${moduleKeys}`;
-
-          // Check if we've seen this exact combination recently
-          const lastSeen = lastEventTimestampRef.current.get(dedupeKey) || 0;
-
-          // Throttle to once per 30 seconds for the same modules
-          if (now - lastSeen < 30000) {
-            logger.debug(`Throttling duplicate module health update for ${brokerConnId}`);
-            return;
-          }
-
-          lastEventTimestampRef.current.set(dedupeKey, now);
-          throttleMs = 0; // Already throttled above
-        } else if (eventType === 'heartbeat') {
+        if (eventType === 'heartbeat') {
           throttleMs = 5000; // 5 seconds for heartbeats
         } else if (eventType === 'market_data_update') {
           throttleMs = 100; // 100ms for market data
@@ -776,11 +736,11 @@ export function useWSE(
         }
 
         logger.info(`=== REQUESTING INITIAL SNAPSHOTS (Attempt ${i + 1}/${retries}) ===`);
-        logger.info('Topics for snapshot:', ['broker_connection_events', 'account_events', 'broker_health', 'broker_streaming']);
+        logger.info('Topics for snapshot:', ['user_account_events', 'system_events']);
 
         // Request snapshot without historical events
         sendMessage('sync_request', {
-          topics: ['broker_connection_events', 'account_events', 'broker_health', 'broker_streaming'],
+          topics: ['user_account_events', 'system_events'],
           include_snapshots: true,
           include_history: false, // Don't include historical events
           last_sequence: 0,
@@ -818,7 +778,7 @@ export function useWSE(
       ? store.activeTopics
       : (initialTopics || getSavedSubscriptions());
 
-    const topics = [...new Set([...savedTopics, 'broker_connection_events', 'account_events', 'broker_health', 'broker_streaming'])];
+    const topics = [...new Set([...savedTopics, 'user_account_events', 'system_events'])];
 
     logger.info('Subscribing to topics:', topics);
 
@@ -858,22 +818,22 @@ export function useWSE(
 
   // Add event listeners for snapshot tracking
   useEffect(() => {
-    const handleBrokerSnapshot = () => {
-      snapshotsReceivedRef.current.broker = true;
+    const handleUserSnapshot = () => {
+      snapshotsReceivedRef.current.broker = true; // Reuse existing flag
       subscriptionsConfirmedRef.current = true;
     };
 
-    const handleAccountSnapshot = () => {
-      snapshotsReceivedRef.current.account = true;
+    const handleSystemSnapshot = () => {
+      snapshotsReceivedRef.current.account = true; // Reuse existing flag
       subscriptionsConfirmedRef.current = true;
     };
 
-    window.addEventListener('brokerSnapshotReceived', handleBrokerSnapshot);
-    window.addEventListener('accountSnapshotReceived', handleAccountSnapshot);
+    window.addEventListener('userSnapshotReceived', handleUserSnapshot);
+    window.addEventListener('systemSnapshotReceived', handleSystemSnapshot);
 
     return () => {
-      window.removeEventListener('brokerSnapshotReceived', handleBrokerSnapshot);
-      window.removeEventListener('accountSnapshotReceived', handleAccountSnapshot);
+      window.removeEventListener('userSnapshotReceived', handleUserSnapshot);
+      window.removeEventListener('systemSnapshotReceived', handleSystemSnapshot);
     };
   }, []);
 
@@ -881,8 +841,8 @@ export function useWSE(
   useEffect(() => {
     const handleSubscriptionUpdate = (event: CustomEvent) => {
       const { success, topics } = event.detail;
-      if (success && topics?.includes('broker_connection_events')) {
-        logger.info('Subscription confirmed for broker_connection_events');
+      if (success && topics?.includes('user_account_events')) {
+        logger.info('Subscription confirmed for user_account_events');
         subscriptionsConfirmedRef.current = true;
       }
     };
@@ -1105,7 +1065,7 @@ export function useWSE(
         }
 
         const savedTopics = initialTopics || getSavedSubscriptions();
-        const topics = [...new Set([...savedTopics, 'broker_connection_events', 'account_events', 'broker_health', 'broker_streaming'])];
+        const topics = [...new Set([...savedTopics, 'user_account_events', 'system_events'])];
         store.setActiveTopics(topics);
 
         if (!mounted) {

@@ -506,7 +506,7 @@ class WsErrorEvent(WsBaseEvent):
 # Broker Connection Events (keeping existing)
 # ──────────────────────────────────────────────────────────────────────────────
 from app.infra.broker_adapters.common.adapter_enums import BrokerConnectionStatusEnum, MarketStatusEnum
-from app.broker_connection.read_models import BrokerConnectionReadModel
+# from app.broker_connection.read_models import BrokerConnectionReadModel
 
 
 class WsBrokerModuleInfo(BaseModel):
@@ -632,7 +632,7 @@ class WsBrokerModuleHealthUpdateEvent(WsBaseEvent):
 # ──────────────────────────────────────────────────────────────────────────────
 # Account Events (keeping existing)
 # ──────────────────────────────────────────────────────────────────────────────
-from app.broker_account.read_models import BrokerAccountReadModel
+# from app.broker_account.read_models import BrokerAccountReadModel
 from app.infra.broker_adapters.common.adapter_enums import AssetTypeEnum
 
 

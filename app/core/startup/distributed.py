@@ -256,7 +256,7 @@ async def register_sync_projections_phase(app: FastAPI) -> None:
 
     # Broker Connection Projector
     if hasattr(app.state, 'broker_connection_state') and hasattr(app.state, 'broker_auth_service'):
-        from app.broker_connection.projectors import BrokerConnectionProjector
+        # from app.broker_connection.projectors import BrokerConnectionProjector
         projector_instances["broker_connection"] = BrokerConnectionProjector(
             app.state.broker_connection_state,
             app.state.broker_auth_service
@@ -264,7 +264,7 @@ async def register_sync_projections_phase(app: FastAPI) -> None:
 
     # Broker Account Projector
     if hasattr(app.state, 'account_state'):
-        from app.broker_account.projectors import BrokerAccountProjector
+        # from app.broker_account.projectors import BrokerAccountProjector
         from app.infra.persistence.cache_manager import get_cache_manager
 
         # CQRS COMPLIANCE (Nov 11, 2025): Removed reactive_event_bus from projector

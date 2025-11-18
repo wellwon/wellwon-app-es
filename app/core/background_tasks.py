@@ -131,7 +131,7 @@ async def _streaming_restoration_task(adapter_monitoring_service, query_bus) -> 
         logger.info("Starting streaming restoration for all connected brokers...")
 
         # Query for ALL connected brokers (regardless of automations or login status)
-        from app.broker_connection.queries import GetAllConnectionsQuery
+        # from app.broker_connection.queries import GetAllConnectionsQuery
 
         query = GetAllConnectionsQuery(
             only_active=True,  # Only get connected brokers

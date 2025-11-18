@@ -379,119 +379,24 @@ export interface PerformanceMetrics {
 // Event Types (matching backend)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface BrokerConnectionUpdate {
-  broker_connection_id: string;
-  broker_id: string;
-  environment: 'paper' | 'live';
-  status: string;
-  reauth_required?: boolean;
-  message?: string;
-  last_connected_at?: string;
-  last_heartbeat_at?: string;
-  api_endpoint?: string;
-  connection_instance_id?: string;
-  adapter_type?: string;
-  modules?: Record<string, BrokerModuleInfo>;
-  supported_assets?: string[];
-  adapter_version?: string;
-}
-
-export interface BrokerModuleInfo {
-  module_id: string;
-  module_type: string;
-  is_healthy: boolean;
-  status: string;
-  message?: string;
-  details?: Record<string, any>;
-  capabilities?: string[];
-  last_checked?: string;
-}
-
-export interface BrokerHealthUpdate {
-  broker_connection_id: string;
-  broker_id: string;
-  environment: 'paper' | 'live';
-  is_healthy: boolean;
-  health_status: 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
-  response_time_ms?: number;
-  modules?: {
-    account?: boolean;
-    orders?: boolean;
-    positions?: boolean;
-    market_data?: boolean;
-    streaming?: boolean;
-  };
-  message?: string;
-  last_checked?: string;
-  timestamp?: string;
-}
-
-export interface BrokerStreamingUpdate {
-  broker_connection_id: string;
-  broker_id: string;
-  environment: 'paper' | 'live';
-  stream_type: 'trade_data_stream' | 'market_data_stream';
-  status: 'active' | 'inactive' | 'error' | 'connecting';
-  message?: string;
-  timestamp?: string;
-}
-
-export interface AccountUpdate {
-  id: string;
-  broker_connection_id?: string;
-  broker_id: string;
-  environment: 'paper' | 'live';
-  asset_type: string;
-  broker_account_id: string;
-  account_name?: string;
-  balance: string;
-  currency: string;
-  equity?: string;
-  buying_power?: string;
-  status?: string;
-  account_type?: string;
+export interface UserAccountUpdate {
+  user_id: string;
+  username: string;
+  email: string;
+  role: string;
+  is_active: boolean;
+  email_verified: boolean;
+  mfa_enabled: boolean;
+  created_at: string;
+  updated_at?: string;
   metadata?: Record<string, any>;
-  deleted: boolean;
-  archived?: boolean;
-  last_synced_at?: string;
-  created_at: string;
-  updated_at?: string;
-  positions?: PositionInfo[];
-  open_orders_count?: number;
-  daily_pnl?: string;
-  daily_pnl_percent?: string;
 }
 
-// Type alias for renamed event
-export type BrokerAccountUpdate = AccountUpdate;
-
-export interface PositionInfo {
-  symbol: string;
-  quantity: string;
-  side: string;
-  market_value?: string;
-  avg_cost?: string;
-  unrealized_pnl?: string;
-  unrealized_pnl_percent?: string;
-  asset_class?: string;
-}
-
-export interface OrderUpdate {
-  order_id: string;
-  client_order_id?: string;
-  account_id: string;
-  symbol: string;
-  side: string;
-  quantity: string;
-  order_type: string;
-  status: string;
-  filled_quantity?: string;
-  avg_fill_price?: string;
-  limit_price?: string;
-  stop_price?: string;
-  time_in_force?: string;
-  created_at: string;
-  updated_at?: string;
+export interface EntityUpdate {
+  entity_id: string;
+  entity_type: string;
+  data: Record<string, any>;
+  timestamp: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

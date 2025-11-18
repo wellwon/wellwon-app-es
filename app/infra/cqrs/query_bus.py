@@ -87,16 +87,11 @@ class QueryCachingMiddleware(QueryMiddleware):
     # Queries that should not be cached
     SKIP_CACHE_QUERIES = {
         'CreateUserSessionQuery',  # Contains device_info dict that changes
-        'GetUserActiveSessionsQuery',  # Real-time data
-        'GetActiveSessionCountQuery',  # Real-time data
-        'CheckConcurrentSessionsQuery',  # Real-time check
-        'GetVirtualAccountsByUserQuery',  # Used by sagas - needs fresh data for cleanup
-        'GetVirtualAccountsByConnectionAndUserQuery',  # Used by batch deletion - needs fresh data
-        'GetAccountsByConnectionQuery',  # CRITICAL: Used by saga validation - needs fresh data after deletion
-        'GetBrokerConnectionDetailsQuery',  # Used by OAuth status polling - needs fresh connection status
-        'GetBrokerConnectionByUserBrokerEnvQuery',  # Used by disconnect - needs current connection ID, not cached old ID
-        'GetUserByUsernameQuery',  # Authentication must always be fresh
-        'GetUserProfileQuery',  # User data changes frequently
+        'GetUserActiveSessionsQuery',
+        'GetActiveSessionCountQuery',
+        'CheckConcurrentSessionsQuery',
+        'GetUserByUsernameQuery',
+        'GetUserProfileQuery',
     }
 
     def __init__(self, cache_ttl: int = 60):
