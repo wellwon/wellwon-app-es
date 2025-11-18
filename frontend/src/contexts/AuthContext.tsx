@@ -1,15 +1,21 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { logger } from '@/utils/logger';
 import type { Profile, SignUpMetadata, AuthResponse } from '@/types/auth';
-import { login as apiLogin, register as apiRegister, getProfile as apiGetProfile } from '@/api/user_account';
+import { login as apiLogin, register as apiRegister, fetchMe as apiGetProfile } from '@/api/user_account';
 import { API } from '@/api/core';
 
 // Simplified User type (no Supabase dependency)
 interface User {
+  id: string;  // Alias for user_id (for compatibility)
   user_id: string;
   username: string;
   email: string;
   role: string;
+  user_metadata?: {
+    first_name?: string;
+    last_name?: string;
+    avatar_url?: string;
+  };
 }
 
 interface AuthContextType {
@@ -69,7 +75,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       logger.debug('Profile loaded successfully', { component: 'AuthContext' });
 
       if (isMountedRef.current && profileLoadingRef.current === userId) {
-        setProfile(profileData);
+        // Map API response to Profile type
+        const mappedProfile: Profile = {
+          id: profileData.user_id,
+          user_id: profileData.user_id,
+          username: profileData.username,
+          email: profileData.email,
+          role: profileData.role,
+          first_name: null,
+          last_name: null,
+          avatar_url: null,
+          bio: null,
+          phone: null,
+          active: profileData.is_active,
+          is_active: profileData.is_active,
+          is_developer: false,
+          email_verified: profileData.email_verified,
+          mfa_enabled: profileData.mfa_enabled,
+          created_at: profileData.created_at,
+          updated_at: profileData.created_at,
+          last_login: profileData.last_login,
+          last_password_change: profileData.last_password_change,
+          security_alerts_enabled: profileData.security_alerts_enabled,
+          connected_brokers: profileData.connected_brokers,
+          active_sessions_count: profileData.active_sessions_count,
+        };
+        setProfile(mappedProfile);
       }
     } catch (error) {
       logger.error('Profile loading error', error, { userId, component: 'AuthContext' });
@@ -113,14 +144,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (mounted && isMountedRef.current) {
           // Create user object from profile
           const userObj: User = {
+            id: profileData.user_id,
             user_id: profileData.user_id,
             username: profileData.username,
             email: profileData.email,
             role: profileData.role || 'user'
           };
 
+          // Map API response to Profile type
+          const mappedProfile: Profile = {
+            id: profileData.user_id,
+            user_id: profileData.user_id,
+            username: profileData.username,
+            email: profileData.email,
+            role: profileData.role,
+            first_name: null,
+            last_name: null,
+            avatar_url: null,
+            bio: null,
+            phone: null,
+            active: profileData.is_active,
+            is_active: profileData.is_active,
+            is_developer: false,
+            email_verified: profileData.email_verified,
+            mfa_enabled: profileData.mfa_enabled,
+            created_at: profileData.created_at,
+            updated_at: profileData.created_at,
+            last_login: profileData.last_login,
+            last_password_change: profileData.last_password_change,
+            security_alerts_enabled: profileData.security_alerts_enabled,
+            connected_brokers: profileData.connected_brokers,
+            active_sessions_count: profileData.active_sessions_count,
+          };
+
           setUser(userObj);
-          setProfile(profileData);
+          setProfile(mappedProfile);
           logger.info('User session restored from localStorage', { component: 'AuthContext' });
         }
 
@@ -147,13 +205,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signUp = async (email: string, password: string, metadata?: SignUpMetadata) => {
     try {
       // Call new backend register API
-      await apiRegister({
-        username: email.split('@')[0], // Use email prefix as username
+      await apiRegister(
+        email.split('@')[0], // Use email prefix as username
         email,
         password,
-        secret: metadata?.secret || 'default',  // TODO: Add secret to form
-        terms_accepted: true
-      });
+        (metadata as any)?.secret || 'default',  // TODO: Add secret to form
+        true // terms_accepted
+      );
 
       // Auto-login after registration
       return await signIn(email, password);
@@ -181,14 +239,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (isMountedRef.current) {
         const userObj: User = {
+          id: profileData.user_id,
           user_id: profileData.user_id,
           username: profileData.username,
           email: profileData.email,
           role: profileData.role || 'user'
         };
 
+        // Map API response to Profile type
+        const mappedProfile: Profile = {
+          id: profileData.user_id,
+          user_id: profileData.user_id,
+          username: profileData.username,
+          email: profileData.email,
+          role: profileData.role,
+          first_name: null,
+          last_name: null,
+          avatar_url: null,
+          bio: null,
+          phone: null,
+          active: profileData.is_active,
+          is_active: profileData.is_active,
+          is_developer: false,
+          email_verified: profileData.email_verified,
+          mfa_enabled: profileData.mfa_enabled,
+          created_at: profileData.created_at,
+          updated_at: profileData.created_at,
+          last_login: profileData.last_login,
+          last_password_change: profileData.last_password_change,
+          security_alerts_enabled: profileData.security_alerts_enabled,
+          connected_brokers: profileData.connected_brokers,
+          active_sessions_count: profileData.active_sessions_count,
+        };
+
         setUser(userObj);
-        setProfile(profileData);
+        setProfile(mappedProfile);
       }
 
       logger.info('User logged in successfully', { component: 'AuthContext' });

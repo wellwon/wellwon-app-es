@@ -1,16 +1,27 @@
 export interface Profile {
   id: string;
   user_id: string;
+  username: string;
+  email: string;
+  role: string;
   first_name: string | null;
   last_name: string | null;
   avatar_url: string | null;
   bio: string | null;
   phone: string | null;
   active: boolean;
+  is_active: boolean;
   is_developer: boolean;
+  email_verified: boolean;
+  mfa_enabled: boolean;
   user_number?: number;
   created_at: string;
   updated_at: string;
+  last_login: string | null;
+  last_password_change: string | null;
+  security_alerts_enabled: boolean;
+  connected_brokers: string[];
+  active_sessions_count: number;
 }
 
 export interface AuthError {
