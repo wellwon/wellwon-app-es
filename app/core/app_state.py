@@ -33,8 +33,8 @@ from app.services.application.user_auth_service import UserAuthenticationService
 from app.services.infrastructure.saga_service import SagaService
 
 # Virtual broker types
-from app.virtual_broker.services.virtual_broker_service import VirtualBrokerService
-from app.virtual_broker.services.virtual_market_data_service import VirtualBrokerMarketDataService
+# from app.virtual_broker.services.virtual_broker_service import VirtualBrokerService
+# from app.virtual_broker.services.virtual_market_data_service import VirtualBrokerMarketDataService
 
 # Adapter types
 from app.infra.broker_adapters.adapter_factory import BrokerAdapterFactory

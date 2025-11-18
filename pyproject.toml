@@ -1,0 +1,131 @@
+# =============================================================================
+# WellWon Platform - Project Configuration
+# =============================================================================
+# PEP 621 compliant pyproject.toml
+# Single source of truth for project metadata and versioning
+# =============================================================================
+
+[project]
+name = "wellwon"
+version = "0.1"  # SINGLE SOURCE OF TRUTH - Change version HERE only!
+description = "WellWon - Enterprise Logistics Platform"
+readme = "README.md"
+requires-python = ">=3.14"
+license = {text = "Proprietary"}
+authors = [
+    {name = "WellWon Team", email = "team@wellwon.com"}
+]
+keywords = [
+    "logistics",
+    "customs",
+    "fintech",
+    "event-sourcing",
+    "cqrs",
+    "fastapi"
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Logistics Industry",
+    "Programming Language :: Python :: 3.14",
+    "Framework :: FastAPI",
+    "Topic :: Office/Business :: Logistics",
+]
+
+# Dependencies loaded from requirements.txt
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/wellwon/wellwon-app-es"
+Documentation = "https://docs.wellwon.app"
+Repository = "https://github.com/wellwon/wellwon-app-es"
+Issues = "https://github.com/wellwon/wellwon-app-es/issues"
+
+# =============================================================================
+# BUILD SYSTEM
+# =============================================================================
+[build-system]
+requires = ["setuptools>=68.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.setuptools.dynamic]
+# If you want to load version from file instead of hardcoding:
+# version = {attr = "app.__version__"}
+
+# =============================================================================
+# PYTEST CONFIGURATION
+# =============================================================================
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = "-v --tb=short"
+
+# =============================================================================
+# BLACK (Code Formatter)
+# =============================================================================
+[tool.black]
+line-length = 120
+target-version = ['py314']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.git
+  | \.venv
+  | venv
+  | build
+  | dist
+)/
+'''
+
+# =============================================================================
+# RUFF (Linter)
+# =============================================================================
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+select = ["E", "F", "W", "I"]  # pycodestyle, pyflakes, warnings, isort
+ignore = ["E501"]  # line too long (handled by black)
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "build",
+    "dist",
+]
+
+# =============================================================================
+# VERSIONING STRATEGY
+# =============================================================================
+# Semantic Versioning 2.0.0: MAJOR.MINOR.PATCH
+#
+# MAJOR: Breaking changes (API incompatible)
+# MINOR: New features (backwards compatible)
+# PATCH: Bug fixes (backwards compatible)
+#
+# Examples:
+# - 0.5.1 → 0.5.2  (bug fix)
+# - 0.5.2 → 0.6.0  (new feature)
+# - 0.6.0 → 1.0.0  (major release, API stable)
+#
+# HOW TO UPDATE VERSION:
+# 1. Edit version in THIS FILE (line 10)
+# 2. Run: python scripts/update_version.py
+# 3. Commit: git commit -am "Bump version to X.Y.Z"
+# 4. Tag: git tag vX.Y.Z
+# 5. Push: git push && git push --tags
+#
+# =============================================================================

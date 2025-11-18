@@ -30,8 +30,8 @@ from app.services.infrastructure.adapter_monitoring.adapter_monitoring_service i
 # NOTE: BrokerStreamingService merged into BrokerOperationService
 
 # Virtual broker services
-from app.virtual_broker.services.virtual_broker_service import VirtualBrokerService
-from app.virtual_broker.services.virtual_market_data_service import VirtualBrokerMarketDataService
+# from app.virtual_broker.services.virtual_broker_service import VirtualBrokerService
+# from app.virtual_broker.services.virtual_market_data_service import VirtualBrokerMarketDataService
 from app.infra.market_data.base_provider import MarketDataProviderType
 
 logger = logging.getLogger("wellwon.startup.services")

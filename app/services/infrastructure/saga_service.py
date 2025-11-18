@@ -37,7 +37,7 @@ from app.config.reliability_config import ReliabilityConfigs
 from app.infra.saga import saga_events
 
 # Import virtual broker events to register them with @domain_event decorator
-from app.virtual_broker import events as vb_events
+# from app.virtual_broker import events as vb_events
 
 # Type checking imports
 if TYPE_CHECKING:

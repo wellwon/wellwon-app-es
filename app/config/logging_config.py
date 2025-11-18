@@ -716,7 +716,7 @@ def get_logger_level_from_env(logger_name: str, default_level: int) -> int:
     """Get logger level from environment variable."""
     # Convert logger name to env variable format
     # e.g., "aiokafka" -> "LOGLEVEL_AIOKAFKA"
-    # e.g., "wellwon.infra.broker_conn_state" -> "LOGLEVEL_TRADECORE_INFRA_BROKER_CONN_STATE"
+    # e.g., "wellwon.infra.broker_conn_state" -> "LOGLEVEL_WELLWON_INFRA_BROKER_CONN_STATE"
     env_name = f"LOGLEVEL_{logger_name.replace('.', '_').upper()}"
 
     level_str = os.getenv(env_name, '').upper()
