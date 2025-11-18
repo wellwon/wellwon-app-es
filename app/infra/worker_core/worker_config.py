@@ -98,20 +98,20 @@ HEALTH_CHECK_FILE_PATH = Path(os.getenv("HEALTH_CHECK_FILE_PATH", "/tmp/evo_work
 # REDIS KEYS
 # =============================================================================
 
-WORKER_REGISTRY_KEY = "tradecore:workers:registry"
-WORKER_METRICS_KEY = "tradecore:workers:metrics"
-SAGA_REDIS_PREFIX = "tradecore:saga:"
+WORKER_REGISTRY_KEY = "wellwon:workers:registry"
+WORKER_METRICS_KEY = "wellwon:workers:metrics"
+SAGA_REDIS_PREFIX = "wellwon:saga:"
 
 # Enhanced Redis keys
-GAP_DETECTION_PREFIX = "tradecore:worker:gaps:"
-SEQUENCE_CHECKPOINT_PREFIX = "tradecore:worker:checkpoints:"
+GAP_DETECTION_PREFIX = "wellwon:worker:gaps:"
+SEQUENCE_CHECKPOINT_PREFIX = "wellwon:worker:checkpoints:"
 
 # Virtual Broker Redis keys
-VIRTUAL_BROKER_PREFIX = "tradecore:virtual_broker:"
+VIRTUAL_BROKER_PREFIX = "wellwon:virtual_broker:"
 
 # Sync projection Redis keys
-SYNC_PROJECTION_METRICS_PREFIX = "tradecore:sync_projections:metrics:"
-SYNC_PROJECTION_ERRORS_PREFIX = "tradecore:sync_projections:errors:"
+SYNC_PROJECTION_METRICS_PREFIX = "wellwon:sync_projections:metrics:"
+SYNC_PROJECTION_ERRORS_PREFIX = "wellwon:sync_projections:errors:"
 
 # =============================================================================
 # INFRASTRUCTURE ENDPOINTS
@@ -129,8 +129,8 @@ ADMIN_API_KEY = os.getenv("WORKER_ADMIN_API_KEY", "")  # Required if admin endpo
 # =============================================================================
 
 USER_ACCOUNT_EVENTS_TOPIC = os.getenv("USER_ACCOUNT_EVENTS_TOPIC", "transport.user-account-events")
-BROKER_ACCOUNT_EVENTS_TOPIC = os.getenv("BROKER_ACCOUNT_EVENTS_TOPIC", "transport.broker-account-events")
-BROKER_CONNECTION_EVENTS_TOPIC = os.getenv("BROKER_CONNECTION_EVENTS_TOPIC", "transport.broker-connection-events")
+BROKER_ACCOUNT_EVENTS_TOPIC = os.getenv("BROKER_ACCOUNT_EVENTS_TOPIC", "transport.account-events")
+BROKER_CONNECTION_EVENTS_TOPIC = os.getenv("BROKER_CONNECTION_EVENTS_TOPIC", "transport.entity-events")
 
 # Order events topic
 ORDER_EVENTS_TOPIC = os.getenv("ORDER_EVENTS_TOPIC", "transport.order-events")

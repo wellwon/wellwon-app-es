@@ -2,7 +2,7 @@
 """
 Base Query Handler
 
-Provides common infrastructure for all query handlers in TradeCore.
+Provides common infrastructure for all query handlers in WellWon.
 
 Unlike BaseCommandHandler (which handles event publishing and sagas),
 BaseQueryHandler is LIGHTWEIGHT and provides:
@@ -34,7 +34,7 @@ TResult = TypeVar('TResult')
 
 class BaseQueryHandler(ABC, Generic[TQuery, TResult]):
     """
-    Base class for all query handlers in TradeCore.
+    Base class for all query handlers in WellWon.
 
     Provides:
     - Common logging infrastructure

@@ -31,7 +31,7 @@ from app.broker_account.commands import RefreshAccountDataFromBrokerCommand
 # For tracking recovery actions
 from collections import defaultdict
 
-log = logging.getLogger("tradecore.data_sync.processor")
+log = logging.getLogger("wellwon.data_sync.processor")
 
 
 class DataSyncProcessor:

@@ -69,7 +69,7 @@ except ImportError:
     retry_async = None
     CircuitBreakerOpenError = Exception
 
-log = logging.getLogger("tradecore.infra.redis_client")
+log = logging.getLogger("wellwon.infra.redis_client")
 
 # -----------------------------------------------------------------------------
 # Default Configuration (used when RedisConfig is not available)
@@ -101,10 +101,10 @@ def _get_slow_command_threshold(key: Optional[str] = None) -> float:
     Get slow command threshold from config (lazy load to avoid circular imports).
 
     Uses adaptive thresholds based on operation type:
-    - Saga operations (tradecore_saga:*, saga_aggregate_lock:*): 50ms (large payloads ~6KB)
-    - Worker registry (tradecore:workers:registry:*): 30ms (large JSON ~2-4KB)
-    - Worker metrics (tradecore:workers:metrics): 30ms (hash operations)
-    - Cache operations (tradecore:cache:*): 20ms (serialized objects)
+    - Saga operations (wellwon_saga:*, saga_aggregate_lock:*): 50ms (large payloads ~6KB)
+    - Worker registry (wellwon:workers:registry:*): 30ms (large JSON ~2-4KB)
+    - Worker metrics (wellwon:workers:metrics): 30ms (hash operations)
+    - Cache operations (wellwon:cache:*): 20ms (serialized objects)
     - Regular operations: 5ms (small payloads <1KB)
 
     Industry benchmarks:
@@ -116,19 +116,19 @@ def _get_slow_command_threshold(key: Optional[str] = None) -> float:
     """
     if key:
         # Saga operations - large state objects (6KB+)
-        if key.startswith("tradecore_saga:") or key.startswith("saga_aggregate_lock:"):
+        if key.startswith("wellwon_saga:") or key.startswith("saga_aggregate_lock:"):
             return 50.0
 
         # Worker registry - heartbeat payloads (2-4KB)
-        if key.startswith("tradecore:workers:registry:"):
+        if key.startswith("wellwon:workers:registry:"):
             return 30.0
 
         # Worker metrics - hash operations
-        if key.startswith("tradecore:workers:metrics"):
+        if key.startswith("wellwon:workers:metrics"):
             return 30.0
 
         # Cache operations - serialized objects (1-2KB)
-        if key.startswith("tradecore:cache:"):
+        if key.startswith("wellwon:cache:"):
             return 20.0
 
     try:

@@ -416,7 +416,7 @@ async def run_worker():
             service_type="data_integrity"  # Yellow color
         )
 
-        log = logging.getLogger(f"tradecore.worker.{WorkerType.DATA_SYNC.value}")
+        log = logging.getLogger(f"wellwon.worker.{WorkerType.DATA_SYNC.value}")
 
         # Create worker
         worker = DataSyncWorker()
@@ -449,10 +449,10 @@ async def run_worker():
         await worker.wait_for_shutdown()
 
     except KeyboardInterrupt:
-        log = logging.getLogger(f"tradecore.worker.{WorkerType.DATA_SYNC.value}")
+        log = logging.getLogger(f"wellwon.worker.{WorkerType.DATA_SYNC.value}")
         log.info("Worker interrupted by user")
     except Exception as e:
-        log = logging.getLogger(f"tradecore.worker.{WorkerType.DATA_SYNC.value}")
+        log = logging.getLogger(f"wellwon.worker.{WorkerType.DATA_SYNC.value}")
         log.error(f"Worker failed: {e}", exc_info=True)
         raise
     finally:
@@ -460,13 +460,13 @@ async def run_worker():
             try:
                 # BaseWorker handles graceful shutdown
                 await asyncio.wait_for(worker.stop(), timeout=30.0)
-                log = logging.getLogger(f"tradecore.worker.{WorkerType.DATA_SYNC.value}")
+                log = logging.getLogger(f"wellwon.worker.{WorkerType.DATA_SYNC.value}")
                 log.info("Graceful shutdown completed")
             except asyncio.TimeoutError:
-                log = logging.getLogger(f"tradecore.worker.{WorkerType.DATA_SYNC.value}")
+                log = logging.getLogger(f"wellwon.worker.{WorkerType.DATA_SYNC.value}")
                 log.error("Graceful shutdown timed out")
             except Exception as e:
-                log = logging.getLogger(f"tradecore.worker.{WorkerType.DATA_SYNC.value}")
+                log = logging.getLogger(f"wellwon.worker.{WorkerType.DATA_SYNC.value}")
                 log.error(f"Error during shutdown: {e}", exc_info=True)
 
 

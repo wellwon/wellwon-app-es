@@ -52,7 +52,7 @@ from app.infra.event_store.kurrentdb_event_store import KurrentDBEventStore
 from app.infra.event_bus.event_bus import EventBus
 from app.common.exceptions.exceptions import ProjectionRebuildError
 
-logger = logging.getLogger("tradecore.projection_rebuilder_service")
+logger = logging.getLogger("wellwon.projection_rebuilder_service")
 
 
 class RebuildPriority(Enum):

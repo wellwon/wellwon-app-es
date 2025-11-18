@@ -44,7 +44,7 @@ from typing import Any, Dict
 
 import logging
 
-log = logging.getLogger("tradecore.wse.filters")
+log = logging.getLogger("wellwon.wse.filters")
 
 
 class EventFilter:

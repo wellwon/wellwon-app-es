@@ -60,12 +60,6 @@ class VerifyPasswordHashQuery(Query):
 # Existing queries continue below...
 # =============================================================================
 
-class GetUserConnectedBrokersQuery(Query):
-    """Get list of user's connected brokers"""
-    user_id: uuid.UUID
-    include_disconnected: bool = False
-
-
 class GetUserActiveSessionsQuery(Query):
     """Get all active sessions for user"""
     user_id: uuid.UUID
@@ -82,12 +76,6 @@ class GetUserSessionHistoryQuery(Query):
     user_id: uuid.UUID
     limit: int = 50
     include_failed_attempts: bool = True
-
-
-class GetUserAccountMappingsQuery(Query):
-    """Get user's broker account mappings"""
-    user_id: uuid.UUID
-    broker_id: Optional[str] = None
 
 
 class CheckUserExistsQuery(Query):
@@ -116,12 +104,6 @@ class GetUserAuthDetailsQuery(Query):
     user_id: uuid.UUID
     include_password_hash: bool = False
     include_session_info: bool = True
-
-
-class GetUserOAuthStateQuery(Query):
-    """Get OAuth states for all user's brokers"""
-    user_id: uuid.UUID
-    broker_id: Optional[str] = None
 
 
 class GetUserCredentialsSummaryQuery(Query):
@@ -153,19 +135,6 @@ class GetUserOperationalStatusQuery(Query):
     user_id: uuid.UUID
     include_connection_status: bool = True
     include_account_status: bool = True
-
-
-class GetUserBrokerAccessQuery(Query):
-    """Check user's access to specific broker operations"""
-    user_id: uuid.UUID
-    broker_id: str
-    operation: str  # "trade", "data", "account_management"
-
-
-class GetUserTradingRestrictionsQuery(Query):
-    """Get user's trading restrictions"""
-    user_id: uuid.UUID
-    broker_id: Optional[str] = None
 
 
 class GetUserOperationalLimitsQuery(Query):
@@ -210,7 +179,6 @@ class GetUserActivityMetricsQuery(Query):
     """Get activity metrics for a user"""
     user_id: uuid.UUID
     period_days: int = 30
-    include_trading_activity: bool = True
     include_login_activity: bool = True
 
 
@@ -219,7 +187,6 @@ class GetUserComplianceStatusQuery(Query):
     user_id: uuid.UUID
     check_kyc: bool = True
     check_agreements: bool = True
-    check_restrictions: bool = True
 
 
 class BatchGetUserStatusQuery(Query):
@@ -369,15 +336,6 @@ class UserSession(BaseModel):
     is_current: bool
 
 
-class ConnectedBroker(BaseModel):
-    """Connected broker info"""
-    broker_id: str
-    broker_name: str
-    environments: list[dict[str, Any]] = Field(default_factory=list)
-    total_accounts: int
-    connection_ids: list[uuid.UUID] = Field(default_factory=list)
-
-
 class UserMonitoringStatus(BaseModel):
     """Monitoring status for a user"""
     user_id: uuid.UUID
@@ -397,8 +355,6 @@ class UserSystemHealth(BaseModel):
     user_id: uuid.UUID
     overall_status: str  # "healthy", "degraded", "critical"
     last_check_time: datetime
-    broker_health: dict[str, Any] = Field(default_factory=dict)
-    account_health: dict[str, Any] = Field(default_factory=dict)
     session_health: dict[str, Any] = Field(default_factory=dict)
     recommendations: list[str] = Field(default_factory=list)
 
@@ -410,9 +366,6 @@ class UserActivityMetrics(BaseModel):
     total_logins: int
     unique_login_days: int
     average_session_duration_minutes: float
-    total_trades: int
-    total_volume: float
-    most_active_broker: Optional[str] = None
     activity_trend: str  # "increasing", "stable", "decreasing"
     last_activity_time: Optional[datetime] = None
 
@@ -423,7 +376,6 @@ class UserComplianceStatus(BaseModel):
     is_compliant: bool
     kyc_status: str  # "verified", "pending", "failed", "not_started"
     agreements_signed: bool
-    trading_restrictions: list[str] = Field(default_factory=list)
     compliance_issues: list[dict[str, Any]] = Field(default_factory=list)
     last_review_date: Optional[datetime] = None
     next_review_date: Optional[datetime] = None
@@ -465,13 +417,6 @@ class UserOperationalStatus(BaseModel):
     restrictions: list[str] = Field(default_factory=list)
     connection_status: Optional[dict[str, Any]] = None
     account_status: Optional[dict[str, Any]] = None
-
-
-class UserTradingRestrictions(BaseModel):
-    """User trading restrictions"""
-    user_id: uuid.UUID
-    global_restrictions: list[Any] = Field(default_factory=list)
-    broker_restrictions: dict[str, Any] = Field(default_factory=dict)
 
 
 # =============================================================================

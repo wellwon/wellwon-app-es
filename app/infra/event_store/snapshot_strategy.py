@@ -29,7 +29,7 @@ from app.infra.persistence.redis_client import (
 # Cache Manager for centralized caching
 from app.infra.persistence.cache_manager import CacheManager
 
-log = logging.getLogger("tradecore.event_store.snapshot_strategy")
+log = logging.getLogger("wellwon.event_store.snapshot_strategy")
 
 
 class SnapshotTriggerReason(Enum):

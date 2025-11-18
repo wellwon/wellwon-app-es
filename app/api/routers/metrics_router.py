@@ -6,7 +6,7 @@ Prometheus metrics endpoint for WSE and application monitoring
 from fastapi import APIRouter, Response
 import logging
 
-log = logging.getLogger("tradecore.metrics")
+log = logging.getLogger("wellwon.metrics")
 
 router = APIRouter(tags=["monitoring"])
 
@@ -36,7 +36,7 @@ async def prometheus_metrics():
 
     Prometheus scrape configuration:
         scrape_configs:
-          - job_name: 'tradecore-wse'
+          - job_name: 'wellwon-wse'
             scrape_interval: 15s
             static_configs:
               - targets: ['localhost:5001']

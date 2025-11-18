@@ -11,7 +11,7 @@
 # Based on:
 # - Redpanda documentation: https://docs.redpanda.com/current/
 # - Kafka best practices
-# - TradeCore architecture requirements
+# - WellWon architecture requirements
 # =============================================================================
 
 import logging
@@ -23,12 +23,12 @@ from enum import Enum
 from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 from aiokafka.errors import TopicAlreadyExistsError, KafkaError
 
-log = logging.getLogger("tradecore.topic_manager")
+log = logging.getLogger("wellwon.topic_manager")
 
 
 class RetentionPolicy(Enum):
     """
-    Topic retention policies based on TradeCore architecture.
+    Topic retention policies based on WellWon architecture.
 
     - EVENT_STORE: 10 years (永久хранение событий для audit trail)
     - TRANSPORT: 7 days (временный транспорт между сервисами)
@@ -113,14 +113,14 @@ class TopicManager:
         await topic_manager.validate_retention_policies()
 
     Features:
-    - Automatic topic creation based on TradeCore architecture
+    - Automatic topic creation based on WellWon architecture
     - Retention validation
     - Configuration enforcement
     - Health checks
     """
 
     # =========================================================================
-    # Default topic specifications for TradeCore
+    # Default topic specifications for WellWon
     # =========================================================================
     DEFAULT_TOPICS = [
         # =====================================================================
@@ -144,14 +144,14 @@ class TopicManager:
             segment_ms=7 * 24 * 60 * 60 * 1000,
         ),
         TopicSpec(
-            name="eventstore.broker-connection-events",
+            name="eventstore.entity-events",
             partitions=6,
             replication_factor=3,
             retention_policy=RetentionPolicy.EVENT_STORE,
             cleanup_policy="delete",
         ),
         TopicSpec(
-            name="eventstore.broker-account-events",
+            name="eventstore.account-events",
             partitions=6,
             replication_factor=3,
             retention_policy=RetentionPolicy.EVENT_STORE,
@@ -242,7 +242,7 @@ class TopicManager:
             compression_type="producer",  # Use producer compression (lz4)
         ),
         TopicSpec(
-            name="transport.broker-connection-events",
+            name="transport.entity-events",
             partitions=6,
             replication_factor=3,
             retention_policy=RetentionPolicy.TRANSPORT,
@@ -250,7 +250,7 @@ class TopicManager:
             compression_type="producer",
         ),
         TopicSpec(
-            name="transport.broker-account-events",
+            name="transport.account-events",
             partitions=6,
             replication_factor=3,
             retention_policy=RetentionPolicy.TRANSPORT,
@@ -311,7 +311,7 @@ class TopicManager:
         # Create async admin client (will be started when needed)
         self.admin_client = AIOKafkaAdminClient(
             bootstrap_servers=bootstrap_servers,
-            client_id="tradecore-topic-manager",
+            client_id="wellwon-topic-manager",
             request_timeout_ms=30000
         )
         self._admin_started = False

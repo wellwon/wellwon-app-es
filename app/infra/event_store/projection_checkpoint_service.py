@@ -19,7 +19,7 @@ import logging
 from typing import Optional, Dict
 from datetime import datetime, timezone
 
-log = logging.getLogger("tradecore.projection_checkpoint_service")
+log = logging.getLogger("wellwon.projection_checkpoint_service")
 
 
 class ProjectionCheckpointService:

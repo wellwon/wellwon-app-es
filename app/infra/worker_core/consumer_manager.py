@@ -22,7 +22,7 @@ from app.infra.worker_core.worker_config import WorkerConfig
 from app.infra.worker_core.event_processor.event_processor import EventProcessor
 from app.infra.worker_core.event_processor.domain_registry import DomainRegistry
 
-log = logging.getLogger("tradecore.consumer_manager")
+log = logging.getLogger("wellwon.consumer_manager")
 
 
 @dataclass

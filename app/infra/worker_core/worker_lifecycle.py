@@ -39,7 +39,7 @@ from app.infra.persistence.pg_client import (
     get_global_circuit_breaker as get_pg_circuit_breaker
 )
 
-log = logging.getLogger("tradecore.worker.lifecycle")
+log = logging.getLogger("wellwon.worker.lifecycle")
 
 
 @dataclass

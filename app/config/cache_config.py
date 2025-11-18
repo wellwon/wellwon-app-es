@@ -15,7 +15,7 @@ CACHE_CONFIG: Dict[str, Any] = {
     # =========================================================================
     "core": {
         "enabled": True,
-        "key_prefix": "tradecore",
+        "key_prefix": "wellwon",
         "default_ttl": 300,  # 5 minutes default
         "max_key_length": 256,
         "compression_enabled": False,

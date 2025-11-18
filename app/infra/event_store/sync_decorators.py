@@ -17,7 +17,7 @@ import time
 
 from app.infra.event_store.event_envelope import EventEnvelope
 
-log = logging.getLogger("tradecore.sync_projections.decorators")
+log = logging.getLogger("wellwon.sync_projections.decorators")
 
 # Configuration
 DEFAULT_TIMEOUT = 2.0  # seconds

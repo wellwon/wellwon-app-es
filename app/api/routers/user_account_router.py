@@ -80,7 +80,7 @@ from app.user_account.queries import (
     TokenRotationResult,
 )
 
-log = logging.getLogger("tradecore.api.user_account_router")
+log = logging.getLogger("wellwon.api.user_account_router")
 router = APIRouter()
 jwt_manager = JwtTokenManager()
 security = HTTPBearer()
@@ -470,19 +470,29 @@ async def update_profile(
         query_bus=Depends(get_query_bus)
 ) -> UserProfileResponse:
     """
-    Update user profile.
+    Update user profile (WellWon integrated).
     """
     try:
         user_uuid = uuid.UUID(current_user_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user id") from exc
 
-    # Update profile fields
+    # Update profile fields using UpdateUserProfileCommand
     update_fields = payload.model_dump(exclude_unset=True)
     if update_fields:
-        # TODO: Implement UpdateUserProfileCommand in app.user_account.commands
-        log.warning(f"Profile update requested for user {user_uuid} but UpdateUserProfileCommand not implemented")
-        log.info(f"Update fields: {update_fields}")
+        from app.user_account.commands import UpdateUserProfileCommand
+
+        command = UpdateUserProfileCommand(
+            user_id=user_uuid,
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+            avatar_url=payload.avatar_url,
+            bio=payload.bio,
+            phone=payload.phone
+        )
+
+        await command_bus.send(command)
+        log.info(f"Profile updated for user {user_uuid}, fields: {list(update_fields.keys())}")
 
     # Return current profile
     return await get_me(current_user_id, request, query_bus)

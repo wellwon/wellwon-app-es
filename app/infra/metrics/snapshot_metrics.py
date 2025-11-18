@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
-log = logging.getLogger("tradecore.snapshot_metrics")
+log = logging.getLogger("wellwon.snapshot_metrics")
 
 
 class SnapshotMetrics:

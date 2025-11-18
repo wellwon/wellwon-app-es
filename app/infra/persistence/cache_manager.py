@@ -1,7 +1,7 @@
 # app/infra/persistence/cache_manager.py
 
 """
-Centralized cache management for the entire TradeCore system.
+Centralized cache management for the entire WellWon system.
 Uses dictionary-based configuration for better production management.
 ENHANCED: Added TTL lookup methods to avoid direct cache_config imports.
 FIXED: Added existence checks before clearing cache to avoid warnings.
@@ -80,14 +80,14 @@ class CacheMetrics:
 
 class CacheManager:
     """
-    Centralized cache management for all TradeCore operations.
+    Centralized cache management for all WellWon operations.
 
     Key patterns follow: {prefix}:{domain}:{type}:{identifiers}
     Examples:
-    - tradecore:user:profile:{user_id}
-    - tradecore:auth:session:{session_id}
-    - tradecore:broker:health:{broker_id}:{connection_id}
-    - tradecore:vb:adapter:u:{user_id}:c:{connection_id}
+    - wellwon:user:profile:{user_id}
+    - wellwon:auth:session:{session_id}
+    - wellwon:broker:health:{broker_id}:{connection_id}
+    - wellwon:vb:adapter:u:{user_id}:c:{connection_id}
     """
 
     def __init__(self, redis_client):
@@ -170,7 +170,7 @@ class CacheManager:
         """Initialize settings from configuration"""
         # Core settings
         self.enabled = get_cache_config('core.enabled', True)
-        self.key_prefix = get_cache_config('core.key_prefix', 'tradecore')
+        self.key_prefix = get_cache_config('core.key_prefix', 'wellwon')
         self.default_ttl = get_cache_config('core.default_ttl', 300)
         self.max_key_length = get_cache_config('core.max_key_length', 256)
 

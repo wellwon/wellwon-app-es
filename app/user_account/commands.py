@@ -92,33 +92,16 @@ class VerifyUserEmailCommand(BaseModel):
 
 
 # -----------------------------------------------------------------------------
-# Runtime User State Commands
+# WellWon Platform Commands
 # -----------------------------------------------------------------------------
-class SetUserBrokerAccountMappingCommand(BaseModel):
-    """Command to map an asset type to a broker account for the user."""
+class UpdateUserProfileCommand(BaseModel):
+    """Command to update user profile information (WellWon)."""
     user_id: uuid.UUID
-    asset_type: str = Field(..., description="Asset type (stocks, options, crypto, etc)")
-    account_id: str = Field(..., description="Broker account ID to map to this asset type")
-
-    # ADDED: Saga support
-    saga_id: Optional[uuid.UUID] = Field(None, description="ID of orchestrating saga if part of larger workflow")
-
-
-class AddUserConnectedBrokerCommand(BaseModel):
-    """Command to track that a user has connected to a broker."""
-    user_id: uuid.UUID
-    broker_id: str = Field(..., description="Broker identifier (alpaca, tradestation, etc)")
-    environment: str = Field(..., pattern="^(sim|live)$", description="Trading environment")
-
-    # ADDED: Saga support
-    saga_id: Optional[uuid.UUID] = Field(None, description="ID of orchestrating saga if part of larger workflow")
-
-
-class RemoveUserConnectedBrokerCommand(BaseModel):
-    """Command to remove a broker connection tracking for a user."""
-    user_id: uuid.UUID
-    broker_id: str
-    environment: str = Field(..., pattern="^(sim|live)$")
+    first_name: Optional[str] = Field(None, max_length=100)
+    last_name: Optional[str] = Field(None, max_length=100)
+    avatar_url: Optional[str] = Field(None, max_length=500)
+    bio: Optional[str] = Field(None, max_length=1000)
+    phone: Optional[str] = Field(None, max_length=20)
 
     # ADDED: Saga support
     saga_id: Optional[uuid.UUID] = Field(None, description="ID of orchestrating saga if part of larger workflow")

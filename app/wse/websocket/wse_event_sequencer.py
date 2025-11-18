@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
 
-log = logging.getLogger("tradecore.wse_event_sequencer")
+log = logging.getLogger("wellwon.wse_event_sequencer")
 
 
 @dataclass

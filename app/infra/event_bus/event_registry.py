@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 
 # --- System Events ---
 # WebSocket events removed - not used in event registry
-# from app.common.models.tradecore_model import (
+# from app.common.models.wellwon_model import (
 #     WebSocketClientConnectedEvent,
 #     WebSocketClientDisconnectedEvent
 # )

@@ -119,7 +119,7 @@ class WorkerConfig(BaseSettings):
 
     # PostgreSQL
     postgres_dsn: str = Field(
-        default="postgresql://user:pass@localhost/tradecore",
+        default="postgresql://user:pass@localhost/wellwon",
         description="PostgreSQL connection DSN"
     )
 
@@ -129,7 +129,7 @@ class WorkerConfig(BaseSettings):
 
     # Consumer group
     consumer_group_prefix: str = Field(
-        default="tradecore_worker",
+        default="wellwon_worker",
         description="Prefix for consumer group names"
     )
 
@@ -396,12 +396,12 @@ class WorkerConfig(BaseSettings):
     # =========================================================================
 
     readiness_file_path: Path = Field(
-        default=Path("/tmp/tradecore_worker.ready"),
+        default=Path("/tmp/wellwon_worker.ready"),
         description="Path to readiness file"
     )
 
     health_check_file_path: Path = Field(
-        default=Path("/tmp/tradecore_worker.health"),
+        default=Path("/tmp/wellwon_worker.health"),
         description="Path to health check file"
     )
 
@@ -410,12 +410,12 @@ class WorkerConfig(BaseSettings):
     # =========================================================================
 
     worker_registry_key: str = Field(
-        default="tradecore:workers:registry",
+        default="wellwon:workers:registry",
         description="Redis key for worker registry"
     )
 
     worker_metrics_key: str = Field(
-        default="tradecore:workers:metrics",
+        default="wellwon:workers:metrics",
         description="Redis key for worker metrics"
     )
 

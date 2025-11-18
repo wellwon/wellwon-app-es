@@ -75,7 +75,7 @@ except ImportError:
     WorkerConsumerConfig = None  # type: ignore
     WORKER_GROUPS_AVAILABLE = False
 
-log = logging.getLogger("tradecore.redpanda_adapter")
+log = logging.getLogger("wellwon.redpanda_adapter")
 
 
 def json_default(obj: Any) -> Any:
@@ -611,7 +611,7 @@ class RedpandaTransportAdapter(TransportAdapter):
         Convert channel name to Kafka topic name.
 
         SIMPLIFIED (Nov 12, 2025): All topics now use consistent naming with prefixes.
-        - transport.* for domain events (broker-connection-events, order-events, etc.)
+        - transport.* for domain events (entity-events, order-events, etc.)
         - system.* for system events (dlq.events, worker-heartbeats, etc.)
         - saga.* for saga orchestration
         - alerts.* for alerts

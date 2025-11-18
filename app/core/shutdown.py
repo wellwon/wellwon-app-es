@@ -14,7 +14,7 @@ from app.core.fastapi_types import FastAPI
 from app.infra.persistence.pg_client import close_db_pool, close_vb
 from app.infra.persistence.redis_client import close_global_client as close_redis
 
-logger = logging.getLogger("tradecore.shutdown")
+logger = logging.getLogger("wellwon.shutdown")
 
 # Import cache manager shutdown if available
 try:

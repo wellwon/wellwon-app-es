@@ -16,7 +16,7 @@ from app.infra.persistence.redis_client import (
 )
 from app.infra.persistence.cache_manager import CacheManager
 
-log = logging.getLogger("tradecore.sequence_tracker")
+log = logging.getLogger("wellwon.sequence_tracker")
 
 
 class EventSequenceError(Exception):

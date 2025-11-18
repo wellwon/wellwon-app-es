@@ -35,7 +35,7 @@ from app.infra.reliability.retry import retry_async, RetryConfig
 # Import configuration
 from app.config.eventbus_transport_config import EventBusConfig, TransportConfig
 
-log = logging.getLogger("tradecore.event_bus")
+log = logging.getLogger("wellwon.event_bus")
 
 Handler: TypeAlias = Callable[[Dict[str, Any]], Awaitable[None]]
 FilterFunc: TypeAlias = Callable[[Dict[str, Any]], bool]
@@ -483,7 +483,7 @@ class EventBus:
         """
         try:
             # Create fallback directory if it doesn't exist
-            fallback_dir = Path(os.getenv("DLQ_FALLBACK_DIR", "/var/log/tradecore/dlq_fallback"))
+            fallback_dir = Path(os.getenv("DLQ_FALLBACK_DIR", "/var/log/wellwon/dlq_fallback"))
             fallback_dir.mkdir(parents=True, exist_ok=True)
 
             # Create timestamped filename for event

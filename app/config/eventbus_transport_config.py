@@ -34,7 +34,7 @@ class KafkaConfig:
     - 64MB buffer for better buffering capacity
     """
     bootstrap_servers: str = "localhost:9092"
-    client_id: str = "tradecore-synapse"
+    client_id: str = "wellwon-synapse"
 
     # ========================================================================
     # Producer settings - OPTIMIZED FOR THROUGHPUT
@@ -103,7 +103,7 @@ class KafkaConfig:
     # Kafka Transactions (Exactly-Once Semantics) - NEW
     # ========================================================================
     enable_transactions: bool = True  # Enable Kafka transactions for exactly-once
-    transactional_id_prefix: str = "tradecore-txn"  # Prefix for transactional IDs
+    transactional_id_prefix: str = "wellwon-txn"  # Prefix for transactional IDs
     # ISSUE #1 FIX: Increased from 60s to 90s for production reliability
     # Handles large batches + external API calls (broker adapters, database ops)
     # NOTE: Industry standard is 900s (15min), but our fast processing (<30s typical)
@@ -125,7 +125,7 @@ class KafkaConfig:
         """Create config from environment variables"""
         return cls(
             bootstrap_servers=os.getenv("REDPANDA_BOOTSTRAP_SERVERS", "localhost:9092"),
-            client_id=os.getenv("REDPANDA_CLIENT_ID", "tradecore"),
+            client_id=os.getenv("REDPANDA_CLIENT_ID", "wellwon"),
 
             # Producer settings - OPTIMIZED DEFAULTS (can be overridden via env)
             producer_acks=os.getenv("REDPANDA_ACKS", "all"),
@@ -154,7 +154,7 @@ class KafkaConfig:
 
             # Kafka Transactions (NEW - Exactly-Once Semantics)
             enable_transactions=os.getenv("REDPANDA_ENABLE_TRANSACTIONS", "true").lower() == "true",
-            transactional_id_prefix=os.getenv("REDPANDA_TRANSACTIONAL_ID_PREFIX", "tradecore-txn"),
+            transactional_id_prefix=os.getenv("REDPANDA_TRANSACTIONAL_ID_PREFIX", "wellwon-txn"),
             transaction_timeout_ms=int(os.getenv("REDPANDA_TRANSACTION_TIMEOUT_MS", "90000")),  # FIX: 60s→90s
             consumer_isolation_level=os.getenv("REDPANDA_CONSUMER_ISOLATION_LEVEL", "read_committed"),
 
@@ -262,15 +262,15 @@ class EventBusConfig:
                 retention_ms=604800000,  # 7 days
                 consumer_group="event-processor-workers"  # From WorkerConsumerGroups
             ),
-            "transport.broker-connection-events": TopicConfig(
-                name="transport.broker-connection-events",
+            "transport.entity-events": TopicConfig(
+                name="transport.entity-events",
                 type=TopicType.STREAM,
                 partitions=9,
                 retention_ms=604800000,
                 consumer_group="event-processor-workers"
             ),
-            "transport.broker-account-events": TopicConfig(
-                name="transport.broker-account-events",
+            "transport.account-events": TopicConfig(
+                name="transport.account-events",
                 type=TopicType.STREAM,
                 partitions=9,
                 retention_ms=604800000,
@@ -579,8 +579,8 @@ class TransportConfig:
     # Default transport topics (for outbox pattern)
     default_transport_topics: List[str] = field(default_factory=lambda: [
         "transport.user-account-events",
-        "transport.broker-connection-events",
-        "transport.broker-account-events",
+        "transport.entity-events",
+        "transport.account-events",
         "transport.order-events",
         "transport.position-events",
         "transport.trade-events",
@@ -621,14 +621,14 @@ class TransportConfig:
             "UserEmailVerified": "transport.user-account-events",
 
             # Broker connection events
-            "BrokerConnectionInitiated": "transport.broker-connection-events",
-            "BrokerConnectionEstablished": "transport.broker-connection-events",
-            "BrokerDisconnected": "transport.broker-connection-events",
-            "BrokerConnectionFailed": "transport.broker-connection-events",  # ✅ Connection failure recovery
+            "BrokerConnectionInitiated": "transport.entity-events",
+            "BrokerConnectionEstablished": "transport.entity-events",
+            "BrokerDisconnected": "transport.entity-events",
+            "BrokerConnectionFailed": "transport.entity-events",  # ✅ Connection failure recovery
 
             # Broker account events
-            "BrokerAccountLinked": "transport.broker-account-events",
-            "AccountDataFromBrokerUpdated": "transport.broker-account-events",
+            "BrokerAccountLinked": "transport.account-events",
+            "AccountDataFromBrokerUpdated": "transport.account-events",
 
             # Order events
             "OrderPlaced": "transport.order-events",
@@ -673,7 +673,7 @@ class TransportConfig:
 
             # Sync events
             "AccountSyncRequested": "system.sync-commands",
-            "AccountSyncCompleted": "transport.broker-account-events",
+            "AccountSyncCompleted": "transport.account-events",
         }
 
     def get_topic_for_event(self, event_type: str, **kwargs) -> Optional[str]:

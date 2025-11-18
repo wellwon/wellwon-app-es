@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from dataclasses import dataclass, field
 import logging
 
-log = logging.getLogger("tradecore.metrics.dlq")
+log = logging.getLogger("wellwon.metrics.dlq")
 
 
 @dataclass

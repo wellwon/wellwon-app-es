@@ -36,7 +36,7 @@ except ImportError:
         """Stub for when dotenv is not installed"""
         pass
 
-log = logging.getLogger("tradecore.app.infra.pg_client")
+log = logging.getLogger("wellwon.app.infra.pg_client")
 
 # =============================================================================
 # Transaction Context (ContextVar for async context)
@@ -221,7 +221,7 @@ def get_postgres_dsn_for_db(database: str = Database.MAIN) -> str:
             port = os.getenv("VB_POSTGRES_PORT") or os.getenv("POSTGRES_PORT", "5432")
             user = os.getenv("VB_POSTGRES_USER") or os.getenv("POSTGRES_USER", "postgres")
             password = os.getenv("VB_POSTGRES_PASSWORD") or os.getenv("POSTGRES_PASSWORD", "")
-            database_name = os.getenv("VB_DATABASE_NAME", "tradecore_vb")
+            database_name = os.getenv("VB_DATABASE_NAME", "wellwon_vb")
 
             if password:
                 return f"postgresql://{user}:{password}@{host}:{port}/{database_name}"
@@ -950,7 +950,7 @@ async def transaction_for_db(database: str = Database.MAIN, timeout: Optional[fl
 # Enhanced Schema Bootstrap (Dev/CI)
 # =============================================================================
 
-async def run_schema_from_file(file_path_str: str = "app/database/tradecore.sql") -> None:
+async def run_schema_from_file(file_path_str: str = "app/database/wellwon.sql") -> None:
     """Execute DDL statements from a SQL file with circuit breaker and retry."""
     await run_schema_for_db(file_path_str, Database.MAIN)
 
@@ -1193,7 +1193,7 @@ run_schema = run_schema_from_file
 # VB database shortcuts
 init_vb = lambda **kwargs: init_pool_for_db(Database.VB, **kwargs)
 close_vb = lambda: close_pool_for_db(Database.VB)
-run_vb_schema = lambda path="database/tradecore_vb.sql": run_schema_for_db(path, Database.VB)
+run_vb_schema = lambda path="database/wellwon_vb.sql": run_schema_for_db(path, Database.VB)
 
 
 # Initialize all databases
@@ -1307,18 +1307,18 @@ def get_all_circuit_breaker_metrics() -> Dict[str, Dict[str, Any]]:
 """
 Environment variables for multi-database support:
 
-# Main database (tradecore)
-POSTGRES_DSN=postgresql://user:password@localhost:5432/tradecore
-DATABASE_URL=postgresql://user:password@localhost:5432/tradecore
+# Main database (wellwon)
+POSTGRES_DSN=postgresql://user:password@localhost:5432/wellwon
+DATABASE_URL=postgresql://user:password@localhost:5432/wellwon
 PG_POOL_MIN_SIZE=20     # Production default
 PG_POOL_MAX_SIZE=100    # Production default
 PG_POOL_TIMEOUT_SEC=30.0
 PG_COMMAND_TIMEOUT_SEC=60.0
 
-# Virtual Broker database (tradecore_vb)
-VB_POSTGRES_DSN=postgresql://user:password@localhost:5432/tradecore_vb
-VB_DATABASE_URL=postgresql://user:password@localhost:5432/tradecore_vb
-VB_DATABASE_NAME=tradecore_vb
+# Virtual Broker database (wellwon_vb)
+VB_POSTGRES_DSN=postgresql://user:password@localhost:5432/wellwon_vb
+VB_DATABASE_URL=postgresql://user:password@localhost:5432/wellwon_vb
+VB_DATABASE_NAME=wellwon_vb
 VB_POSTGRES_HOST=localhost
 VB_POSTGRES_PORT=5432
 VB_POSTGRES_USER=postgres

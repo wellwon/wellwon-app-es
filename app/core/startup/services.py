@@ -34,7 +34,7 @@ from app.virtual_broker.services.virtual_broker_service import VirtualBrokerServ
 from app.virtual_broker.services.virtual_market_data_service import VirtualBrokerMarketDataService
 from app.infra.market_data.base_provider import MarketDataProviderType
 
-logger = logging.getLogger("tradecore.startup.services")
+logger = logging.getLogger("wellwon.startup.services")
 
 
 async def initialize_read_repositories(app: FastAPI, vb_database_initialized: bool) -> None:

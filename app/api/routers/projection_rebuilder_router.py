@@ -41,7 +41,7 @@ from app.security.jwt_auth import get_current_user
 from app.services.infrastructure.projection_rebuilder_service import ProjectionRebuilderService
 from app.common.exceptions.exceptions import ProjectionRebuildError
 
-logger = logging.getLogger("tradecore.api.projection_rebuilder")
+logger = logging.getLogger("wellwon.api.projection_rebuilder")
 
 # Create router
 router = APIRouter(

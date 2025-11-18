@@ -13,7 +13,7 @@ from app.core.fastapi_types import FastAPI
 
 from app.core import __version__
 
-logger = logging.getLogger("tradecore.health")
+logger = logging.getLogger("wellwon.health")
 
 
 def get_handler_count(app: FastAPI) -> int:
@@ -278,7 +278,7 @@ async def add_exactly_once_status(app: FastAPI, health_data: Dict[str, Any]) -> 
             "configuration": {
                 "transactional_publishing": os.getenv("OUTBOX_ENABLE_TRANSACTIONAL_PUBLISHING", "false").lower() == "true",
                 "transaction_timeout_ms": 60000,
-                "transactional_id_prefix": "tradecore-txn"
+                "transactional_id_prefix": "wellwon-txn"
             }
         }
 
@@ -294,7 +294,7 @@ async def add_exactly_once_status(app: FastAPI, health_data: Dict[str, Any]) -> 
 def get_root_info(app: FastAPI) -> Dict[str, Any]:
     """Get root endpoint information"""
     return {
-        "name": "TradeCore API",
+        "name": "WellWon API",
         "version": __version__,
         "status": "running",
         "architecture": "UNIFIED ADAPTER STACK + SAGAS + EVENT STORE + STREAMING",

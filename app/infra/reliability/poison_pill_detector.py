@@ -8,7 +8,7 @@ import logging
 from typing import Optional, Tuple
 from enum import Enum
 
-log = logging.getLogger("tradecore.reliability.poison_pill")
+log = logging.getLogger("wellwon.reliability.poison_pill")
 
 
 class ErrorCategory(Enum):

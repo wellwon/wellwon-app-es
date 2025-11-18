@@ -13,7 +13,7 @@ from typing import Optional, Union  # Added Union
 
 
 # import logging
-# log = logging.getLogger("tradecore.utils.uuid")
+# log = logging.getLogger("wellwon.utils.uuid")
 
 def generate_strategy_id(account_id_data: Optional[Union[str, uuid.UUID]] = None) -> str:
     """

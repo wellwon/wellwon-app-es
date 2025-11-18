@@ -28,7 +28,7 @@ from app.infra.metrics.exactly_once_metrics import (
     outbox_reconciliation_events_checked
 )
 
-log = logging.getLogger("tradecore.event_store.reconciliation")
+log = logging.getLogger("wellwon.event_store.reconciliation")
 
 
 class EventStoreReconciliationService:

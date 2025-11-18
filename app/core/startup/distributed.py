@@ -19,7 +19,7 @@ from app.infra.event_store.dlq_service import create_dlq_service
 # Import decorator-based sync projection system
 from app.infra.event_store.sync_decorators import auto_register_sync_projections
 
-logger = logging.getLogger("tradecore.startup.distributed")
+logger = logging.getLogger("wellwon.startup.distributed")
 
 
 async def initialize_distributed_features(app: FastAPI) -> None:
@@ -53,7 +53,7 @@ async def initialize_lock_manager(app: FastAPI) -> None:
     """Initialize distributed lock manager"""
 
     app.state.lock_manager = DistributedLockManager(
-        namespace="tradecore_lock",
+        namespace="wellwon_lock",
         default_ttl_ms=30000,  # 30 seconds
         max_wait_ms=5000  # 5 seconds
     )
@@ -64,7 +64,7 @@ async def initialize_sequence_tracker(app: FastAPI) -> None:
     """Initialize event sequence tracker"""
 
     app.state.sequence_tracker = EventSequenceTracker(
-        namespace="tradecore_sequence",
+        namespace="wellwon_sequence",
         ttl_seconds=86400,  # 24 hours
         cache_manager=app.state.cache_manager if hasattr(app.state, 'cache_manager') else None
     )
@@ -103,10 +103,10 @@ async def initialize_outbox_service(app: FastAPI) -> None:
     custom_mappings = {
         "UserAccountCreated": "transport.user-account-events",
         "UserDeleted": "transport.user-account-events",
-        "BrokerConnectionEstablished": "transport.broker-connection-events",
-        "BrokerConnectionRestored": "transport.broker-connection-events",  # ADDED: Connection restoration
-        "BrokerDisconnected": "transport.broker-connection-events",
-        "BrokerAccountLinked": "transport.broker-account-events",
+        "BrokerConnectionEstablished": "transport.entity-events",
+        "BrokerConnectionRestored": "transport.entity-events",  # ADDED: Connection restoration
+        "BrokerDisconnected": "transport.entity-events",
+        "BrokerAccountLinked": "transport.account-events",
         "OrderPlaced": "transport.order-events",
         "PositionOpened": "transport.position-events",
         "SagaStarted": "saga.events",

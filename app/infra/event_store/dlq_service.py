@@ -30,7 +30,7 @@ from app.config.dlq_config import (
 from app.infra.metrics.dlq_metrics import get_dlq_metrics, DLQMetricsCollector
 from app.infra.reliability.poison_pill_detector import PoisonPillDetector, ErrorCategory
 
-log = logging.getLogger("tradecore.event_store.dlq")
+log = logging.getLogger("wellwon.event_store.dlq")
 
 
 @dataclass

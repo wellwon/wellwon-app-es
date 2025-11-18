@@ -20,7 +20,7 @@ from app.infra.event_bus.event_bus import init_event_bus, EventBus
 from app.infra.event_bus.redpanda_adapter import RedpandaTransportAdapter
 from app.wse.core.pubsub_bus import PubSubBus
 
-logger = logging.getLogger("tradecore.startup.infrastructure")
+logger = logging.getLogger("wellwon.startup.infrastructure")
 
 # Cache manager imports with error handling
 try:
@@ -116,7 +116,7 @@ async def initialize_event_infrastructure(app: FastAPI) -> None:
     try:
         redpanda_adapter = RedpandaTransportAdapter(
             bootstrap_servers=os.getenv("REDPANDA_BOOTSTRAP_SERVERS", "localhost:9092"),
-            client_id=f"tradecore-api-{os.getenv('INSTANCE_ID', 'default')}",
+            client_id=f"wellwon-api-{os.getenv('INSTANCE_ID', 'default')}",
             producer_config={
                 'acks': 'all',
                 'compression_type': 'snappy',
@@ -160,7 +160,7 @@ async def initialize_event_infrastructure(app: FastAPI) -> None:
 async def run_database_schemas(vb_database_initialized: bool) -> None:
     """Run database schemas for main and VB databases"""
     # Main database schema
-    schema_file_path = "database/tradecore.sql"
+    schema_file_path = "database/wellwon.sql"
     try:
         await run_schema(schema_file_path)
         logger.info(f"Main database schema checked/applied.")
@@ -171,7 +171,7 @@ async def run_database_schemas(vb_database_initialized: bool) -> None:
 
     # Virtual Broker schema
     if vb_database_initialized:
-        vb_schema_path = os.getenv("VB_SCHEMA_PATH", "database/tradecore_vb.sql")
+        vb_schema_path = os.getenv("VB_SCHEMA_PATH", "database/wellwon_vb.sql")
         if os.getenv("VB_RUN_SCHEMA", "true").lower() == "true":
             try:
                 await run_vb_schema(vb_schema_path)

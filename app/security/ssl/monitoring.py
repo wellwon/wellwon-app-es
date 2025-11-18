@@ -1,13 +1,13 @@
 # =============================================================================
 # File: app/security/ssl/monitoring.py
-# Description: Simple SSL metrics collection module for TradeCore
+# Description: Simple SSL metrics collection module for WellWon
 # =============================================================================
 
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
-log = logging.getLogger("tradecore.ssl.monitoring")
+log = logging.getLogger("wellwon.ssl.monitoring")
 
 
 class MetricsCollector:

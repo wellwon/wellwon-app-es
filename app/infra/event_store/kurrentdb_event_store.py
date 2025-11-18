@@ -1,5 +1,5 @@
 """
-KurrentDB Event Store Implementation for TradeCore
+KurrentDB Event Store Implementation for WellWon
 
 Full-featured production-ready implementation with feature parity to RedPandaEventStore.
 
@@ -19,7 +19,7 @@ Features:
 - Health checks
 - Metrics
 
-Author: TradeCore Team
+Author: WellWon Team
 Date: January 2025
 """
 
@@ -48,7 +48,7 @@ from kurrentdbclient.exceptions import (
     NotFoundError as StreamNotFoundError  # Alias for compatibility
 )
 
-# TradeCore imports
+# WellWon imports
 from app.common.base.base_model import BaseEvent
 from app.infra.event_store.event_envelope import EventEnvelope, AggregateSnapshot
 
@@ -72,7 +72,7 @@ from app.infra.persistence.cache_manager import CacheManager
 if TYPE_CHECKING:
     pass
 
-log = logging.getLogger("tradecore.kurrentdb")
+log = logging.getLogger("wellwon.kurrentdb")
 
 
 # =============================================================================
@@ -135,7 +135,7 @@ class EventStoreStats:
 
 class KurrentDBEventStore:
     """
-    KurrentDB-based Event Store for TradeCore.
+    KurrentDB-based Event Store for WellWon.
 
     Full-featured production implementation with:
     - Feature parity with RedPandaEventStore (61 methods)
@@ -202,7 +202,7 @@ class KurrentDBEventStore:
         self._cache_manager = cache_manager  # Centralized cache manager
         self._aggregate_registry = aggregate_registry or {}  # ADDED (2025-11-14): Aggregate repositories for proper snapshots
 
-        # SYNC projection support (critical for TradeCore)
+        # SYNC projection support (critical for WellWon)
         self._synchronous_event_types: Set[str] = set()
         self._sync_projection_handlers: Dict[str, List[Callable[[EventEnvelope], Awaitable[None]]]] = {}
         self._sync_projections_enabled: bool = True
@@ -1013,7 +1013,7 @@ class KurrentDBEventStore:
             return False
 
     # =========================================================================
-    # SYNC Projections (Critical for TradeCore)
+    # SYNC Projections (Critical for WellWon)
     # =========================================================================
 
     def enable_synchronous_projections(self, event_types: Set[str]) -> None:
@@ -1066,7 +1066,7 @@ class KurrentDBEventStore:
         """
         Process projections synchronously for immediate consistency.
 
-        This is CRITICAL for TradeCore's SYNC projections (balances, positions, orders).
+        This is CRITICAL for WellWon's SYNC projections (balances, positions, orders).
         """
         if not self._sync_projections_enabled:
             return

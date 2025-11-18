@@ -1,6 +1,6 @@
 # =============================================================================
 #  File: app/api/models/user_account_api_models.py
-#  TradeCore API Models - User Account & Authentication
+#  WellWon API Models - User Account & Authentication
 # =============================================================================
 #  Complete Pydantic models for user account and auth endpoints
 #  Includes all models previously duplicated in router
@@ -234,6 +234,15 @@ class UserProfileResponse(BaseModel):
     preferences: Dict[str, Any] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+    # WellWon Platform fields
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    bio: Optional[str] = None
+    phone: Optional[str] = None
+    user_type: str = Field(default="entrepreneur", description="WellWon user type: ww_admin, ww_manager, entrepreneur, investor")
+    user_number: Optional[int] = None
+
 
 class UpdateProfileRequest(BaseModel):
     """Profile update request."""
@@ -241,6 +250,13 @@ class UpdateProfileRequest(BaseModel):
     security_alerts_enabled: Optional[bool] = None
     mfa_enabled: Optional[bool] = None
     preferences: Optional[Dict[str, Any]] = None
+
+    # WellWon Platform fields
+    first_name: Optional[str] = Field(None, max_length=100)
+    last_name: Optional[str] = Field(None, max_length=100)
+    avatar_url: Optional[str] = Field(None, max_length=500)
+    bio: Optional[str] = Field(None, max_length=1000)
+    phone: Optional[str] = Field(None, max_length=20)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

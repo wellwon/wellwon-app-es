@@ -65,7 +65,7 @@ def get_env_float(key: str, default: float) -> float:
 
 # Custom theme with muted colors - only if Rich is available
 if RICH_AVAILABLE:
-    TRADECORE_THEME = Theme({
+    WELLWON_THEME = Theme({
         "debug": "magenta dim",
         "info": "green",  # Changed: muted green for INFO logs
         "warning": "dark_goldenrod",  # Changed: muted yellow for WARNING logs
@@ -83,7 +83,7 @@ if RICH_AVAILABLE:
         "table.row.alt": "white on grey11",
     })
 else:
-    TRADECORE_THEME = None
+    WELLWON_THEME = None
 
 
 class StartupCollector:
@@ -229,7 +229,7 @@ class SmartRichHandler(RichHandler if RICH_AVAILABLE else logging.StreamHandler)
             r'Redis.*initialized': ('persistence', 'Redis'),
 
             # Databases (Application-specific databases)
-            r'Main database.*checked|applied': ('database', 'TradeCore DB'),
+            r'Main database.*checked|applied': ('database', 'WellWon DB'),
             r'Virtual Broker.*database.*initialized': ('database', 'Virtual Broker DB'),
             r'Virtual Broker.*PostgreSQL.*initialized': ('database', 'Virtual Broker DB'),
             r'Virtual Broker schema.*': ('database', 'Virtual Broker DB'),
@@ -556,7 +556,7 @@ class SmartRichHandler(RichHandler if RICH_AVAILABLE else logging.StreamHandler)
         from app import __version__
 
         service_names = {
-            'api': f'TradeCore v{__version__}',
+            'api': f'WellWon v{__version__}',
             'data_integrity': 'DATA INTEGRITY WORKER',
             'consumer': 'CONSUMER WORKER',
             'connection_recovery': 'CONNECTION RECOVERY WORKER'
@@ -569,7 +569,7 @@ class SmartRichHandler(RichHandler if RICH_AVAILABLE else logging.StreamHandler)
             'connection_recovery': 'cyan'  # Cyan for Connection Recovery
         }
 
-        service_name = service_names.get(service_type, 'TradeCore Service')
+        service_name = service_names.get(service_type, 'WellWon Service')
         border_color = border_colors.get(service_type, 'bright_blue')
 
         # Only show detailed table for API, simplified for workers
@@ -674,7 +674,7 @@ class SmartRichHandler(RichHandler if RICH_AVAILABLE else logging.StreamHandler)
         self.console.print()
 
         # Indicate normal logging is active
-        logger = logging.getLogger("tradecore.startup")
+        logger = logging.getLogger("wellwon.startup")
         logger.info("Startup complete - normal logging active")
 
 
@@ -716,7 +716,7 @@ def get_logger_level_from_env(logger_name: str, default_level: int) -> int:
     """Get logger level from environment variable."""
     # Convert logger name to env variable format
     # e.g., "aiokafka" -> "LOGLEVEL_AIOKAFKA"
-    # e.g., "tradecore.infra.broker_conn_state" -> "LOGLEVEL_TRADECORE_INFRA_BROKER_CONN_STATE"
+    # e.g., "wellwon.infra.broker_conn_state" -> "LOGLEVEL_TRADECORE_INFRA_BROKER_CONN_STATE"
     env_name = f"LOGLEVEL_{logger_name.replace('.', '_').upper()}"
 
     level_str = os.getenv(env_name, '').upper()
@@ -736,7 +736,7 @@ def get_logger_level_from_env(logger_name: str, default_level: int) -> int:
 
 
 def setup_logging(
-        service_name: str = "tradecore",
+        service_name: str = "wellwon",
         log_level: Optional[str] = None,
         log_file: Optional[str] = None,
         enable_json: bool = None,
@@ -794,7 +794,7 @@ def setup_logging(
 
         # Create Rich console with custom theme
         console = Console(
-            theme=TRADECORE_THEME,
+            theme=WELLWON_THEME,
             force_terminal=get_env_bool("FORCE_COLOR", False),
             width=console_width,
             legacy_windows=False,
@@ -862,16 +862,16 @@ def setup_logging(
         "concurrent.futures": logging.WARNING,
         "parso": logging.WARNING,
 
-        # TradeCore components
-        "tradecore.infra.broker_conn_state": logging.INFO,
-        "tradecore.event_bus": logging.INFO,
-        "tradecore.redpanda_adapter": logging.INFO,
+        # WellWon components
+        "wellwon.infra.broker_conn_state": logging.INFO,
+        "wellwon.event_bus": logging.INFO,
+        "wellwon.redpanda_adapter": logging.INFO,
 
         # Data Integrity specific loggers
-        "tradecore.services.integrity_monitor": logging.INFO,
-        "tradecore.workers.data_integrity": logging.DEBUG,
-        "tradecore.infra.reliability.circuit_breaker": logging.INFO,
-        "tradecore.infra.reliability.retry": logging.WARNING,
+        "wellwon.services.integrity_monitor": logging.INFO,
+        "wellwon.workers.data_integrity": logging.DEBUG,
+        "wellwon.infra.reliability.circuit_breaker": logging.INFO,
+        "wellwon.infra.reliability.retry": logging.WARNING,
     }
 
     # Apply logger levels from environment or defaults
@@ -896,13 +896,13 @@ def setup_logging(
     if level == "DEBUG":
         # Set specific worker loggers to DEBUG when global LOG_LEVEL is DEBUG
         worker_loggers = [
-            f"tradecore.worker.{service_type}",
-            f"tradecore.worker.{service_type}.state",
-            f"tradecore.workers.{service_type}",
-            "tradecore.worker.data-integrity",
-            "tradecore.worker.connection-recovery",
-            "tradecore.worker.consumer",
-            "tradecore.worker.event-processor",
+            f"wellwon.worker.{service_type}",
+            f"wellwon.worker.{service_type}.state",
+            f"wellwon.workers.{service_type}",
+            "wellwon.worker.data-integrity",
+            "wellwon.worker.connection-recovery",
+            "wellwon.worker.consumer",
+            "wellwon.worker.event-processor",
         ]
 
         for worker_logger_name in worker_loggers:
@@ -917,9 +917,9 @@ def setup_logging(
 
                 # Handle special cases for worker loggers
                 if 'workers_data_integrity' in logger_name_from_env:
-                    logger_name_from_env = 'tradecore.worker.data-integrity'
+                    logger_name_from_env = 'wellwon.worker.data-integrity'
                 elif 'workers_connection_recovery' in logger_name_from_env:
-                    logger_name_from_env = 'tradecore.worker.connection-recovery'
+                    logger_name_from_env = 'wellwon.worker.connection-recovery'
                 else:
                     logger_name_from_env = logger_name_from_env.replace('_', '.')
 
@@ -967,7 +967,7 @@ def log_section(logger: logging.Logger, title: str):
         logger.info(f"{'=' * 60}")
         return
 
-    console = Console(theme=TRADECORE_THEME)
+    console = Console(theme=WELLWON_THEME)
     width = min(console.width - 2, 80)
 
     # Determine border color based on service type
@@ -1021,7 +1021,7 @@ def log_worker_banner(logger: logging.Logger, worker_name: str, instance_id: str
         logger.info(f"{'=' * 60}")
         return
 
-    console = Console(theme=TRADECORE_THEME)
+    console = Console(theme=WELLWON_THEME)
 
     # Determine border color based on service type
     border_colors = {
@@ -1064,7 +1064,7 @@ def log_metrics_table(logger: logging.Logger, title: str, metrics: Dict[str, Any
             logger.info(f"  {key}: {value}")
         return
 
-    console = Console(theme=TRADECORE_THEME)
+    console = Console(theme=WELLWON_THEME)
 
     # Create metrics table
     table = Table(
@@ -1125,7 +1125,7 @@ def log_status_update(logger: logging.Logger, status: str, details: Optional[Dic
                 logger.info(f"  {key}: {value}")
         return
 
-    console = Console(theme=TRADECORE_THEME)
+    console = Console(theme=WELLWON_THEME)
 
     # Build status text with better formatting for long values
     status_text = f"[bold]Status:[/bold] [info]{status}[/info]"
@@ -1218,7 +1218,7 @@ def log_error_box(logger: logging.Logger, error_msg: str, error_type: str = "Err
         logger.error(f"{error_type}: {error_msg}")
         return
 
-    console = Console(theme=TRADECORE_THEME)
+    console = Console(theme=WELLWON_THEME)
 
     # Create error panel
     error_panel = Panel(

@@ -8,7 +8,7 @@ import asyncio
 import logging
 from app.core.fastapi_types import FastAPI
 
-logger = logging.getLogger("tradecore.background")
+logger = logging.getLogger("wellwon.background")
 
 # Global flag for background tasks (exported for backward compatibility)
 _stop_requested = False

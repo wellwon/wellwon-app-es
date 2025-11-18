@@ -1,6 +1,6 @@
 # =============================================================================
 # File: app/security/ssl/alerting.py
-# Description: Simple alert management module for TradeCore
+# Description: Simple alert management module for WellWon
 # =============================================================================
 
 import logging
@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 from enum import Enum
 
-log = logging.getLogger("tradecore.ssl.alerting")
+log = logging.getLogger("wellwon.ssl.alerting")
 
 
 class AlertSeverity(Enum):

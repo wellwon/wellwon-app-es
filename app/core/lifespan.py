@@ -30,7 +30,7 @@ from app.core.startup.adapters import initialize_broker_adapters, configure_adap
 from app.core.startup.cqrs import initialize_cqrs_and_handlers
 from app.core.shutdown import shutdown_all_services
 
-logger = logging.getLogger("tradecore.lifespan")
+logger = logging.getLogger("wellwon.lifespan")
 
 
 # =============================================================================
@@ -109,7 +109,7 @@ async def lifespan(app_instance: FastAPI):
        # Startup complete
        logger.info("=" * 60)
        logger.info("Application startup complete - all systems operational")
-       logger.info(f"TradeCore v{__version__} ready to serve requests")
+       logger.info(f"WellWon v{__version__} ready to serve requests")
        logger.info("=" * 60)
 
        await asyncio.sleep(0.1)  # Small delay to ensure all async initialization is complete
@@ -122,14 +122,14 @@ async def lifespan(app_instance: FastAPI):
 
    finally:
        # Graceful shutdown with timeout to prevent hanging
-       logger.info(f"TradeCore v{__version__} API shutting down...")
+       logger.info(f"WellWon v{__version__} API shutting down...")
        try:
            # Use timeout to prevent hanging during shutdown (known aiokafka bug)
            # This ensures Ctrl-C and reload work properly
            async with asyncio.timeout(30.0):
                await stop_background_tasks(app_instance)
                await shutdown_all_services(app_instance)
-           logger.info(f"TradeCore v{__version__} API stopped gracefully")
+           logger.info(f"WellWon v{__version__} API stopped gracefully")
        except TimeoutError:
            logger.error("Shutdown timed out after 30s, forcing exit")
            logger.error("This usually indicates a blocking operation in shutdown handlers")

@@ -54,7 +54,7 @@ from app.wse.core.pubsub_bus import PubSubBus
 from app.wse.core.types import EventPriority
 from app.wse.core.event_mappings import INTERNAL_TO_WS_EVENT_TYPE_MAP
 
-log = logging.getLogger("tradecore.wse.domain_publisher")
+log = logging.getLogger("wellwon.wse.domain_publisher")
 
 
 class WSEDomainPublisher:
@@ -242,7 +242,7 @@ class WSEDomainPublisher:
             return
 
         # FIXED: Use transport topic where events are actually published (not domain topic)
-        topic = "transport.broker-connection-events"
+        topic = "transport.entity-events"
 
         try:
             log.info(f"[WSEDomainPublisher] Subscribing to {topic} with group=wse-domain-publisher, consumer=wse-publisher-{os.getpid()}")
@@ -265,7 +265,7 @@ class WSEDomainPublisher:
             return
 
         # FIXED: Use transport topic where events are actually published (not domain topic)
-        topic = "transport.broker-account-events"
+        topic = "transport.account-events"
 
         try:
             await self._event_bus.subscribe(

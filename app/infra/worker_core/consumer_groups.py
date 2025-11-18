@@ -173,8 +173,8 @@ class WorkerConsumerGroups:
         description="Processes all domain events and updates read models",
         topics=[
             "transport.user-account-events",
-            "transport.broker-connection-events",
-            "transport.broker-account-events",
+            "transport.entity-events",
+            "transport.account-events",
             "transport.automation-events",  # Automation domain
             "transport.admin-events",  # Admin events
             "transport.order-events",
@@ -225,7 +225,7 @@ class WorkerConsumerGroups:
             "alerts.data-integrity",
 
             # Monitor connection events for new connections
-            "transport.broker-connection-events",
+            "transport.entity-events",
 
             # Recovery coordination
             # NOTE: system.recovery-commands REMOVED (orphan - CQRS replaced with sagas)
@@ -253,7 +253,7 @@ class WorkerConsumerGroups:
     #     description="Manages broker connection recovery and reconnection",
     #     topics=[
     #         # Domain events (separate consumer group from event-processor)
-    #         "transport.broker-connection-events",  # React to connection state changes
+    #         "transport.entity-events",  # React to connection state changes
     #
     #         # Recovery commands and status
     #         # NOTE: system.recovery-commands REMOVED (orphan - CQRS replaced with sagas)
@@ -311,7 +311,7 @@ class WorkerConsumerGroups:
         topics=[
             # User events that might trigger notifications
             "transport.user-account-events",
-            "transport.broker-connection-events",
+            "transport.entity-events",
             "transport.order-events",
 
             # Alerts
@@ -360,7 +360,7 @@ class WorkerConsumerGroups:
         description="Periodically syncs account data with brokers",
         topics=[
             "system.sync-commands",
-            "transport.broker-account-events",
+            "transport.account-events",
         ],
         max_poll_records=100,
         max_poll_interval_ms=1800000,  # 30 minutes for batch syncs

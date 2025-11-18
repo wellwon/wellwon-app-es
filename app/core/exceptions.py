@@ -14,7 +14,7 @@ from starlette.responses import JSONResponse
 
 from app.common.exceptions.exceptions import BrokerAuthError
 
-logger = logging.getLogger("tradecore.exceptions")
+logger = logging.getLogger("wellwon.exceptions")
 
 
 def setup_exception_handlers(app: FastAPI) -> None:

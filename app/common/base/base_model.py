@@ -24,7 +24,7 @@ class BaseEvent(BaseModel):
     event_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     event_type: str  # To be overridden by Literal in specific event types
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))  # ISO UTC datetime
-    # schema_version: str = Field(default=_DEFAULT_EVENT_SCHEMA_VERSION) # From original tradecore_model
+    # schema_version: str = Field(default=_DEFAULT_EVENT_SCHEMA_VERSION) # From original wellwon_model
     version: int = Field(default=_DEFAULT_DOMAIN_EVENT_VERSION, description="Version of this event model's schema")
 
     # Common Pydantic model configuration

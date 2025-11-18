@@ -9,7 +9,7 @@ import logging
 from app.core.fastapi_types import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-logger = logging.getLogger("tradecore.middleware")
+logger = logging.getLogger("wellwon.middleware")
 
 
 def setup_middleware(app: FastAPI) -> None:

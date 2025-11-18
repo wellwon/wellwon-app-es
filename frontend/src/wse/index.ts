@@ -8,6 +8,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 export { useWSE } from './hooks/useWSE';
+export { useWSEQuery, useWSEMutation } from './hooks/useWSEQuery';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

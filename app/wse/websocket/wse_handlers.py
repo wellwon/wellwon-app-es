@@ -17,7 +17,7 @@ from app.api.models.wse_api_models import MessagePriority
 from app.wse.services.snapshot_service import SnapshotServiceProtocol
 from app.wse.core.types import EventPriority
 
-log = logging.getLogger("tradecore.wse_handlers")
+log = logging.getLogger("wellwon.wse_handlers")
 
 # Module-level tracking for broker monitoring tasks
 _monitoring_tasks: Dict[str, asyncio.Task] = {}  # user_id -> Task
@@ -237,7 +237,7 @@ class WSEHandler:
                 },
                 'server_time': datetime.now(timezone.utc).isoformat(),
                 'connection_id': self.connection.conn_id,
-                'message': 'Welcome to TradeCore WebSocket Events'
+                'message': 'Welcome to WellWon WebSocket Events'
             }
         }, priority=MessagePriority.HIGH.value)
 

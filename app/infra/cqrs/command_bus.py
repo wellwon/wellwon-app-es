@@ -12,7 +12,7 @@ import uuid
 
 from pydantic import BaseModel
 
-log = logging.getLogger("tradecore.cqrs.command")
+log = logging.getLogger("wellwon.cqrs.command")
 
 
 # =============================================================================

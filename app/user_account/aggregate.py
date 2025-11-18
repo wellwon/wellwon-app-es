@@ -23,9 +23,7 @@ from app.user_account.events import (
     UserPasswordResetViaSecret,
     UserAccountDeleted,
     UserEmailVerified,
-    UserBrokerAccountMappingSet,
-    UserConnectedBrokerAdded,
-    UserConnectedBrokerRemoved,
+    UserProfileUpdated,
 )
 
 
@@ -42,14 +40,17 @@ class UserAccountAggregateState(BaseModel):
     email_verified: bool = False
     secret_hash: Optional[str] = None
     password_hash: Optional[str] = None
-    account_mappings: Dict[str, str] = Field(default_factory=dict)
-    connected_brokers: List[str] = Field(default_factory=list)
     created_at: Optional[datetime] = None
     last_password_change: Optional[datetime] = None
-    # TRUE SAGA Pattern: Track owned resources for event enrichment
-    owned_connection_ids: List[uuid.UUID] = Field(default_factory=list)
-    owned_account_ids: List[uuid.UUID] = Field(default_factory=list)
-    owned_automation_ids: List[uuid.UUID] = Field(default_factory=list)
+
+    # WellWon Platform fields
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    bio: Optional[str] = None
+    phone: Optional[str] = None
+    user_type: str = "entrepreneur"  # ww_admin, ww_manager, entrepreneur, investor
+    user_number: Optional[int] = None  # Auto-increment user number
 
 
 class UserAccountAggregate:
@@ -168,66 +169,29 @@ class UserAccountAggregate:
         event = UserEmailVerified(user_id=self.id)
         self._apply_and_record(event)
 
-    def set_account_mapping(self, asset_type: str, account_id: str) -> None:
+    def update_profile(
+            self,
+            first_name: Optional[str] = None,
+            last_name: Optional[str] = None,
+            avatar_url: Optional[str] = None,
+            bio: Optional[str] = None,
+            phone: Optional[str] = None
+    ) -> None:
         """
-        Handle SetUserAccountMappingCommand:
-        - Map asset_type to account_id.
-        """
-        if not self.state.is_active:
-            raise ValueError("Cannot modify mappings for inactive user.")
-
-        if not asset_type or not account_id:
-            raise ValueError("Asset type and account ID are required.")
-
-        # Check if mapping already exists and is the same
-        if self.state.account_mappings.get(asset_type) == account_id:
-            return  # No change, idempotent
-
-        event = UserBrokerAccountMappingSet(
-            user_id=self.id,
-            asset_type=asset_type,
-            account_id=account_id
-        )
-        self._apply_and_record(event)
-
-    def add_connected_broker(self, broker_id: str, environment: str) -> None:
-        """
-        Handle AddUserConnectedBrokerCommand:
-        - Add broker session identifier to state.
+        Handle UpdateUserProfileCommand:
+        - Update user profile information.
+        - Emit UserProfileUpdated event.
         """
         if not self.state.is_active:
-            raise ValueError("Cannot add brokers for inactive user.")
+            raise ValueError("Cannot update profile for inactive user.")
 
-        if not broker_id or not environment:
-            raise ValueError("Broker ID and environment are required.")
-
-        key = f"{broker_id}:{environment}"
-        if key in self.state.connected_brokers:
-            return  # Already connected, idempotent
-
-        event = UserConnectedBrokerAdded(
+        event = UserProfileUpdated(
             user_id=self.id,
-            broker_id=broker_id,
-            environment=environment
-        )
-        self._apply_and_record(event)
-
-    def remove_connected_broker(self, broker_id: str, environment: str) -> None:
-        """
-        Handle RemoveUserConnectedBrokerCommand:
-        - Remove broker session identifier from the state.
-        """
-        if not broker_id or not environment:
-            raise ValueError("Broker ID and environment are required.")
-
-        key = f"{broker_id}:{environment}"
-        if key not in self.state.connected_brokers:
-            return  # Not connected, idempotent
-
-        event = UserConnectedBrokerRemoved(
-            user_id=self.id,
-            broker_id=broker_id,
-            environment=environment
+            first_name=first_name,
+            last_name=last_name,
+            avatar_url=avatar_url,
+            bio=bio,
+            phone=phone
         )
         self._apply_and_record(event)
 
@@ -256,12 +220,8 @@ class UserAccountAggregate:
             self._on_user_deleted(event)
         elif isinstance(event, UserEmailVerified):
             self._on_email_verified(event)
-        elif isinstance(event, UserBrokerAccountMappingSet):
-            self._on_account_mapping_set(event)
-        elif isinstance(event, UserConnectedBrokerAdded):
-            self._on_broker_added(event)
-        elif isinstance(event, UserConnectedBrokerRemoved):
-            self._on_broker_removed(event)
+        elif isinstance(event, UserProfileUpdated):
+            self._on_profile_updated(event)
 
     # -------------------------------------------------------------------------
     # State Update Methods
@@ -293,18 +253,18 @@ class UserAccountAggregate:
     def _on_email_verified(self, event: UserEmailVerified) -> None:
         self.state.email_verified = True
 
-    def _on_account_mapping_set(self, event: UserBrokerAccountMappingSet) -> None:
-        self.state.account_mappings[event.asset_type] = event.account_id
-
-    def _on_broker_added(self, event: UserConnectedBrokerAdded) -> None:
-        key = f"{event.broker_id}:{event.environment}"
-        if key not in self.state.connected_brokers:
-            self.state.connected_brokers.append(key)
-
-    def _on_broker_removed(self, event: UserConnectedBrokerRemoved) -> None:
-        key = f"{event.broker_id}:{event.environment}"
-        if key in self.state.connected_brokers:
-            self.state.connected_brokers.remove(key)
+    def _on_profile_updated(self, event) -> None:
+        """Apply UserProfileUpdated event to state"""
+        if event.first_name is not None:
+            self.state.first_name = event.first_name
+        if event.last_name is not None:
+            self.state.last_name = event.last_name
+        if event.avatar_url is not None:
+            self.state.avatar_url = event.avatar_url
+        if event.bio is not None:
+            self.state.bio = event.bio
+        if event.phone is not None:
+            self.state.phone = event.phone
 
     # -------------------------------------------------------------------------
     # Snapshot Support for Event Store
@@ -320,10 +280,16 @@ class UserAccountAggregate:
             "email_verified": self.state.email_verified,
             "secret_hash": self.state.secret_hash,
             "password_hash": self.state.password_hash,
-            "account_mappings": self.state.account_mappings,
-            "connected_brokers": self.state.connected_brokers,
             "created_at": self.state.created_at.isoformat() if self.state.created_at else None,
             "last_password_change": self.state.last_password_change.isoformat() if self.state.last_password_change else None,
+            # WellWon fields
+            "first_name": self.state.first_name,
+            "last_name": self.state.last_name,
+            "avatar_url": self.state.avatar_url,
+            "bio": self.state.bio,
+            "phone": self.state.phone,
+            "user_type": self.state.user_type,
+            "user_number": self.state.user_number,
             "version": self.version
         }
 
@@ -337,8 +303,15 @@ class UserAccountAggregate:
         self.state.email_verified = snapshot_data.get("email_verified", False)
         self.state.secret_hash = snapshot_data.get("secret_hash")
         self.state.password_hash = snapshot_data.get("password_hash")
-        self.state.account_mappings = snapshot_data.get("account_mappings", {})
-        self.state.connected_brokers = snapshot_data.get("connected_brokers", [])
+
+        # WellWon fields
+        self.state.first_name = snapshot_data.get("first_name")
+        self.state.last_name = snapshot_data.get("last_name")
+        self.state.avatar_url = snapshot_data.get("avatar_url")
+        self.state.bio = snapshot_data.get("bio")
+        self.state.phone = snapshot_data.get("phone")
+        self.state.user_type = snapshot_data.get("user_type", "entrepreneur")
+        self.state.user_number = snapshot_data.get("user_number")
 
         if snapshot_data.get("created_at"):
             self.state.created_at = datetime.fromisoformat(snapshot_data["created_at"])

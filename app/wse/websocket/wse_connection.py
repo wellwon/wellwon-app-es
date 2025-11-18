@@ -34,7 +34,7 @@ from app.wse.websocket.wse_security import SecurityManager
 from app.wse.websocket.wse_queue import PriorityMessageQueue
 from app.wse.websocket.wse_event_sequencer import EventSequencer
 
-log = logging.getLogger("tradecore.wse_connection")
+log = logging.getLogger("wellwon.wse_connection")
 
 # Check if Prometheus metrics are available
 try:

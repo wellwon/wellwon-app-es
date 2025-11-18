@@ -65,7 +65,7 @@ except ImportError:
     METRICS_AVAILABLE = False
     log.warning("Prometheus metrics not available (prometheus_client not installed)")
 
-log = logging.getLogger("tradecore.wse.pubsub")
+log = logging.getLogger("wellwon.wse.pubsub")
 
 
 class WSEJSONEncoder(json.JSONEncoder):

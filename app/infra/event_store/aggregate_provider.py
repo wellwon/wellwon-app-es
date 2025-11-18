@@ -57,7 +57,7 @@ try:
 except ImportError:
     TradeAggregate = None
 
-log = logging.getLogger("tradecore.aggregate_provider")
+log = logging.getLogger("wellwon.aggregate_provider")
 
 
 @runtime_checkable

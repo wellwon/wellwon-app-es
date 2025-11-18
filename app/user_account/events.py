@@ -1,6 +1,6 @@
 # =============================================================================
-# File: app/user_account/events.py 
-# Description: Domain events for User operations in TradeCore.
+# File: app/user_account/events.py
+# Description: Domain events for User operations in WellWon Platform.
 # =============================================================================
 
 from __future__ import annotations
@@ -78,11 +78,9 @@ class UserAccountDeleted(BaseEvent):
     user_id: uuid.UUID
     reason: Optional[str] = Field(default=None, description="Reason for deletion")
     grace_period: Optional[int] = Field(default=0, description="Grace period in seconds before hard-delete")
-    has_virtual_broker: bool = Field(default=False, description="Whether user has virtual broker connections")
     # TRUE SAGA Pattern: Enriched event data (eliminates query_bus dependency in saga)
-    owned_connection_ids: list[uuid.UUID] = Field(default_factory=list, description="Broker connection IDs owned by this user")
-    owned_account_ids: list[uuid.UUID] = Field(default_factory=list, description="Broker account IDs owned by this user")
-    owned_automation_ids: list[uuid.UUID] = Field(default_factory=list, description="Automation IDs owned by this user")
+    owned_resource_ids: list[uuid.UUID] = Field(default_factory=list, description="Resource IDs owned by this user")
+    owned_entity_ids: list[uuid.UUID] = Field(default_factory=list, description="Entity IDs owned by this user")
 
 @domain_event(category="domain")
 class UserEmailVerified(BaseEvent):
@@ -90,29 +88,19 @@ class UserEmailVerified(BaseEvent):
     user_id: uuid.UUID
 
 # =============================================================================
-# SECTION: User Runtime State Events
+# SECTION: WellWon Platform Events
 # =============================================================================
 
 @domain_event(category="domain")
-class UserBrokerAccountMappingSet(BaseEvent):
-    event_type: Literal["UserBrokerAccountMappingSet"] = "UserBrokerAccountMappingSet"
+class UserProfileUpdated(BaseEvent):
+    """User profile information updated"""
+    event_type: Literal["UserProfileUpdated"] = "UserProfileUpdated"
     user_id: uuid.UUID
-    asset_type: str
-    account_id: str
-
-@domain_event(category="domain")
-class UserConnectedBrokerAdded(BaseEvent):
-    event_type: Literal["UserConnectedBrokerAdded"] = "UserConnectedBrokerAdded"
-    user_id: uuid.UUID
-    broker_id: str
-    environment: str
-
-@domain_event(category="domain")
-class UserConnectedBrokerRemoved(BaseEvent):
-    event_type: Literal["UserConnectedBrokerRemoved"] = "UserConnectedBrokerRemoved"
-    user_id: uuid.UUID
-    broker_id: str
-    environment: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    bio: Optional[str] = None
+    phone: Optional[str] = None
 
 # =============================================================================
 # EOF

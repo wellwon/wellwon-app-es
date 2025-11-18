@@ -13,7 +13,7 @@ import logging
 # Import configuration from central location
 from app.config.reliability_config import RetryConfig
 
-logger = logging.getLogger("tradecore.retry")
+logger = logging.getLogger("wellwon.retry")
 
 T = TypeVar('T')
 

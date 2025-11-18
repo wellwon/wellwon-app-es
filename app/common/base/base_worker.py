@@ -114,7 +114,7 @@ class PersistentWorkerState:
         self.instance_id = instance_id
         self.namespace = f"worker_state:{worker_type.value}:{instance_id}"
         self.redis_client = None
-        self.logger = logging.getLogger(f"tradecore.worker.{worker_type.value}.state")
+        self.logger = logging.getLogger(f"wellwon.worker.{worker_type.value}.state")
 
     async def initialize(self):
         """Initialize connection to Redis"""
@@ -237,7 +237,7 @@ class BaseWorker(ABC):
         self._metrics_reporting_task: Optional[asyncio.Task] = None
 
         # Logger
-        self.logger = logging.getLogger(f"tradecore.worker.{self.worker_type.value}")
+        self.logger = logging.getLogger(f"wellwon.worker.{self.worker_type.value}")
 
     async def initialize(self) -> None:
         """Initialize common infrastructure for all workers"""
@@ -291,8 +291,8 @@ class BaseWorker(ABC):
 
         # Temporarily reduce logging for setup (quiet initialization)
         import logging as log_module
-        redpanda_logger = log_module.getLogger("tradecore.redpanda_adapter")
-        event_bus_logger = log_module.getLogger("tradecore.event_bus")
+        redpanda_logger = log_module.getLogger("wellwon.redpanda_adapter")
+        event_bus_logger = log_module.getLogger("wellwon.event_bus")
         original_redpanda_level = redpanda_logger.level
         original_event_bus_level = event_bus_logger.level
         redpanda_logger.setLevel(log_module.WARNING)

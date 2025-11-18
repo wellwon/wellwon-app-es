@@ -13,7 +13,7 @@ from app.wse.websocket.wse_connection import WSEConnection
 from app.infra.reliability.rate_limiter import RateLimiter
 from app.config.reliability_config import RateLimiterConfig
 
-log = logging.getLogger("tradecore.wse_manager")
+log = logging.getLogger("wellwon.wse_manager")
 
 
 @dataclass

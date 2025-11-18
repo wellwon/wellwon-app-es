@@ -9,7 +9,7 @@ import logging
 import inspect
 from functools import wraps
 
-log = logging.getLogger("tradecore.cqrs.decorators")
+log = logging.getLogger("wellwon.cqrs.decorators")
 
 # Global registries for handlers
 _COMMAND_HANDLERS: Dict[Type, Type] = {}

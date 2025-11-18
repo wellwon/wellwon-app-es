@@ -14,7 +14,7 @@ from typing import Union, Dict, Any
 from uuid import UUID
 import logging
 
-log = logging.getLogger("tradecore.wse_compression")
+log = logging.getLogger("wellwon.wse_compression")
 
 
 class CompressionManager:

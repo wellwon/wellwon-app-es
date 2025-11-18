@@ -12,7 +12,7 @@ import logging
 # Import configuration from central location
 from app.config.reliability_config import RateLimiterConfig
 
-logger = logging.getLogger("tradecore.rate_limiter")
+logger = logging.getLogger("wellwon.rate_limiter")
 
 
 class RateLimiterAlgorithm(ABC):

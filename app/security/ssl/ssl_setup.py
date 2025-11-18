@@ -11,7 +11,7 @@ from app.security.ssl.certificate_monitor import get_certificate_monitor, Certif
 from app.security.ssl.monitoring import get_metrics_collector
 from app.security.ssl.alerting import get_alert_manager
 
-log = logging.getLogger("tradecore.security.ssl_setup")
+log = logging.getLogger("wellwon.security.ssl_setup")
 
 
 async def initialize_ssl_security(enable_monitoring: bool = True):

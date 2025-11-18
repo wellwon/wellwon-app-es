@@ -7,9 +7,9 @@
 WSE Publishers - Bridge Domain Events → WebSocket
 
 Publishers:
-- WSEDomainPublisher: Domain events (orders, positions, accounts)
-- WSEMarketDataPublisher: Market data (quotes, bars, trades)
+- WSEDomainPublisher: Domain events (user accounts, entities)
 - WSEMonitoringPublisher: Infrastructure events (health, adapter status)
+- WSESnapshotPublisher: Snapshot events for client state sync
 """
 
 __all__ = []

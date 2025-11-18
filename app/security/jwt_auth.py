@@ -28,7 +28,7 @@ from starlette.exceptions import WebSocketException
 
 from app.infra.persistence.cache_manager import get_cache_manager
 
-log = logging.getLogger("tradecore.security.jwt_auth")
+log = logging.getLogger("wellwon.security.jwt_auth")
 
 
 # =============================================================================

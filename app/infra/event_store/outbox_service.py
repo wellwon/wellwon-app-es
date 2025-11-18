@@ -29,7 +29,7 @@ from app.config.outbox_config import OutboxConfig, DEFAULT_OUTBOX_CONFIG
 if TYPE_CHECKING:
     from app.infra.event_store.dlq_service import DLQService
 
-log = logging.getLogger("tradecore.outbox")
+log = logging.getLogger("wellwon.outbox")
 
 
 class OutboxStatus(Enum):
@@ -105,17 +105,17 @@ class TransportOutboxService:
         "UserEmailVerified": "transport.user-account-events",
 
         # Broker connection events
-        "BrokerConnectionInitiated": "transport.broker-connection-events",
-        "BrokerConnectionEstablished": "transport.broker-connection-events",
-        "BrokerConnectionAttemptFailed": "transport.broker-connection-events",
-        "BrokerDisconnected": "transport.broker-connection-events",
-        "BrokerConnectionHealthUpdated": "transport.broker-connection-events",
-        "BrokerTokensSuccessfullyStored": "transport.broker-connection-events",
-        "BrokerConnectionHealthChecked": "transport.broker-connection-events",
+        "BrokerConnectionInitiated": "transport.entity-events",
+        "BrokerConnectionEstablished": "transport.entity-events",
+        "BrokerConnectionAttemptFailed": "transport.entity-events",
+        "BrokerDisconnected": "transport.entity-events",
+        "BrokerConnectionHealthUpdated": "transport.entity-events",
+        "BrokerTokensSuccessfullyStored": "transport.entity-events",
+        "BrokerConnectionHealthChecked": "transport.entity-events",
 
         # Account events
-        "BrokerAccountLinked": "transport.broker-account-events",
-        "AccountDataFromBrokerUpdated": "transport.broker-account-events",
+        "BrokerAccountLinked": "transport.account-events",
+        "AccountDataFromBrokerUpdated": "transport.account-events",
 
         # Order events
         "OrderPlaced": "transport.order-events",
@@ -343,7 +343,7 @@ class TransportOutboxService:
         # The stored procedure has a pre-compiled query plan, reducing first-query latency
         # from ~100ms to <5ms
         # Note: Function signature - get_pending_outbox_events(max_attempts INT, cutoff_time TIMESTAMPTZ, created_after TIMESTAMPTZ, limit INT)
-        # Function definition in database/tradecore.sql (lines 1459-1519)
+        # Function definition in database/wellwon.sql (lines 1459-1519)
         # noinspection SqlResolve
         try:
             rows = await pg_db_proxy.fetch(

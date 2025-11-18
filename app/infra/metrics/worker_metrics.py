@@ -2,7 +2,7 @@
 # =============================================================================
 # File: app/infra/metrics/worker_metrics.py
 # Description: Unified metrics interface for all workers
-# Author: TradeCore Platform Team
+# Author: WellWon Platform Team
 # Version: 0.8
 # =============================================================================
 
@@ -184,7 +184,7 @@ class WorkerMetricsCollector:
     def __init__(self, worker_type: WorkerType, instance_id: Optional[str] = None):
         self.worker_type = worker_type
         self.instance_id = instance_id or f"{worker_type.value}-default"
-        self.logger = logging.getLogger(f"tradecore.metrics.{worker_type.value}")
+        self.logger = logging.getLogger(f"wellwon.metrics.{worker_type.value}")
 
         # Initialize Prometheus metrics
         self._metrics: Dict[str, Any] = {}
@@ -554,7 +554,7 @@ def get_worker_metrics_labels(worker_type: WorkerType) -> Dict[str, str]:
     """Get standard labels for worker metrics"""
     return {
         "worker_type": worker_type.value,
-        "service": "tradecore",
+        "service": "wellwon",
         "component": "worker"
     }
 

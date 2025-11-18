@@ -36,7 +36,7 @@ from app.infra.broker_adapters.common.adapter_enums import BrokerConnectionStatu
 if TYPE_CHECKING:
     from app.infra.event_store.dlq_service import DLQService
 
-log = logging.getLogger("tradecore.worker.event_processor")
+log = logging.getLogger("wellwon.worker.event_processor")
 
 
 class EventProcessingMetrics:

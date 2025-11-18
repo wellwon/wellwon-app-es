@@ -1,7 +1,7 @@
 # =============================================================================
 # File: app/infra/reliability/distributed_lock.py
 # Description: Unified distributed locking mechanism for all services
-#              Provides consistent locking interface across TradeCore
+#              Provides consistent locking interface across WellWon
 #              with full configuration support
 # =============================================================================
 
@@ -22,7 +22,7 @@ from app.config.reliability_config import DistributedLockConfig, ReliabilityConf
 import logging
 
 # Use standard logger
-logger = logging.getLogger("tradecore.distributed_lock")
+logger = logging.getLogger("wellwon.distributed_lock")
 
 T = TypeVar('T')
 

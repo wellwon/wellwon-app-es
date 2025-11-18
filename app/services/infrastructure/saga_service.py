@@ -43,7 +43,7 @@ from app.virtual_broker import events as vb_events
 if TYPE_CHECKING:
     from app.services.infrastructure.projection_rebuilder_service import ProjectionRebuilderService
 
-log = logging.getLogger("tradecore.saga_service")
+log = logging.getLogger("wellwon.saga_service")
 
 
 class SagaPriority(Enum):
@@ -224,7 +224,7 @@ class SagaService:
         # Create saga manager with monitoring
         self.saga_manager = SagaManager(
             event_bus=self.event_bus,
-            redis_prefix="tradecore_saga:",
+            redis_prefix="wellwon_saga:",
             enable_monitoring=True
         )
 
@@ -409,7 +409,7 @@ class SagaService:
         ]
 
         # Enhanced broker connection triggers with tighter windows
-        self._trigger_configs["transport.broker-connection-events"] = [
+        self._trigger_configs["transport.entity-events"] = [
             SagaTriggerConfig(
                 event_types=["BrokerConnectionEstablished"],
                 saga_class=BrokerConnectionSaga,

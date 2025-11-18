@@ -50,7 +50,7 @@ from app.position.queries import GetPositionsByAccountQuery
 from app.order.commands import FetchOrdersFromBrokerCommand
 from app.broker_account.commands import RefreshAccountDataFromBrokerCommand
 
-log = logging.getLogger("tradecore.integrity_checker")
+log = logging.getLogger("wellwon.integrity_checker")
 
 
 # =============================================================================

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: app/security/ssl/ssl_manager.py
-# Description: Enterprise-grade SSL/TLS certificate management for TradeCore
+# Description: Enterprise-grade SSL/TLS certificate management for WellWon
 # =============================================================================
 
 import ssl
@@ -21,7 +21,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import ExtensionOID, NameOID
 
-log = logging.getLogger("tradecore.security.ssl")
+log = logging.getLogger("wellwon.security.ssl")
 
 
 class SSLVerificationMode(Enum):

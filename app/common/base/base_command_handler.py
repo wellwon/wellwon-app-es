@@ -19,7 +19,7 @@ from app.infra.event_bus.event_bus import EventBus
 from app.infra.event_store.kurrentdb_event_store import KurrentDBEventStore
 from app.common.base.base_model import BaseEvent
 
-log = logging.getLogger("tradecore.base_handler")
+log = logging.getLogger("wellwon.base_handler")
 
 
 @runtime_checkable
@@ -39,7 +39,7 @@ class AggregateProtocol(Protocol):
 
 class BaseCommandHandler(ABC):
     """
-    Base class for all command handlers in TradeCore.
+    Base class for all command handlers in WellWon.
 
     Provides:
     - Consistent event publishing to both event store and transport
@@ -62,7 +62,7 @@ class BaseCommandHandler(ABC):
 
         Args:
             event_bus: EventBus instance for publishing to transport streams
-            transport_topic: Topic name for transport (e.g., "transport.broker-connection-events")
+            transport_topic: Topic name for transport (e.g., "transport.entity-events")
             event_store: Optional event store for permanent event storage
         """
         self.event_bus = event_bus

@@ -22,7 +22,7 @@ from app.wse.dependencies import get_snapshot_service
 from app.wse.services.snapshot_service import SnapshotServiceProtocol
 from app.security.jwt_auth import JwtTokenManager
 
-log = logging.getLogger("tradecore.wse_router")
+log = logging.getLogger("wellwon.wse_router")
 router = APIRouter()
 
 # Constants

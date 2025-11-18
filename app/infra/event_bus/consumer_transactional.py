@@ -20,7 +20,7 @@ from app.infra.metrics.exactly_once_metrics import (
     kafka_txn_active
 )
 
-log = logging.getLogger("tradecore.event_bus.transactional")
+log = logging.getLogger("wellwon.event_bus.transactional")
 
 
 async def consumer_loop_transactional(

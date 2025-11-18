@@ -12,7 +12,7 @@ from app.infra.broker_adapters.adapter_factory import BrokerAdapterFactory
 from app.infra.broker_adapters.adapter_pool import AdapterPool, PoolConfig
 from app.infra.broker_adapters.adapter_manager import AdapterManager
 
-logger = logging.getLogger("tradecore.startup.adapters")
+logger = logging.getLogger("wellwon.startup.adapters")
 
 
 async def initialize_broker_adapters(app: FastAPI) -> None:

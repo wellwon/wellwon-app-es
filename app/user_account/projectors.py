@@ -15,7 +15,7 @@ from app.infra.event_store.event_envelope import EventEnvelope
 from app.infra.event_store.sync_decorators import sync_projection, monitor_projection
 from app.infra.read_repos.user_account_read_repo import UserAccountReadRepo
 
-log = logging.getLogger("tradecore.user_account.projectors")
+log = logging.getLogger("wellwon.user_account.projectors")
 
 # Grace period (seconds) before hard deleting a user
 GRACE_SECONDS = int(os.getenv("USER_DELETION_GRACE_SECONDS", "0"))
@@ -360,11 +360,43 @@ class UserAccountProjector:
 
         log.info(f"Cache invalidation completed for user {user_id}")
 
+    # -------------------------------------------------------------------------
+    # WellWon Platform Projection Handlers
+    # -------------------------------------------------------------------------
+
+    @sync_projection("UserProfileUpdated")
+    @monitor_projection
+    async def on_user_profile_updated(self, envelope: EventEnvelope) -> None:
+        """Project UserProfileUpdated event for WellWon platform"""
+        event_data = envelope.event_data
+        user_id = envelope.aggregate_id
+
+        log.info(f"Projecting UserProfileUpdated for user_id={user_id}")
+
+        # Use static method to update profile fields
+        await UserAccountReadRepo.update_user_profile_projection(
+            user_id=user_id,
+            first_name=event_data.get('first_name'),
+            last_name=event_data.get('last_name'),
+            avatar_url=event_data.get('avatar_url'),
+            bio=event_data.get('bio'),
+            phone=event_data.get('phone')
+        )
+
+        # Invalidate cache
+        try:
+            from app.infra.persistence.cache_manager import get_cache_manager
+            cache_manager = get_cache_manager()
+            await cache_manager.delete(f"user:profile:{user_id}")
+            log.info(f"Cleared profile cache for user {user_id}")
+        except Exception as e:
+            log.warning(f"Failed to clear profile cache: {e}")
+
     def get_stats(self) -> dict:
         """Get projector statistics"""
         return {
             "projector": "UserAccountProjector",
-            "handlers": 13,  # Number of sync projection handlers
+            "handlers": 14,  # Number of sync projection handlers
             "sync_events": [
                 "UserAccountCreated", "UserCreated",
                 "UserAccountDeleted", "UserDeleted",
@@ -372,7 +404,7 @@ class UserAccountProjector:
                 "UserEmailVerified", "UserBrokerAccountMappingSet",
                 "UserAccountMappingSet", "UserConnectedBrokerAdded",
                 "UserConnectedBrokerRemoved", "UserAuthenticationSucceeded",
-                "UserAuthenticationFailed"
+                "UserAuthenticationFailed", "UserProfileUpdated"
             ]
         }
 

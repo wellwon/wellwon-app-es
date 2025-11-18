@@ -1,6 +1,6 @@
 # app/core/__init__.py
 """
-TradeCore Core Module
+WellWon Core Module
 Central location for shared constants and metadata
 """
 

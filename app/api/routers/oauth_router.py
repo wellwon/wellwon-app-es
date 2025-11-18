@@ -63,7 +63,7 @@ from app.infra.broker_adapters.common.adapter_enums import (
     BrokerConnectionStatusEnum,
 )
 
-log = logging.getLogger("tradecore.api.oauth_router")
+log = logging.getLogger("wellwon.api.oauth_router")
 router = APIRouter()
 
 # Configuration

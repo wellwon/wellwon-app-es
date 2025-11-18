@@ -32,7 +32,7 @@ except ImportError:
     circuit_breaker_trips = None
     circuit_breaker_call_duration = None
 
-logger = logging.getLogger("tradecore.circuit_breaker")
+logger = logging.getLogger("wellwon.circuit_breaker")
 
 T = TypeVar('T')
 

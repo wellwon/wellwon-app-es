@@ -21,7 +21,7 @@ from app.infra.event_bus.event_bus import EventBus
 from app.infra.persistence.redis_client import redis_client
 from app.common.exceptions.exceptions import ProjectionRebuildError
 
-log = logging.getLogger("tradecore.projection_rebuilder")
+log = logging.getLogger("wellwon.projection_rebuilder")
 
 
 class RebuildStatus(Enum):
@@ -144,14 +144,14 @@ class ProjectionRebuilder:
                 name="broker_connections",
                 aggregate_type="broker_connection",
                 event_types=None,  # All events
-                transport_topic="transport.broker-connection-events",
+                transport_topic="transport.entity-events",
                 batch_size=100
             ),
             "broker_accounts": ProjectionConfig(
                 name="broker_accounts",
                 aggregate_type="broker_account",
                 event_types=None,
-                transport_topic="transport.broker-account-events",
+                transport_topic="transport.account-events",
                 dependencies=["broker_connections"],  # Depends on broker connections
                 batch_size=150
             ),

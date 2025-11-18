@@ -30,7 +30,7 @@ from app.infra.reliability.distributed_lock import (
 from app.infra.event_store.sequence_tracker import EventSequenceTracker
 from app.infra.saga.saga_manager import SagaManager, BaseSaga
 
-log = logging.getLogger("tradecore.aggregate_repository")
+log = logging.getLogger("wellwon.aggregate_repository")
 
 # Type variable for aggregate types
 T = TypeVar('T', bound='EventSourcedAggregate')

@@ -11,7 +11,7 @@ from typing import Type, Dict, Any, Optional, Set
 from functools import wraps
 from pydantic import BaseModel
 
-log = logging.getLogger("tradecore.event_bus.decorators")
+log = logging.getLogger("wellwon.event_bus.decorators")
 
 # Thread-safe lock for registry access
 _REGISTRY_LOCK = threading.Lock()

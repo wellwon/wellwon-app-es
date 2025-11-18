@@ -57,7 +57,7 @@ from typing import Any, Dict, Union
 
 from app.wse.core.event_mappings import INTERNAL_TO_WS_EVENT_TYPE_MAP
 
-log = logging.getLogger("tradecore.wse.transformer")
+log = logging.getLogger("wellwon.wse.transformer")
 
 
 class EventTransformer:

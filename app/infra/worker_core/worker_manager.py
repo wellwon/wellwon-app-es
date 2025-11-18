@@ -27,7 +27,7 @@ from app.infra.persistence.pg_client import (
     init_db_pool, close_db_pool
 )
 
-log = logging.getLogger("tradecore.worker_manager")
+log = logging.getLogger("wellwon.worker_manager")
 
 
 class ManagerState(Enum):
@@ -96,8 +96,8 @@ class ManagerConfig:
     worker_shutdown_timeout: int = 30
 
     # Redis keys
-    manager_registry_key: str = "tradecore:managers:registry"
-    worker_registry_key: str = "tradecore:workers:registry"
+    manager_registry_key: str = "wellwon:managers:registry"
+    worker_registry_key: str = "wellwon:workers:registry"
 
     # Topics
     manager_events_topic: str = "system.manager-events"

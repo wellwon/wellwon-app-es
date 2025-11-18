@@ -28,7 +28,7 @@ from app.user_account.read_models import (
     UserSummaryReadModel
 )
 
-log = logging.getLogger("tradecore.infra.user_read_repo")
+log = logging.getLogger("wellwon.infra.user_read_repo")
 
 # Grace period (seconds) before hard deleting a user
 GRACE_SECONDS = int(os.getenv("USER_DELETION_GRACE_SECONDS", "0"))
@@ -191,7 +191,8 @@ class UserAccountReadRepo:
 
         Args:
             user_id: The UUID of the user to update
-            **kwargs: Fields to update (email, mfa_enabled, security_alerts_enabled)
+            **kwargs: Fields to update (email, mfa_enabled, security_alerts_enabled,
+                     first_name, last_name, avatar_url, bio, phone)
         """
         # Filter out None values
         updates = {k: v for k, v in kwargs.items() if v is not None}
@@ -216,7 +217,7 @@ class UserAccountReadRepo:
         params.append(user_id)
 
         sql = f"""
-            UPDATE user_accounts 
+            UPDATE user_accounts
             SET {', '.join(set_clauses)}
             WHERE id = ${param_count}
         """
@@ -227,6 +228,28 @@ class UserAccountReadRepo:
         except Exception as e:
             log.error(f"Failed to update user profile for user_id {user_id}: {e}")
             raise
+
+    @staticmethod
+    async def update_user_profile_projection(
+            user_id: UUID,
+            first_name: Optional[str] = None,
+            last_name: Optional[str] = None,
+            avatar_url: Optional[str] = None,
+            bio: Optional[str] = None,
+            phone: Optional[str] = None
+    ) -> None:
+        """
+        Updates WellWon platform profile fields (called by projector).
+        Alias for update_user_profile with typed parameters.
+        """
+        await UserAccountReadRepo.update_user_profile(
+            user_id=user_id,
+            first_name=first_name,
+            last_name=last_name,
+            avatar_url=avatar_url,
+            bio=bio,
+            phone=phone
+        )
 
     # ==========================================================================
     # PostgreSQL Query Methods - READ operations

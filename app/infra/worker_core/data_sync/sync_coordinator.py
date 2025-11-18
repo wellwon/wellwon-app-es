@@ -16,7 +16,7 @@ from uuid import UUID
 from app.infra.reliability.distributed_lock import DistributedLockManager
 from app.infra.reliability.rate_limiter import TokenBucket
 
-log = logging.getLogger("tradecore.data_sync.coordinator")
+log = logging.getLogger("wellwon.data_sync.coordinator")
 
 
 class SyncCoordinator:

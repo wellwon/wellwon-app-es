@@ -29,13 +29,13 @@ setup_logging(
 )
 
 # Get logger for this module
-logger = logging.getLogger("tradecore.server")
+logger = logging.getLogger("wellwon.server")
 
 # =============================================================================
 # FASTAPI APP
 # =============================================================================
 app = FastAPI(
-    title=f"TradeCore API v{__version__}",
+    title=f"WellWon API v{__version__}",
     version=__version__,
     lifespan=lifespan,
     docs_url="/docs",
@@ -70,7 +70,7 @@ if __name__ == "__main__":
     host = os.getenv("HOST", "0.0.0.0")
     reload = os.getenv("RELOAD", "true").lower() == "true"
 
-    logger.info(f"Starting TradeCore API on {host}:{port} (reload={reload})")
+    logger.info(f"Starting WellWon API on {host}:{port} (reload={reload})")
 
     # Build granian command
     cmd = [

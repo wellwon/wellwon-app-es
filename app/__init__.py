@@ -1,8 +1,8 @@
 # =============================================================================
-# TradeCore Main Package - Dynamic Version Loading
+# WellWon Platform Main Package - Dynamic Version Loading
 # =============================================================================
 """
-TradeCore - Main Package
+WellWon Platform - Main Package
 
 Version is loaded dynamically from pyproject.toml via importlib.metadata.
 This follows Python Packaging Guide best practices (2025).
@@ -32,7 +32,7 @@ def _get_version() -> str:
     if sys.version_info >= (3, 8):
         try:
             from importlib.metadata import version, PackageNotFoundError
-            return version("tradecore")
+            return version("wellwon")
         except PackageNotFoundError:
             pass  # Package not installed, try fallback
         except ImportError:
@@ -62,8 +62,8 @@ def _get_version() -> str:
 
 
 __version__: str = _get_version()
-__description__: str = "TradeCore - Unified Trading Platform"
-__author__: str = "TradeCore Team"
+__description__: str = "WellWon - Logistics, Customs & Fintech Platform"
+__author__: str = "WellWon Team"
 
 # =============================================================================
 # EXPORTS

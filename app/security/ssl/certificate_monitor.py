@@ -23,12 +23,12 @@ try:
     from app.security.ssl.monitoring import MetricsCollector
     from app.security.ssl.alerting import AlertManager
 except ImportError:
-    log = logging.getLogger("tradecore.security.cert_monitor")
+    log = logging.getLogger("wellwon.security.cert_monitor")
     log.warning("Monitoring and alerting modules not available - metrics and alerts will be disabled")
     MetricsCollector = None
     AlertManager = None
 
-log = logging.getLogger("tradecore.security.cert_monitor")
+log = logging.getLogger("wellwon.security.cert_monitor")
 
 
 class CertificateStatus(Enum):

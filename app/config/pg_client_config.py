@@ -12,7 +12,7 @@ from typing import Optional, Dict, Any, List, Callable
 from enum import Enum
 import logging
 
-logger = logging.getLogger("tradecore.config.pg_client")
+logger = logging.getLogger("wellwon.config.pg_client")
 
 
 class EnvironmentProfile(str, Enum):
@@ -132,8 +132,8 @@ class DatabaseConfig:
 
         if self.schema_paths is None:
             self.schema_paths = {
-                'main': 'database/tradecore.sql',
-                'vb': 'database/tradecore_vb.sql'
+                'main': 'database/wellwon.sql',
+                'vb': 'database/wellwon_vb.sql'
             }
 
 
@@ -255,7 +255,7 @@ class DatabaseProfiles:
                 statement_cache_size=50,
                 # Use only safe commands that don't require superuser privileges
                 init_commands=[
-                    "SET application_name = 'tradecore_dev'",
+                    "SET application_name = 'wellwon_dev'",
                     "SET statement_timeout = '30s'",  # Safe timeout for dev
                 ]
             ),
@@ -295,7 +295,7 @@ class DatabaseProfiles:
                     'max_parallel_workers_per_gather': '4',
                 },
                 init_commands=[
-                    "SET application_name = 'tradecore_prod'",
+                    "SET application_name = 'wellwon_prod'",
                     "SET statement_timeout = '60s'",
                     "SET lock_timeout = '10s'",
                     "SET idle_in_transaction_session_timeout = '30s'",
@@ -340,7 +340,7 @@ class DatabaseProfiles:
                     'max_parallel_workers_per_gather': '8',
                 },
                 init_commands=[
-                    "SET application_name = 'tradecore_hp'",
+                    "SET application_name = 'wellwon_hp'",
                     "SET statement_timeout = '5s'",  # Fail fast
                     "SET lock_timeout = '2s'",
                     "SET tcp_keepalives_idle = '60'",
@@ -522,7 +522,7 @@ def _apply_env_overrides(config: DatabaseConfig) -> None:
         port = os.getenv('VB_POSTGRES_PORT', os.getenv('POSTGRES_PORT', '5432'))
         user = os.getenv('VB_POSTGRES_USER', os.getenv('POSTGRES_USER', 'postgres'))
         password = os.getenv('VB_POSTGRES_PASSWORD', os.getenv('POSTGRES_PASSWORD', ''))
-        database = os.getenv('VB_DATABASE_NAME', 'tradecore_vb')
+        database = os.getenv('VB_DATABASE_NAME', 'wellwon_vb')
 
         if password:
             config.vb_dsn = f"postgresql://{user}:{password}@{host}:{port}/{database}"

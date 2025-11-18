@@ -50,7 +50,7 @@ from app.wse.core.pubsub_bus import PubSubBus
 if TYPE_CHECKING:
     from app.wse.services.snapshot_service import SnapshotServiceProtocol
 
-log = logging.getLogger("tradecore.wse.snapshot_publisher")
+log = logging.getLogger("wellwon.wse.snapshot_publisher")
 
 
 class WSESnapshotPublisher:
@@ -148,7 +148,7 @@ class WSESnapshotPublisher:
             return
 
         try:
-            topic = "transport.broker-connection-events"
+            topic = "transport.entity-events"
 
             log.info(f"Subscribing to saga events on topic: {topic}")
 

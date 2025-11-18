@@ -25,7 +25,7 @@ from app.api.routers.debug_router import router as debug_router
 # Import health endpoints
 from app.core.health import register_health_endpoints
 
-logger = logging.getLogger("tradecore.routes")
+logger = logging.getLogger("wellwon.routes")
 
 
 def setup_routes(app: FastAPI) -> None:

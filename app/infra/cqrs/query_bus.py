@@ -15,7 +15,7 @@ import uuid
 
 from pydantic import BaseModel
 
-log = logging.getLogger("tradecore.cqrs.query")
+log = logging.getLogger("wellwon.cqrs.query")
 
 # Type vars
 TQuery = TypeVar('TQuery', bound='Query')

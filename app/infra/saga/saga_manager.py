@@ -28,7 +28,7 @@ from app.config.saga_config import saga_config
 if TYPE_CHECKING:
     from app.services.infrastructure.saga_service import SagaService
 
-log = logging.getLogger("tradecore.saga_manager")
+log = logging.getLogger("wellwon.saga_manager")
 
 
 class SagaStatus(Enum):

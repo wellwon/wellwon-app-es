@@ -677,7 +677,7 @@ async def run_worker():
             service_type="consumer"  # Purple color
         )
 
-        log = logging.getLogger("tradecore.worker.event-processor")
+        log = logging.getLogger("wellwon.worker.event-processor")
 
         # Create worker
         worker = EventProcessingWorker()
@@ -716,27 +716,27 @@ async def run_worker():
         await worker.wait_for_shutdown()
 
     except KeyboardInterrupt:
-        log = logging.getLogger("tradecore.worker.event-processor")
+        log = logging.getLogger("wellwon.worker.event-processor")
         log.info("Worker interrupted by user")
     except Exception as e:
-        log = logging.getLogger("tradecore.worker.event-processor")
+        log = logging.getLogger("wellwon.worker.event-processor")
         log.error(f"Worker failed: {e}", exc_info=True)
         raise
     finally:
         if worker:
             try:
                 await asyncio.wait_for(worker.stop(), timeout=30.0)
-                log = logging.getLogger("tradecore.worker.event-processor")
+                log = logging.getLogger("wellwon.worker.event-processor")
                 log.info("Graceful shutdown completed")
             except asyncio.TimeoutError:
-                log = logging.getLogger("tradecore.worker.event-processor")
+                log = logging.getLogger("wellwon.worker.event-processor")
                 log.error("Graceful shutdown timed out")
             except Exception as e:
-                log = logging.getLogger("tradecore.worker.event-processor")
+                log = logging.getLogger("wellwon.worker.event-processor")
                 log.error(f"Error during shutdown: {e}", exc_info=True)
 
         # Note: Infrastructure cleanup now handled by BaseWorker.stop()
-        log = logging.getLogger("tradecore.worker.event-processor")
+        log = logging.getLogger("wellwon.worker.event-processor")
         log.info("Worker shutdown complete")
 
 

@@ -14,7 +14,7 @@ from app.security.encryption import encrypt_data, decrypt_data
 from app.security.jwt_auth import JwtTokenManager
 from app.security.security_utils import generate_access_token, parse_access_token
 
-log = logging.getLogger("tradecore.wse_security")
+log = logging.getLogger("wellwon.wse_security")
 
 
 class SecurityManager:

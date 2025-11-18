@@ -22,7 +22,7 @@ from app.infra.cqrs.decorators import (
 )
 from app.services.infrastructure.saga_service import create_saga_service
 
-logger = logging.getLogger("tradecore.startup.cqrs")
+logger = logging.getLogger("wellwon.startup.cqrs")
 
 
 async def initialize_cqrs_and_handlers(app: FastAPI) -> None:

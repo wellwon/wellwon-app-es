@@ -42,7 +42,7 @@ from app.infra.saga import saga_events
 # Add virtual broker topic
 VIRTUAL_BROKER_EVENTS_TOPIC = "transport.virtual-broker-events"
 
-log = logging.getLogger("tradecore.worker.domain_registry")
+log = logging.getLogger("wellwon.worker.domain_registry")
 
 
 # =============================================================================

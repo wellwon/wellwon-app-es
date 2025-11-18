@@ -1,7 +1,7 @@
 # app/config/event_store_config.py
 # =============================================================================
 # File: app/config/event_store_config.py
-# Description: Unified Event Store configuration for TradeCore
+# Description: Unified Event Store configuration for WellWon
 # Backend: KurrentDB (EventStoreDB)
 # Created: November 2025
 # =============================================================================
@@ -13,7 +13,7 @@ from pydantic import Field
 
 class EventStoreConfig(BaseSettings):
     """
-    Unified Event Store configuration for TradeCore.
+    Unified Event Store configuration for WellWon.
 
     Primary backend: KurrentDB (EventStoreDB) for high-performance event sourcing
 
@@ -301,7 +301,7 @@ class EventStoreConfig(BaseSettings):
     enable_metrics: bool = True
     """Enable Prometheus metrics for KurrentDB operations"""
 
-    metrics_namespace: str = "tradecore"
+    metrics_namespace: str = "wellwon"
     """Prometheus metrics namespace"""
 
     metrics_subsystem: str = "event_store"
