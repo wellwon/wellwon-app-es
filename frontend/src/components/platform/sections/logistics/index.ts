@@ -1,0 +1,1 @@
+// Logistics components removed - only admin sections remain

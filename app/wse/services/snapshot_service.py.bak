@@ -1,0 +1,1198 @@
+# =============================================================================
+# File: app/api/services/wse_snapshot_service.py
+# Description: Snapshot service for WebSocket Event System
+# UPDATED: Added DataIntegrityMonitor integration for real-time integrity status
+# FIXED: Proper filtering of disconnected brokers and deduplication
+# REFACTORED: Now uses ONLY QueryBus (CQRS compliant) - NO direct ReadRepo access
+# =============================================================================
+
+import logging
+from abc import ABC, abstractmethod
+from typing import List, Dict, Any, Optional, Protocol, Set, TYPE_CHECKING
+from uuid import UUID
+from datetime import datetime, timezone
+
+from app.api.models.wse_api_models import WsBrokerConnectionInfo, WsAccountInfo
+from app.infra.broker_adapters.common.adapter_enums import BrokerConnectionStatusEnum
+# DataIntegrityMonitor removed - no imports needed
+
+# CQRS Queries
+from app.broker_connection.queries import GetAllUserBrokerConnectionsQuery
+from app.broker_account.queries import GetAccountsByUserQuery
+from app.order.queries import GetOrdersByAccountQuery, GetOpenOrdersQuery
+from app.position.queries import GetPositionsByAccountQuery, GetOpenPositionsQuery
+from app.automation.queries import GetAutomationsByUserQuery
+
+if TYPE_CHECKING:
+    from app.infra.cqrs.query_bus import QueryBus
+
+log = logging.getLogger("wellwon.wse_snapshot_service")
+
+
+class SnapshotServiceProtocol(Protocol):
+    """Protocol for snapshot service (typing.Protocol pattern)"""
+
+    async def get_broker_connections_snapshot(
+            self,
+            user_id: UUID,
+            include_archived: bool = False,
+            include_module_details: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Get broker connections snapshot for a user"""
+        ...
+
+    async def get_accounts_snapshot(
+            self,
+            user_id: UUID,
+            include_positions: bool = False,
+            include_deleted: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Get account snapshot for a user"""
+        ...
+
+    async def get_orders_snapshot(
+            self,
+            user_id: UUID,
+            account_id: Optional[UUID] = None,
+            active_only: bool = True
+    ) -> List[Dict[str, Any]]:
+        """Get orders snapshot for a user"""
+        ...
+
+    async def get_positions_snapshot(
+            self,
+            user_id: UUID,
+            account_id: Optional[UUID] = None,
+            open_only: bool = True
+    ) -> List[Dict[str, Any]]:
+        """Get positions snapshot for a user"""
+        ...
+
+    async def get_streaming_status_snapshot(
+            self,
+            user_id: UUID
+    ) -> List[Dict[str, Any]]:
+        """Get streaming status snapshot for a user"""
+        ...
+
+    async def get_full_snapshot(
+            self,
+            user_id: UUID,
+            topics: List[str]
+    ) -> Dict[str, Any]:
+        """Get a full snapshot based on requested topics"""
+        ...
+
+
+class WSESnapshotService(SnapshotServiceProtocol):
+    """
+    Service for generating snapshots for WebSocket clients.
+    This service encapsulates all data retrieval logic for WSE snapshots.
+
+    REFACTORED: Now uses ONLY QueryBus (CQRS compliant) - NO direct ReadRepo access.
+    UPDATED: Added DataIntegrityMonitor integration for real-time integrity status.
+    FIXED: Proper filtering of disconnected brokers and deduplication.
+    """
+
+    def __init__(
+        self,
+        query_bus: 'QueryBus',  # REQUIRED: QueryBus for CQRS compliance
+        include_integrity_fields: bool = None,
+        streaming_health_monitor=None
+    ):
+        """
+        Initialize WSE Snapshot Service with CQRS QueryBus.
+
+        Args:
+            query_bus: QueryBus instance (REQUIRED for CQRS compliance)
+            include_integrity_fields: Whether to include integrity fields
+            streaming_health_monitor: Optional StreamingHealthMonitor (FACADE, not lifecycle manager!)
+        """
+        if not query_bus:
+            raise ValueError("query_bus is required for WSESnapshotService (CQRS compliance)")
+
+        self.query_bus = query_bus  # CQRS: Query Bus for read operations
+        self.streaming_health_monitor = streaming_health_monitor
+
+        # Auto-determine if integrity fields should be included
+        self.include_integrity_fields = include_integrity_fields if include_integrity_fields is not None else False
+
+        self._datetime_fields = {
+            'created_at', 'updated_at', 'last_connected_at',
+            'last_heartbeat_at', 'last_synced_at', 'deleted_at',
+            'disconnected_at', 'grace_period_ends_at'
+        }
+
+        # Track processed connections to avoid duplicates
+        self._processed_connections: Set[UUID] = set()
+
+    def _serialize_datetime_fields(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Recursively serialize datetime fields in a dictionary to ISO format.
+        This ensures all datetime objects are properly serialized for JSON transport.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        result = {}
+        for key, value in data.items():
+            if isinstance(value, datetime):
+                result[key] = value.isoformat()
+            elif isinstance(value, dict):
+                result[key] = self._serialize_datetime_fields(value)
+            elif isinstance(value, list):
+                result[key] = [
+                    self._serialize_datetime_fields(item) if isinstance(item, dict) else item
+                    for item in value
+                ]
+            else:
+                result[key] = value
+
+        return result
+
+    async def _get_integrity_info(self, user_id: UUID, broker_connection_id: UUID) -> Optional[Dict[str, Any]]:
+        """
+        Get integrity information for a broker connection.
+        Returns None - DataIntegrityMonitor has been removed.
+        """
+        return None
+
+    async def _get_health_status(self, broker_connection_id: UUID) -> Optional[Dict[str, Any]]:
+        """
+        Get health status for a broker connection from monitoring service.
+        Returns None if health monitor is not available.
+
+        Args:
+            broker_connection_id: Broker connection UUID
+
+        Returns:
+            Health status dictionary or None
+        """
+        # ADDED (Nov 13, 2025): Health status from AdapterMonitoringService
+        # This provides REST API health check data to snapshots
+        try:
+            # Check if we have access to health monitor (via service composition)
+            if not hasattr(self, 'health_monitor') or not self.health_monitor:
+                return None
+
+            # Get cached health status from monitoring service
+            health = await self.health_monitor.get_cached_health(broker_connection_id)
+            if not health:
+                return {
+                    "is_healthy": True,  # Default to healthy if no data
+                    "health_status": "unknown",
+                    "response_time_ms": 0,
+                    "last_checked": None
+                }
+
+            return {
+                "is_healthy": health.is_healthy if hasattr(health, 'is_healthy') else True,
+                "health_status": health.health_status if hasattr(health, 'health_status') else "unknown",
+                "response_time_ms": health.response_time_ms if hasattr(health, 'response_time_ms') else 0,
+                "modules": health.modules if hasattr(health, 'modules') else {},
+                "last_checked": health.last_checked.isoformat() if hasattr(health, 'last_checked') and health.last_checked else None
+            }
+        except Exception as e:
+            log.debug(f"Failed to get health status for connection {broker_connection_id}: {e}")
+            return None
+
+    async def _get_streaming_status(self, broker_connection_id: UUID) -> Optional[Dict[str, Any]]:
+        """
+        Get streaming status for a broker connection from streaming health monitor.
+        Returns None if streaming monitor is not available.
+
+        Args:
+            broker_connection_id: Broker connection UUID
+
+        Returns:
+            Streaming status dictionary or None
+        """
+        # ADDED (Nov 13, 2025): Streaming status from StreamingHealthMonitor
+        # This provides WebSocket/Chunked connection status to snapshots
+        try:
+            # Check if we have access to streaming health monitor
+            if not self.streaming_health_monitor:
+                return None
+
+            # Get streaming status from monitoring service
+            status = await self.streaming_health_monitor.get_streaming_status(broker_connection_id)
+            if not status:
+                return {
+                    "market_data_stream": "inactive",
+                    "trade_data_stream": "inactive"
+                }
+
+            return {
+                "market_data_stream": status.market_data_stream if hasattr(status, 'market_data_stream') else "inactive",
+                "trade_data_stream": status.trade_data_stream if hasattr(status, 'trade_data_stream') else "inactive"
+            }
+        except Exception as e:
+            log.debug(f"Failed to get streaming status for connection {broker_connection_id}: {e}")
+            return None
+
+    async def get_broker_connections_snapshot(
+            self,
+            user_id: UUID,
+            include_archived: bool = False,
+            include_module_details: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Get broker connections snapshot for a user.
+        UPDATED: Includes integrity status and pending discovery information.
+        FIXED: Proper filtering and deduplication.
+
+        Args:
+            user_id: The user's UUID
+            include_archived: Whether to include archived/disconnected connections
+            include_module_details: Whether to include detailed module health info
+
+        Returns:
+            List of broker connection info dictionaries with integrity status
+        """
+        try:
+            log.info(f"Fetching broker connections for user {user_id}, include_archived={include_archived}")
+
+            # REMOVED (Nov 10, 2025): 50ms delay no longer needed
+            # Now using bypass_cache=True for fresh data instead of fixed sleep
+            # This reduces snapshot latency from 150ms to 100ms
+
+            # Clear processed connections for this snapshot
+            self._processed_connections.clear()
+
+            # CQRS: Fetch connections via QueryBus with cache bypass
+            query = GetAllUserBrokerConnectionsQuery(
+                user_id=user_id,
+                include_disconnected=include_archived,  # True = ALL connections, False = connected only
+                bypass_cache=True  # Always read fresh data from database (prevent stale data)
+            )
+            connections = await self.query_bus.query(query)
+
+            if include_archived:
+                log.info(f"Including archived/disconnected brokers for user {user_id}")
+            else:
+                log.info(f"Fetching only connected brokers for user {user_id}")
+
+            # Additional filtering and deduplication
+            filtered_connections = []
+            seen_broker_env_pairs = set()  # Track (broker_id, environment) pairs
+
+            for conn in connections:
+                # Skip if already processed (deduplication by connection ID)
+                if conn.id in self._processed_connections:
+                    log.debug(f"Skipping duplicate connection {conn.id}")
+                    continue
+
+                # Create unique key for broker+environment
+                broker_env_key = (conn.broker_id.lower(), conn.environment.lower())
+
+                # Skip if we've already seen this broker+environment combination
+                if broker_env_key in seen_broker_env_pairs:
+                    log.warning(
+                        f"Duplicate broker+environment found: {broker_env_key}. "
+                        f"Skipping connection {conn.id}"
+                    )
+                    continue
+
+                # FIXED: Apply strict filtering for non-archived requests
+                if not include_archived:
+                    # Check multiple conditions to ensure broker is truly connected
+                    skip_reasons = []
+
+                    # CRITICAL FIX (Nov 11, 2025): Include brokers in "CONNECTING" status
+                    # Problem: Cold restart → saga running → status=CONNECTING → accounts filtered out
+                    # Solution: Allow CONNECTING status (saga validates connection before discovery)
+                    # Only filter if: (1) not connected AND (2) not currently connecting
+                    if not conn.connected and conn.last_connection_status != BrokerConnectionStatusEnum.CONNECTING:
+                        skip_reasons.append(f"connected=False, status={conn.last_connection_status}")
+
+                    # Check connection status (only filter truly disconnected brokers)
+                    if conn.last_connection_status == BrokerConnectionStatusEnum.DISCONNECTED:
+                        skip_reasons.append(f"status=DISCONNECTED")
+
+                    # CRITICAL FIX: Check if in grace period or disconnected
+                    # This protects against projection lag where BrokerConnectionPurged event
+                    # is published but projection hasn't completed yet
+                    if conn.disconnected_at is not None:
+                        skip_reasons.append(f"disconnected_at={conn.disconnected_at}")
+
+                    # CRITICAL FIX: Check grace period end
+                    # If grace period has ended, connection should be purged
+                    if hasattr(conn, 'grace_period_ends_at') and conn.grace_period_ends_at is not None:
+                        now = datetime.now(timezone.utc)
+                        if conn.grace_period_ends_at < now:
+                            skip_reasons.append(f"grace_period_ended={conn.grace_period_ends_at}")
+
+                    # Check for error status
+                    if conn.last_connection_status == BrokerConnectionStatusEnum.ERROR:
+                        skip_reasons.append(f"status=ERROR")
+
+                    # Check for connection lost status
+                    if conn.last_connection_status == BrokerConnectionStatusEnum.CONNECTION_LOST:
+                        skip_reasons.append(f"status=CONNECTION_LOST")
+
+                    if skip_reasons:
+                        log.info(
+                            f"[WSE_SNAPSHOT] Filtering out broker {conn.id} ({conn.broker_id}/{conn.environment}): "
+                            f"{', '.join(skip_reasons)}"
+                        )
+                        continue
+
+                    # DEFENSE-IN-DEPTH: Log connections that PASS the filter
+                    # This helps debug projection lag issues
+                    log.info(
+                        f"[WSE_SNAPSHOT] Including broker {conn.id} ({conn.broker_id}/{conn.environment}): "
+                        f"connected={conn.connected}, status={conn.last_connection_status}, "
+                        f"disconnected_at={conn.disconnected_at}"
+                    )
+
+                # Add to filtered list and mark as processed
+                filtered_connections.append(conn)
+                self._processed_connections.add(conn.id)
+                seen_broker_env_pairs.add(broker_env_key)
+
+            log.info(
+                f"Filtered {len(connections)} connections to {len(filtered_connections)} "
+                f"for user {user_id} (include_archived={include_archived})"
+            )
+
+            # Convert to WebSocket format with integrity information
+            connection_infos = []
+            for conn in filtered_connections:
+                try:
+                    # Convert to WebSocket model
+                    info = WsBrokerConnectionInfo.from_read_model(conn)
+                    info_dict = info.model_dump()
+
+                    # ADDED: Get integrity information (only if enabled)
+                    integrity_info = await self._get_integrity_info(user_id, conn.id)
+                    if integrity_info and self.include_integrity_fields:
+                        info_dict['integrity_status'] = integrity_info.get('status')
+                        info_dict['integrity_last_check'] = integrity_info.get('last_check')
+                        info_dict['integrity_next_check'] = integrity_info.get('next_check')
+                        info_dict['pending_discovery'] = integrity_info.get('pending_discovery', False)
+                        info_dict['discovery_progress'] = integrity_info.get('discovery_progress')
+                        info_dict['integrity_health'] = integrity_info.get('health', 'unknown')
+                        info_dict['missing_accounts_count'] = integrity_info.get('missing_accounts_count', 0)
+                        info_dict['balance_discrepancies_count'] = integrity_info.get('balance_discrepancies_count', 0)
+
+                        # Add integrity message for status display
+                        if integrity_info.get('pending_discovery'):
+                            info_dict['integrity_message'] = "Account discovery in progress"
+                        elif integrity_info.get('status') == 'PENDING_DISCOVERY':
+                            info_dict['integrity_message'] = "Awaiting account discovery"
+                        elif integrity_info.get('missing_accounts_count', 0) > 0:
+                            count = integrity_info['missing_accounts_count']
+                            info_dict[
+                                'integrity_message'] = f"{count} missing account{'s' if count != 1 else ''} detected"
+                        elif integrity_info.get('status') == 'HEALTHY':
+                            info_dict['integrity_message'] = "All accounts verified"
+                        else:
+                            info_dict['integrity_message'] = f"Status: {integrity_info.get('status', 'Unknown')}"
+                    # BACKWARDS COMPATIBLE: Don't add integrity fields if disabled or not available
+
+                    # ADDED (Nov 13, 2025): Get health status from monitoring
+                    health_info = await self._get_health_status(conn.id)
+                    if health_info:
+                        info_dict['health'] = health_info
+
+                    # ADDED (Nov 13, 2025): Get streaming status from monitoring
+                    streaming_info = await self._get_streaming_status(conn.id)
+                    if streaming_info:
+                        info_dict['streaming_status'] = streaming_info
+
+                    # FIXED: Ensure status consistency
+                    if not include_archived and info_dict.get('status') == 'DISCONNECTED':
+                        log.warning(
+                            f"Inconsistent state: Connected broker {conn.id} has DISCONNECTED status. "
+                            f"Fixing status to match connected state."
+                        )
+                        # Override status to match the connected state
+                        info_dict['status'] = 'CONNECTED'
+
+                    # Remove module details if not requested
+                    if not include_module_details and 'modules' in info_dict:
+                        info_dict.pop('modules', None)
+
+                    # Add additional metadata for debugging
+                    info_dict['_metadata'] = {
+                        'connection_id': str(conn.id),
+                        'connected': conn.connected,
+                        # CRITICAL FIX: Handle both enum and string formats for last_connection_status
+                        'last_connection_status': conn.last_connection_status.value if (conn.last_connection_status and hasattr(conn.last_connection_status, 'value')) else (str(conn.last_connection_status) if conn.last_connection_status else None),
+                        'disconnected_at': conn.disconnected_at.isoformat() if conn.disconnected_at else None,
+                        'snapshot_time': datetime.now().isoformat(),
+                        'integrity_monitor_available': False,
+                        'integrity_fields_enabled': False,
+                        'integrity_info_retrieved': False
+                    }
+
+                    # Ensure datetime serialization
+                    info_dict = self._serialize_datetime_fields(info_dict)
+
+                    connection_infos.append(info_dict)
+
+                except Exception as e:
+                    log.error(f"Error processing broker connection {conn.broker_id}: {e}", exc_info=True)
+                    continue
+
+            log.info(
+                f"Retrieved {len(connection_infos)} broker connections for user {user_id} "
+                f"(filtered from {len(connections)} total)"
+            )
+
+            # Final validation - ensure no duplicates in output
+            final_connections = []
+            seen_ids = set()
+            for info in connection_infos:
+                conn_id = info.get('id') or info.get('broker_connection_id')
+                if conn_id and conn_id not in seen_ids:
+                    seen_ids.add(conn_id)
+                    final_connections.append(info)
+                else:
+                    log.warning(f"Removing duplicate connection from final output: {conn_id}")
+
+            return final_connections
+
+        except Exception as e:
+            log.error(f"Error fetching broker connections for user {user_id}: {e}", exc_info=True)
+            raise
+
+    async def get_accounts_snapshot(
+            self,
+            user_id: UUID,
+            include_positions: bool = False,
+            include_deleted: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Get an account snapshot for a user.
+        UPDATED: Includes account-level integrity information.
+        FIXED: Filter out accounts from disconnected brokers.
+
+        Args:
+            user_id: The user's UUID
+            include_positions: Whether to include position details
+            include_deleted: Whether to include soft-deleted accounts (user-initiated deletes)
+
+        Returns:
+            List of account info dictionaries with integrity status
+        """
+        try:
+            log.info(f"Fetching accounts for user {user_id}, include_deleted={include_deleted}")
+
+            # CRITICAL FIX (2025): Only include CONNECTED brokers
+            # Previous logic sent ALL accounts (include_disconnected=True) which caused:
+            # 1. Accounts reappearing after disconnect (race condition with optimistic UI)
+            # 2. Accounts shown for brokers stuck in 'connecting' state
+            # 3. Frontend receiving stale data for failed connections
+            #
+            # CORRECT BEHAVIOR:
+            # - Backend filters accounts by connected brokers ONLY
+            # - Frontend receives clean snapshots without disconnected broker accounts
+            # - Real-time updates handle transitional states (connecting → connected)
+            # - Optimistic UI updates are not overwritten by stale snapshots
+            connected_brokers = set()
+            broker_integrity_info = {}
+
+            if not include_deleted:
+                # CQRS: Fetch CONNECTED broker connections only via QueryBus
+                # CRITICAL FIX (Nov 16, 2025): Add bypass_cache=True to prevent stale data
+                # Problem: Saga creates new VB connection, but cached query returns only Alpaca
+                # Solution: Always read fresh data from database for snapshots after saga completion
+                broker_connections_query = GetAllUserBrokerConnectionsQuery(
+                    user_id=user_id,
+                    include_disconnected=False,  # FIXED: Only connected brokers
+                    bypass_cache=True  # CRITICAL FIX: Always read fresh data (prevent stale snapshots)
+                )
+                broker_connections = await self.query_bus.query(broker_connections_query)
+
+                # CRITICAL FIX (Nov 16, 2025): Include brokers in CONNECTING state for race condition
+                # Problem: New broker connections (especially Virtual Broker) may still be CONNECTING
+                # when snapshot is requested, causing their accounts to be filtered out
+                # Solution: Include both CONNECTED and recently CONNECTING brokers
+                connected_brokers = set()
+                for conn in broker_connections:
+                    # Include if connected OR if status is CONNECTING (new connections)
+                    if conn.connected or (hasattr(conn, 'status') and str(conn.status).upper() in ['CONNECTING', 'CONNECTED']):
+                        connected_brokers.add(str(conn.id))
+                        log.debug(f"Including broker {conn.id} in snapshot (connected={conn.connected}, status={getattr(conn, 'status', 'unknown')})")
+
+                log.info(f"Found {len(connected_brokers)} connected/connecting brokers for user {user_id}")
+
+                # REMOVED: DataIntegrityMonitor integration (monitor has been removed)
+                # broker_integrity_info remains empty
+
+            # CQRS: Get all accounts for the user via QueryBus
+            # CRITICAL FIX (Nov 16, 2025): Added bypass_cache=True to prevent stale snapshot data
+            # Problem: Saga publishes BrokerAccountLinked, snapshot reads before projection completes
+            # Solution: Always read fresh data from database (mirrors broker connections fix at line 527)
+            accounts_query = GetAccountsByUserQuery(
+                user_id=user_id,
+                include_deleted=include_deleted,
+                bypass_cache=True  # Force fresh database read (prevent stale snapshots)
+            )
+            accounts = await self.query_bus.query(accounts_query)
+
+            # Filter accounts
+            filtered_accounts = []
+            seen_account_ids = set()  # Track processed accounts
+
+            for acc in accounts:
+                # Skip duplicates
+                if acc.id in seen_account_ids:
+                    log.debug(f"Skipping duplicate account {acc.id}")
+                    continue
+
+                # Filter soft-deleted accounts
+                if not include_deleted and getattr(acc, 'deleted', False):
+                    log.debug(f"Filtering out soft-deleted account {acc.id}")
+                    continue
+
+                # CRITICAL FIX (2025): Filter accounts by connected brokers ONLY
+                # This prevents accounts from disconnected brokers appearing in snapshots
+                # and causing race conditions with optimistic UI updates
+                broker_conn_id_str = str(acc.broker_connection_id) if acc.broker_connection_id else None
+
+                # CRITICAL FIX (Nov 16, 2025): Relaxed filtering for ALL brokers
+                # Problem: New broker accounts may arrive before connection status is fully updated
+                # Solution: If account exists in database, include it (trust the projection)
+                # The projection wouldn't have created the account if connection wasn't valid
+                if not include_deleted and broker_conn_id_str and broker_conn_id_str not in connected_brokers:
+                    # Since we're using bypass_cache=True, if account exists it's legitimate
+                    # Log but don't filter - let frontend handle display logic
+                    log.info(
+                        f"Account {acc.id} has connection {broker_conn_id_str} not in connected_brokers list. "
+                        f"Including anyway (race condition tolerance for ALL brokers)"
+                    )
+
+                # Keep the account - broker is connected
+                filtered_accounts.append(acc)
+                seen_account_ids.add(acc.id)
+
+            log.info(
+                f"Filtered {len(accounts)} accounts to {len(filtered_accounts)} "
+                f"for user {user_id}"
+            )
+
+            account_infos = []
+            for acc in filtered_accounts:
+                try:
+                    # Convert to WebSocket model
+                    info = WsAccountInfo.from_read_model(acc)
+
+                    # Convert to dict with proper field mapping for frontend
+                    info_dict = {
+                        'accountId': info.id,  # Map 'id' to 'accountId' for frontend
+                        'userId': str(acc.user_id),
+                        'brokerConnectionId': str(info.broker_connection_id) if info.broker_connection_id else None,
+                        'brokerId': info.broker_id,
+                        'environment': info.environment,
+                        'assetType': info.asset_type.value if hasattr(info.asset_type, 'value') else str(
+                            info.asset_type),
+                        'brokerAccountId': info.broker_account_id,
+                        'accountName': info.account_name,
+                        'balance': info.balance,
+                        'currency': info.currency,
+                        'equity': info.equity,
+                        'buyingPower': info.buying_power,
+                        'status': info.status,
+                        'accountType': info.account_type,
+                        'metadata': info.metadata,
+                        'deleted': info.deleted,
+                        'archived': info.archived,
+                        'lastSyncedAt': info.last_synced_at,
+                        'createdAt': info.created_at,
+                        'updatedAt': info.updated_at,
+                    }
+
+                    # ADDED: Include integrity information from broker (only if enabled)
+                    broker_conn_id_str = str(acc.broker_connection_id) if acc.broker_connection_id else None
+                    if broker_conn_id_str and broker_conn_id_str in broker_integrity_info and self.include_integrity_fields:
+                        broker_integrity = broker_integrity_info[broker_conn_id_str]
+                        info_dict['broker_integrity_status'] = broker_integrity.get('status')
+                        info_dict['broker_pending_discovery'] = broker_integrity.get('pending_discovery', False)
+                        info_dict['broker_missing_accounts'] = broker_integrity.get('missing_accounts_count', 0)
+                        info_dict['account_verified'] = not broker_integrity.get('pending_discovery', False)
+
+                        # Account-specific integrity flags
+                        if broker_integrity.get('pending_discovery'):
+                            info_dict['integrity_message'] = "Account discovery in progress"
+                        elif broker_integrity.get('status') == 'HEALTHY':
+                            info_dict['integrity_message'] = "Account verified"
+                        else:
+                            info_dict['integrity_message'] = f"Status: {broker_integrity.get('status', 'Unknown')}"
+                    # BACKWARDS COMPATIBLE: Don't add integrity fields if disabled
+
+                    # Add positions if requested
+                    if include_positions and info.positions:
+                        info_dict['positions'] = [
+                            pos.model_dump() if hasattr(pos, 'model_dump') else pos
+                            for pos in info.positions
+                        ]
+                    elif not include_positions:
+                        info_dict['positions'] = []
+
+                    # Add additional fields
+                    if info.open_orders_count is not None:
+                        info_dict['openOrdersCount'] = info.open_orders_count
+                    if info.daily_pnl is not None:
+                        info_dict['dailyPnl'] = info.daily_pnl
+                    if info.daily_pnl_percent is not None:
+                        info_dict['dailyPnlPercent'] = info.daily_pnl_percent
+
+                    # Add metadata for debugging
+                    info_dict['_metadata'] = {
+                        'account_id': str(acc.id),
+                        'broker_connection_id': str(acc.broker_connection_id) if acc.broker_connection_id else None,
+                        'snapshot_time': datetime.now().isoformat(),
+                        'integrity_monitor_available': False,
+                        'integrity_fields_enabled': False,
+                        'broker_integrity_available': False
+                    }
+
+                    # Ensure datetime serialization
+                    info_dict = self._serialize_datetime_fields(info_dict)
+
+                    account_infos.append(info_dict)
+
+                except Exception as e:
+                    log.error(f"Error processing account {acc.id}: {e}", exc_info=True)
+                    continue
+
+            # Final deduplication check
+            final_accounts = []
+            seen_final_ids = set()
+            for info in account_infos:
+                account_id = info.get('accountId')
+                if account_id and account_id not in seen_final_ids:
+                    seen_final_ids.add(account_id)
+                    final_accounts.append(info)
+                else:
+                    log.warning(f"Removing duplicate account from final output: {account_id}")
+
+            log.info(f"Retrieved {len(final_accounts)} accounts for user {user_id}")
+            return final_accounts
+
+        except Exception as e:
+            log.error(f"Error fetching accounts for user {user_id}: {e}", exc_info=True)
+            raise
+
+    async def get_orders_snapshot(
+            self,
+            user_id: UUID,
+            account_id: Optional[UUID] = None,
+            active_only: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Get active orders snapshot for a user.
+
+        Args:
+            user_id: The user's UUID
+            account_id: Optional filter by account
+            active_only: If True, only return active orders (pending, partially_filled)
+
+        Returns:
+            List of active order info dictionaries
+        """
+        try:
+            log.info(f"Fetching orders for user {user_id}, active_only={active_only}")
+
+            # CQRS: Get orders via QueryBus
+            if active_only:
+                # Use GetOpenOrdersQuery for open (active) orders
+                orders_query = GetOpenOrdersQuery(
+                    user_id=user_id,
+                    account_id=account_id if account_id else None
+                )
+            elif account_id:
+                # Use GetOrdersByAccountQuery for specific account
+                orders_query = GetOrdersByAccountQuery(
+                    account_id=account_id,
+                    user_id=user_id
+                )
+            else:
+                # Use GetOpenOrdersQuery for all user open orders (no account filter)
+                orders_query = GetOpenOrdersQuery(
+                    user_id=user_id,
+                    account_id=None
+                )
+
+            orders = await self.query_bus.query(orders_query)
+
+            order_infos = []
+            for order in orders:
+                try:
+                    order_dict = {
+                        'orderId': str(order.id),
+                        'userId': str(order.user_id),
+                        'brokerAccountId': str(order.account_id),
+                        'automationId': str(order.automation_id) if order.automation_id else None,
+                        'symbol': order.symbol,
+                        'orderType': order.order_type.value if hasattr(order.order_type, 'value') else str(order.order_type),
+                        'side': order.side.value if hasattr(order.side, 'value') else str(order.side),
+                        'quantity': str(order.quantity),
+                        'filledQuantity': str(order.filled_quantity),
+                        'remainingQuantity': str(order.remaining_quantity),
+                        'price': str(order.price) if order.price else None,
+                        'stopPrice': str(order.stop_price) if order.stop_price else None,
+                        'averageFillPrice': str(order.average_fill_price) if order.average_fill_price else None,
+                        'status': order.status.value if hasattr(order.status, 'value') else str(order.status),
+                        'timeInForce': order.time_in_force.value if hasattr(order.time_in_force, 'value') else str(order.time_in_force),
+                        'extendedHours': order.extended_hours,
+                        'brokerOrderId': order.broker_order_id,
+                        'clientOrderId': order.client_order_id,
+                        'bracketGroupId': str(order.bracket_group_id) if order.bracket_group_id else None,
+                        'bracketType': order.bracket_type.value if order.bracket_type and hasattr(order.bracket_type, 'value') else None,
+                        'totalCommission': str(order.total_commission) if order.total_commission else None,
+                        'totalFees': str(order.total_fees) if order.total_fees else None,
+                        'createdAt': order.created_at.isoformat() if order.created_at else None,
+                        'submittedAt': order.submitted_at.isoformat() if order.submitted_at else None,
+                        'acceptedAt': order.accepted_at.isoformat() if order.accepted_at else None,
+                        'filledAt': order.filled_at.isoformat() if order.filled_at else None,
+                        'cancelledAt': order.cancelled_at.isoformat() if order.cancelled_at else None,
+                        'rejectedAt': order.rejected_at.isoformat() if order.rejected_at else None,
+                        'updatedAt': order.updated_at.isoformat() if order.updated_at else None,
+                        'metadata': order.metadata or {},
+                    }
+
+                    # Ensure datetime serialization
+                    order_dict = self._serialize_datetime_fields(order_dict)
+                    order_infos.append(order_dict)
+
+                except Exception as e:
+                    log.error(f"Error processing order {order.id}: {e}", exc_info=True)
+                    continue
+
+            log.info(f"Retrieved {len(order_infos)} orders for user {user_id} (active_only={active_only})")
+            return order_infos
+
+        except Exception as e:
+            log.error(f"Error fetching orders for user {user_id}: {e}", exc_info=True)
+            return []  # Return empty list on error, don't fail entire snapshot
+
+    async def get_positions_snapshot(
+            self,
+            user_id: UUID,
+            account_id: Optional[UUID] = None,
+            open_only: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Get positions snapshot for a user.
+
+        Args:
+            user_id: The user's UUID
+            account_id: Optional filter by account
+            open_only: If True, only return open positions (default)
+
+        Returns:
+            List of position info dictionaries
+        """
+        try:
+            log.info(f"Fetching positions for user {user_id}, open_only={open_only}")
+
+            # CQRS: Get positions via QueryBus
+            if open_only:
+                # Use GetOpenPositionsQuery for open positions
+                positions_query = GetOpenPositionsQuery(
+                    user_id=user_id,
+                    account_id=account_id if account_id else None
+                )
+            elif account_id:
+                # Use GetPositionsByAccountQuery for specific account
+                positions_query = GetPositionsByAccountQuery(
+                    account_id=account_id,
+                    user_id=user_id
+                )
+            else:
+                # Use GetOpenPositionsQuery for all user positions (fallback)
+                positions_query = GetOpenPositionsQuery(
+                    user_id=user_id,
+                    account_id=None
+                )
+
+            positions = await self.query_bus.query(positions_query)
+
+            position_infos = []
+            for position in positions:
+                try:
+                    position_dict = {
+                        'positionId': str(position.id),
+                        'userId': str(position.user_id),
+                        'brokerAccountId': str(position.broker_account_id),
+                        'automationId': str(position.automation_id) if position.automation_id else None,
+                        'symbol': position.symbol,
+                        'assetType': position.asset_type.value if hasattr(position.asset_type, 'value') else str(position.asset_type),
+                        'side': position.side.value if hasattr(position.side, 'value') else str(position.side),
+                        'quantity': str(position.quantity),
+                        'averageEntryPrice': str(position.average_entry_price),
+                        'currentPrice': str(position.current_price) if position.current_price else None,
+                        'stopLossPrice': str(position.stop_loss_price) if position.stop_loss_price else None,
+                        'takeProfitPrice': str(position.take_profit_price) if position.take_profit_price else None,
+                        'unrealizedPnl': str(position.unrealized_pnl) if position.unrealized_pnl else None,
+                        'unrealizedPnlPct': str(position.unrealized_pnl_pct) if position.unrealized_pnl_pct else None,
+                        'realizedPnl': str(position.realized_pnl) if position.realized_pnl else None,
+                        'totalPnl': str(position.total_pnl) if position.total_pnl else None,
+                        'totalPnlPct': str(position.total_pnl_pct) if position.total_pnl_pct else None,
+                        'riskAmount': str(position.risk_amount) if position.risk_amount else None,
+                        'riskPercent': str(position.risk_percent) if position.risk_percent else None,
+                        'riskRewardRatio': str(position.risk_reward_ratio) if position.risk_reward_ratio else None,
+                        'pyramidingCount': position.pyramiding_count,
+                        'pyramidingAllowed': position.pyramiding_allowed,
+                        'maxPyramidEntries': position.max_pyramid_entries,
+                        'status': position.status.value if hasattr(position.status, 'value') else str(position.status),
+                        'openedAt': position.opened_at.isoformat() if position.opened_at else None,
+                        'closedAt': position.closed_at.isoformat() if position.closed_at else None,
+                        'lastSyncAt': position.last_sync_at.isoformat() if position.last_sync_at else None,
+                        'syncDiscrepancy': position.sync_discrepancy if hasattr(position, 'sync_discrepancy') else False,
+                        'metadata': position.metadata or {},
+                    }
+
+                    # Ensure datetime serialization
+                    position_dict = self._serialize_datetime_fields(position_dict)
+                    position_infos.append(position_dict)
+
+                except Exception as e:
+                    log.error(f"Error processing position {position.id}: {e}", exc_info=True)
+                    continue
+
+            log.info(f"Retrieved {len(position_infos)} positions for user {user_id} (open_only={open_only})")
+            return position_infos
+
+        except Exception as e:
+            log.error(f"Error fetching positions for user {user_id}: {e}", exc_info=True)
+            return []  # Return empty list on error, don't fail entire snapshot
+
+    async def get_automations_snapshot(
+            self,
+            user_id: UUID,
+            active_only: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Get automations snapshot for a user.
+
+        Args:
+            user_id: The user's UUID
+            active_only: If True, only return active automations
+
+        Returns:
+            List of automation info dictionaries
+        """
+        try:
+            from app.automation.enums import AutomationStatus
+
+            log.info(f"Fetching automations for user {user_id}, active_only={active_only}")
+
+            # CQRS: Get automations via QueryBus
+            automations_query = GetAutomationsByUserQuery(
+                user_id=user_id,
+                status="ACTIVE" if active_only else None
+            )
+            automations = await self.query_bus.query(automations_query)
+
+            automation_infos = []
+            for automation in automations:
+                try:
+                    automation_dict = {
+                        'automationId': str(automation.id),
+                        'userId': str(automation.user_id),
+                        'name': automation.name,
+                        'symbol': automation.symbol,
+                        'status': automation.status.value if hasattr(automation.status, 'value') else str(automation.status),
+                        'webhookUrl': automation.webhook_url,
+                        'webhookToken': automation.webhook_token,
+                        'assetType': automation.asset_type.value if hasattr(automation.asset_type, 'value') else str(automation.asset_type),
+                        'sidePreference': automation.side_preference.value if hasattr(automation.side_preference, 'value') else str(automation.side_preference),
+                        'autoSubmit': automation.auto_submit,
+                        'brokerAccountIds': automation.broker_account_ids or [],
+                        'createdAt': automation.created_at.isoformat() if automation.created_at else None,
+                        'updatedAt': automation.updated_at.isoformat() if automation.updated_at else None,
+                        'activatedAt': automation.activated_at.isoformat() if automation.activated_at else None,
+                        'deactivatedAt': automation.deactivated_at.isoformat() if automation.deactivated_at else None,
+                        'suspendedAt': automation.suspended_at.isoformat() if automation.suspended_at else None,
+                        'metadata': automation.metadata or {},
+                    }
+
+                    # Ensure datetime serialization
+                    automation_dict = self._serialize_datetime_fields(automation_dict)
+                    automation_infos.append(automation_dict)
+
+                except Exception as e:
+                    log.error(f"Error processing automation {automation.id}: {e}", exc_info=True)
+                    continue
+
+            log.info(f"Retrieved {len(automation_infos)} automations for user {user_id} (active_only={active_only})")
+            return automation_infos
+
+        except Exception as e:
+            log.error(f"Error fetching automations for user {user_id}: {e}", exc_info=True)
+            return []  # Return empty list on error, don't fail entire snapshot
+
+    async def get_streaming_status_snapshot(
+            self,
+            user_id: UUID
+    ) -> List[Dict[str, Any]]:
+        """
+        Get streaming status snapshot for all user's broker connections.
+
+        Returns both market_data_stream and trade_data_stream status for each connection.
+        Initial status is 'inactive' - will be updated by incremental events.
+
+        Args:
+            user_id: The user's UUID
+
+        Returns:
+            List of streaming status dictionaries per broker connection
+        """
+        try:
+            log.debug("=== GET_STREAMING_STATUS_SNAPSHOT CALLED ===")
+            log.debug(f"User ID: {user_id}")
+            log.debug(f"Query bus available: {self.query_bus is not None}")
+            log.debug(f"Query bus type: {type(self.query_bus)}")
+
+            if not self.query_bus:
+                log.error("No query_bus available for streaming status snapshot!")
+                return []
+
+            # Get all broker connections for user
+            connections_query = GetAllUserBrokerConnectionsQuery(
+                user_id=user_id,
+                include_disconnected=False  # Only connected brokers
+            )
+            log.debug(f"Query created: {connections_query}")
+
+            connections = await self.query_bus.query(connections_query)
+
+            log.debug(f"=== QUERY RESULT ===")
+            log.debug(f"Connections returned: {len(connections)}")
+            log.debug(f"Connections type: {type(connections)}")
+            for conn in connections:
+                log.info(f"  - {conn.broker_id} ({conn.environment}): connected={conn.connected}")
+
+            streaming_status = []
+
+            for connection in connections:
+                if not connection.connected:
+                    log.debug(f"Skipping disconnected broker: {connection.broker_id} ({connection.environment})")
+                    continue
+
+                # Query REAL streaming status from StreamingHealthMonitor (PURE - no publishing)
+                # CLEAN ARCHITECTURE (Refactored 2025-11-15):
+                # HealthMonitor is now pure - no publishing during snapshots or otherwise
+                # ContinuousMonitor handles all publishing (orchestrator responsibility)
+                if self.streaming_health_monitor:
+                    try:
+                        real_status = await self.streaming_health_monitor.check_streaming_health(
+                            user_id=user_id,
+                            broker_connection_id=connection.id
+                        )
+                        market_data_status = real_status.get('market_data_stream', 'inactive')
+                        trade_data_status = real_status.get('trade_data_stream', 'inactive')
+                    except Exception as e:
+                        log.warning(f"Failed to get real streaming status for {connection.broker_id}: {e}")
+                        market_data_status = 'inactive'
+                        trade_data_status = 'inactive'
+                else:
+                    # Fallback: no health monitor available
+                    market_data_status = 'inactive'
+                    trade_data_status = 'inactive'
+
+                # Market data stream status
+                streaming_status.append({
+                    'broker_connection_id': str(connection.id),
+                    'broker_id': connection.broker_id,
+                    'environment': connection.environment,
+                    'stream_type': 'market_data_stream',
+                    'status': market_data_status,
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                })
+
+                # Trade data stream status
+                streaming_status.append({
+                    'broker_connection_id': str(connection.id),
+                    'broker_id': connection.broker_id,
+                    'environment': connection.environment,
+                    'stream_type': 'trade_data_stream',
+                    'status': trade_data_status,
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                })
+
+            log.debug(f"=== FINAL RESULT ===")
+            log.debug(f"Total streaming statuses created: {len(streaming_status)}")
+            log.debug(f"Returning to caller")
+            return streaming_status
+
+        except Exception as e:
+            log.error(f"Exception in get_streaming_status_snapshot: {e}", exc_info=True)
+            return []
+
+    async def get_full_snapshot(
+            self,
+            user_id: UUID,
+            topics: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Get a full snapshot based on requested topics.
+        UPDATED: Includes comprehensive integrity status information.
+
+        Args:
+            user_id: The user's UUID
+            topics: List of topics to include in snapshot
+
+        Returns:
+            Dictionary containing all requested snapshot data with integrity info
+        """
+        snapshot = {
+            'timestamp': datetime.now().isoformat(),
+            'user_id': str(user_id),
+            'topics': topics,
+            'version': 3 if self.include_integrity_fields else 2
+            # BACKWARDS COMPATIBLE: v2 for original, v3 for integrity
+        }
+
+        try:
+            # Include broker connections if requested
+            if 'broker_connection_events' in topics:
+                snapshot['broker_connections'] = await self.get_broker_connections_snapshot(
+                    user_id,
+                    include_archived=False,  # Default: only show connected brokers
+                    include_module_details=False
+                )
+
+            # Include accounts if requested
+            if 'broker_account_events' in topics:
+                snapshot['broker_accounts'] = await self.get_accounts_snapshot(
+                    user_id,
+                    include_positions=False,
+                    include_deleted=False  # Only exclude soft-deleted accounts
+                )
+
+            # Include orders if requested
+            if 'trading_events' in topics or 'order_events' in topics:
+                snapshot['active_orders'] = await self.get_orders_snapshot(
+                    user_id,
+                    active_only=True  # Only active orders for initial snapshot
+                )
+
+            # Include positions if requested
+            if 'position_events' in topics or 'trading_events' in topics:
+                snapshot['positions'] = await self.get_positions_snapshot(
+                    user_id,
+                    open_only=True  # Only open positions for initial snapshot
+                )
+
+            # Include automations if requested
+            if 'automation_events' in topics:
+                snapshot['automations'] = await self.get_automations_snapshot(
+                    user_id,
+                    active_only=False  # Include all automations, not just active
+                )
+
+            # Include streaming status if requested
+            if 'broker_streaming_events' in topics:
+                snapshot['streaming_status'] = await self.get_streaming_status_snapshot(user_id)
+
+            # ADDED: Include overall integrity status summary (only if enabled)
+            integrity_summary = None
+            if self.include_integrity_fields:
+                integrity_summary = await self._get_integrity_summary(user_id)
+                if integrity_summary:
+                    snapshot['integrity_summary'] = integrity_summary
+
+            # Add snapshot metadata
+            snapshot['_metadata'] = {
+                'generated_at': datetime.now().isoformat(),
+                'broker_connections_count': len(snapshot.get('broker_connections', [])),
+                'accounts_count': len(snapshot.get('broker_accounts', [])),
+                'active_orders_count': len(snapshot.get('active_orders', [])),
+                'positions_count': len(snapshot.get('positions', [])),
+                'automations_count': len(snapshot.get('automations', [])),
+                'streaming_status_count': len(snapshot.get('streaming_status', [])),
+                'filtered': True,  # Indicates disconnected brokers were filtered
+                'integrity_monitor_available': False,
+                'integrity_fields_enabled': False,
+                'integrity_summary_included': False
+            }
+
+            # Future: Add more snapshot types as needed
+            # if 'strategy_events' in topics:
+            #     snapshot['strategies'] = await self.get_strategies_snapshot(user_id)
+
+            return snapshot
+
+        except Exception as e:
+            log.error(f"Error generating full snapshot for user {user_id}: {e}", exc_info=True)
+            raise
+
+    async def _get_integrity_summary(self, user_id: UUID) -> Optional[Dict[str, Any]]:
+        """
+        Get overall integrity summary for the user.
+        Returns None - DataIntegrityMonitor has been removed.
+        """
+        return None
+
+    def clear_cache(self) -> None:
+        """Clear any internal caches"""
+        self._processed_connections.clear()
+        log.debug("Cleared snapshot service caches")
+
+
+# Factory function for dependency injection
+def create_wse_snapshot_service(
+        query_bus: 'QueryBus',  # REQUIRED for CQRS compliance
+        include_integrity_fields: bool = False
+) -> SnapshotServiceProtocol:
+    """
+    Factory function to create WSESnapshotService with CQRS QueryBus.
+    REFACTORED: query_bus is now REQUIRED (CQRS compliance).
+
+    Args:
+        query_bus: QueryBus instance (REQUIRED for CQRS compliance)
+        include_integrity_fields: Whether to include integrity fields in responses (default: False)
+
+    Returns:
+        WSESnapshotService instance configured with QueryBus
+
+    Raises:
+        ValueError: If query_bus is None
+    """
+    if not query_bus:
+        raise ValueError("query_bus is required for WSESnapshotService (CQRS compliance)")
+
+    return WSESnapshotService(
+        query_bus=query_bus,
+        include_integrity_fields=include_integrity_fields
+    )
+
+
+# Singleton instance getter (DEPRECATED - Use create_wse_snapshot_service instead)
+_snapshot_service: Optional[WSESnapshotService] = None
+
+
+def get_wse_snapshot_service(query_bus: 'QueryBus' = None) -> SnapshotServiceProtocol:
+    """
+    Get the WSE snapshot service singleton.
+
+    DEPRECATED: This function is deprecated and will be removed in future versions.
+    Use create_wse_snapshot_service() instead for proper dependency injection.
+
+    Args:
+        query_bus: QueryBus instance (REQUIRED for CQRS compliance)
+
+    Returns:
+        WSESnapshotService instance
+
+    Raises:
+        ValueError: If query_bus is not provided
+    """
+    if not query_bus:
+        raise ValueError(
+            "query_bus is required for WSESnapshotService. "
+            "Please use create_wse_snapshot_service(query_bus=...) instead."
+        )
+
+    global _snapshot_service
+    if _snapshot_service is None:
+        _snapshot_service = WSESnapshotService(
+            query_bus=query_bus,
+            include_integrity_fields=False
+        )
+    return _snapshot_service

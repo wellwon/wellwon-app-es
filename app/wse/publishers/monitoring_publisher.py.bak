@@ -1,0 +1,914 @@
+# =============================================================================
+# File: app/wse/publishers/wse_monitoring_publisher.py
+# Description: Monitoring & Lifecycle Publisher for WebSocket Events (WSE)
+# =============================================================================
+
+"""
+WSE Monitoring Publisher
+
+Publishes infrastructure, lifecycle, and monitoring events to WSE for frontend visibility.
+
+Architecture:
+- Infrastructure layer component
+- Handles adapter/connection lifecycle events
+- Publishes health checks, metrics, and status updates
+- Used by adapter_monitoring and connection_recovery services
+
+Event Types:
+1. Health Checks - Adapter health status
+2. Streaming Lifecycle - Subscription started/stopped/error
+3. Metrics - Performance and connection metrics
+4. Recovery Events - Connection recovery status
+5. Integrity Checks - Data integrity validation results
+6. Pool Health - Connection pool status
+
+Topic Structure:
+- user:{user_id}:broker_health - REST API health checks (NEW! Nov 13, 2025)
+- user:{user_id}:broker_streaming - Streaming lifecycle (RENAMED! Nov 13, 2025)
+- user:{user_id}:market_data - Market data streams (separate publisher)
+
+Throttling:
+- Health checks: 30s for healthy, 15s for unhealthy
+- Streaming events: No throttling (lifecycle critical)
+- Metrics: 60s throttle
+"""
+
+import logging
+import uuid as uuid_module
+from typing import Optional, Dict, Any, TYPE_CHECKING
+from uuid import UUID
+from datetime import datetime, timezone
+from dataclasses import dataclass
+
+from app.wse.core.types import EventPriority
+from app.wse.core.event_mappings import INTERNAL_TO_WS_EVENT_TYPE_MAP
+from app.infra.broker_adapters.common.adapter_enums import BrokerConnectionStatusEnum
+
+if TYPE_CHECKING:
+    from app.wse.core.pubsub_bus import PubSubBus
+    from app.services.infrastructure.adapter_monitoring.models import HealthStatus, HealthMetrics, IntegrityCheckResult
+    from app.broker_connection.queries import BrokerConnectionDetails
+
+log = logging.getLogger("wellwon.wse.monitoring_publisher")
+
+
+@dataclass
+class MonitoringEventConfig:
+    """Configuration for monitoring event publishing"""
+    enable_throttling: bool = True
+    throttle_interval_healthy: int = 30  # seconds
+    throttle_interval_unhealthy: int = 15  # seconds
+    throttle_interval_metrics: int = 60  # seconds
+
+
+class WSEMonitoringPublisher:
+    """
+    Publisher for infrastructure and monitoring events to WSE.
+
+    This publisher handles:
+    - Adapter health checks
+    - Streaming lifecycle events (subscriptions started/stopped)
+    - Connection recovery events
+    - Metrics and performance data
+    - Data integrity check results
+    - Connection pool health
+
+    Features:
+    - Throttling for non-critical events
+    - Priority-based delivery
+    - Per-user monitoring streams
+    """
+
+    def __init__(
+        self,
+        pubsub_bus: 'PubSubBus',
+        config: Optional[MonitoringEventConfig] = None
+    ):
+        """
+        Initialize WSE Monitoring Publisher.
+
+        Args:
+            pubsub_bus: PubSubBus instance for WSE publishing
+            config: Optional configuration for throttling and behavior
+        """
+        self._pubsub_bus = pubsub_bus
+        self._config = config or MonitoringEventConfig()
+
+        # Track last publish times for throttling
+        self._last_publish_times: Dict[str, datetime] = {}
+
+        log.info(
+            f"WSEMonitoringPublisher initialized - "
+            f"PubSubBus: {pubsub_bus is not None}, "
+            f"PubSubBus Type: {type(pubsub_bus).__name__ if pubsub_bus else 'None'}, "
+            f"Throttling: {self._config.enable_throttling}"
+        )
+
+    # ========================================================================
+    # STREAMING LIFECYCLE EVENTS
+    # ========================================================================
+
+    async def publish_streaming_subscription_started(
+        self,
+        user_id: UUID,
+        broker_id: str,
+        broker_connection_id: UUID,
+        stream_type: str,  # "trade_data" or "market_data"
+        stream_details: Dict[str, Any]
+    ) -> None:
+        """
+        Publish streaming subscription started event.
+
+        Args:
+            user_id: User ID
+            broker_id: Broker ID (e.g., "alpaca", "tradestation")
+            broker_connection_id: Broker connection ID
+            stream_type: Type of stream ("trade_data" or "market_data")
+            stream_details: Details about subscription (symbols, channels, etc.)
+        """
+        now = datetime.now(timezone.utc)
+
+        event = {
+            "event_type": "streaming_subscription_started",
+            "broker_id": broker_id,
+            "broker_connection_id": str(broker_connection_id),
+            "stream_type": stream_type,
+            "details": stream_details,
+            "timestamp": now.isoformat()
+        }
+
+        topic = f"user:{user_id}:broker_streaming"  # Monitoring event (no _events suffix)
+        await self._pubsub_bus.publish(topic, event, priority=EventPriority.HIGH)
+
+        log.info(f"Published streaming started to {topic}: broker={broker_id}, type={stream_type}")
+
+    async def publish_streaming_subscription_stopped(
+        self,
+        user_id: UUID,
+        broker_id: str,
+        broker_connection_id: UUID,
+        stream_type: str,
+        reason: str,
+        error: Optional[str] = None
+    ) -> None:
+        """
+        Publish streaming subscription stopped event.
+
+        Args:
+            user_id: User ID
+            broker_id: Broker ID
+            broker_connection_id: Broker connection ID
+            stream_type: Type of stream
+            reason: Reason for stopping
+            error: Optional error message if stopped due to error
+        """
+        now = datetime.now(timezone.utc)
+
+        event = {
+            "event_type": "streaming_subscription_stopped",
+            "broker_id": broker_id,
+            "broker_connection_id": str(broker_connection_id),
+            "stream_type": stream_type,
+            "reason": reason,
+            "error": error,
+            "timestamp": now.isoformat()
+        }
+
+        topic = f"user:{user_id}:broker_streaming"  # Monitoring event (no _events suffix)
+        priority = EventPriority.CRITICAL if error else EventPriority.HIGH
+        await self._pubsub_bus.publish(topic, event, priority=priority)
+
+        log.info(f"Published streaming stopped to {topic}: broker={broker_id}, type={stream_type}, reason={reason}")
+
+    async def publish_streaming_error(
+        self,
+        user_id: UUID,
+        broker_id: str,
+        broker_connection_id: UUID,
+        stream_type: str,
+        error_message: str,
+        error_details: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Publish streaming error event.
+
+        Args:
+            user_id: User ID
+            broker_id: Broker ID
+            broker_connection_id: Broker connection ID
+            stream_type: Type of stream
+            error_message: Error message
+            error_details: Optional detailed error information
+        """
+        now = datetime.now(timezone.utc)
+
+        event = {
+            "event_type": "streaming_error",
+            "broker_id": broker_id,
+            "broker_connection_id": str(broker_connection_id),
+            "stream_type": stream_type,
+            "error": error_message,
+            "details": error_details or {},
+            "timestamp": now.isoformat()
+        }
+
+        topic = f"user:{user_id}:broker_streaming"  # Monitoring event (no _events suffix)
+        await self._pubsub_bus.publish(topic, event, priority=EventPriority.CRITICAL)
+
+        log.error(f"Published streaming error to {topic}: broker={broker_id}, error={error_message}")
+
+    async def publish_streaming_symbols_updated(
+        self,
+        user_id: UUID,
+        broker_id: str,
+        broker_connection_id: UUID,
+        stream_type: str,
+        symbols: list
+    ) -> None:
+        """
+        Publish streaming symbols updated event (when subscription list changes).
+
+        Args:
+            user_id: User ID
+            broker_id: Broker ID
+            broker_connection_id: Broker connection ID
+            stream_type: Type of stream
+            symbols: List of symbols currently subscribed
+        """
+        now = datetime.now(timezone.utc)
+
+        event = {
+            "event_type": "streaming_symbols_updated",
+            "broker_id": broker_id,
+            "broker_connection_id": str(broker_connection_id),
+            "stream_type": stream_type,
+            "symbols": symbols,
+            "symbol_count": len(symbols),
+            "timestamp": now.isoformat()
+        }
+
+        topic = f"user:{user_id}:broker_streaming"  # Monitoring event (no _events suffix)
+        await self._pubsub_bus.publish(topic, event, priority=EventPriority.NORMAL)
+
+        log.debug(f"Published symbols updated to {topic}: broker={broker_id}, count={len(symbols)}")
+
+    async def publish_streaming_connection_status(
+        self,
+        user_id: UUID,
+        broker_id: str,
+        broker_connection_id: UUID,
+        stream_type: str,
+        status: str,  # "connecting", "connected", "disconnected", "reconnecting"
+        environment: str = "unknown",
+        message: Optional[str] = None
+    ) -> None:
+        """
+        Publish streaming connection status update.
+
+        Args:
+            user_id: User ID
+            broker_id: Broker ID
+            broker_connection_id: Broker connection ID
+            stream_type: Type of stream
+            status: Connection status
+            environment: Environment (paper/live)
+            message: Optional status message
+        """
+        now = datetime.now(timezone.utc)
+
+        event = {
+            "event_type": "broker_streaming_update",
+            "broker_id": broker_id,
+            "broker_connection_id": str(broker_connection_id),
+            "environment": environment,
+            "stream_type": stream_type,
+            "status": status,
+            "message": message,
+            "timestamp": now.isoformat()
+        }
+
+        topic = f"user:{user_id}:broker_streaming"  # Monitoring event (no _events suffix)
+        priority = EventPriority.HIGH if status in ["disconnected", "reconnecting"] else EventPriority.NORMAL
+
+        log.info(
+            f"[WSE_MONITORING_PUBLISHER] Publishing broker_streaming_update - "
+            f"topic: {topic}, broker: {broker_id}, environment: {environment}, "
+            f"stream_type: {stream_type}, status: {status}, priority: {priority.name}, "
+            f"pubsub_bus: {self._pubsub_bus is not None}"
+        )
+
+        await self._pubsub_bus.publish(topic, event, priority=priority)
+
+        log.info(
+            f"[WSE_MONITORING_PUBLISHER] Published broker_streaming_update to {topic}: "
+            f"broker={broker_id} ({environment}), stream_type={stream_type}, status={status}"
+        )
+
+    async def publish_streaming_aggregate_status(
+        self,
+        user_id: UUID,
+        streaming_status: Dict[str, Any]
+    ) -> None:
+        """
+        Publish aggregate streaming status for all user's connections.
+
+        Args:
+            user_id: User ID
+            streaming_status: Aggregate status data (all streams, all brokers)
+        """
+        now = datetime.now(timezone.utc)
+
+        event = {
+            "event_type": "streaming_aggregate_status",
+            "status": streaming_status,
+            "timestamp": now.isoformat()
+        }
+
+        topic = f"user:{user_id}:broker_streaming"  # Monitoring event (no _events suffix)
+        await self._pubsub_bus.publish(topic, event, priority=EventPriority.NORMAL)
+
+        log.debug(f"Published aggregate streaming status to {topic}")
+
+    # ========================================================================
+    # HEALTH CHECK EVENTS (Adapter Monitoring Integration)
+    # ========================================================================
+
+    async def publish_health_check_event(
+        self,
+        broker_connection_id: UUID,
+        user_id: UUID,
+        connection: 'BrokerConnectionDetails',
+        health_status: 'HealthStatus',
+        duration_ms: float,
+        level: str,
+        health_state_changed: bool = False
+    ) -> None:
+        """
+        Publish broker health check event to WSE.
+
+        Args:
+            broker_connection_id: Broker connection ID
+            user_id: User ID
+            connection: Broker connection details
+            health_status: HealthStatus object
+            duration_ms: Check duration in ms
+            level: Check level ("quick" or "deep")
+            health_state_changed: If health state changed
+        """
+        if not connection:
+            return
+
+        # Check if broker is connected
+        # FIX (Nov 11, 2025): Use enum constants instead of uppercase strings
+        connection_connected = (
+            connection.connected and
+            connection.last_connection_status != BrokerConnectionStatusEnum.DISCONNECTED and
+            connection.last_connection_status != BrokerConnectionStatusEnum.CONNECTING
+        )
+
+        if not connection_connected:
+            log.debug(f"Skipping health check for disconnected broker {broker_connection_id}")
+            return
+
+        # Throttling logic
+        cache_key = f"{user_id}:{broker_connection_id}"
+        throttle_key = f"health:{cache_key}"
+
+        # Check if this is first publish for this broker (no throttle on first)
+        is_first_publish = throttle_key not in self._last_publish_times
+
+        # Skip throttling if state changed, deep check, OR first publish
+        if not is_first_publish and not health_state_changed and level != "deep":
+            interval = (
+                self._config.throttle_interval_healthy if health_status.is_healthy
+                else self._config.throttle_interval_unhealthy
+            )
+            if self._should_throttle(throttle_key, interval=interval):
+                log.debug(f"Throttling health check: {throttle_key}")
+                return
+
+        # Determine health status string
+        if health_status.is_healthy:
+            health_status_str = "healthy"
+        elif health_status.market_status and health_status.market_status.status.value == "auth_error":
+            health_status_str = "degraded"
+        else:
+            health_status_str = "unhealthy"
+
+        # Build event
+        from app.broker_connection.events import create_health_check_event
+
+        # Convert module health to proper format
+        module_health_dict = {}
+        if health_status.module_health:
+            for module_name, module_data in health_status.module_health.items():
+                if isinstance(module_data, bool):
+                    module_health_dict[module_name] = {"is_healthy": module_data}
+                elif isinstance(module_data, dict):
+                    module_health_dict[module_name] = module_data
+                else:
+                    module_health_dict[module_name] = {"is_healthy": False}
+
+        event = create_health_check_event(
+            broker_connection_id=broker_connection_id,
+            user_id=user_id,
+            broker_id=connection.broker_id,
+            environment=str(connection.environment),
+            is_healthy=health_status.is_healthy,
+            health_status=health_status_str,
+            message=health_status.reason,
+            connected=connection.connected,
+            response_time_ms=int(duration_ms),
+            module_health=module_health_dict
+        )
+
+        event_data = event.to_dict_for_bus()
+
+        # Transform internal event type to WebSocket-friendly name
+        internal_event_type = event_data.get('event_type')
+        if internal_event_type:
+            ws_event_type = INTERNAL_TO_WS_EVENT_TYPE_MAP.get(internal_event_type, internal_event_type)
+            event_data['event_type'] = ws_event_type
+
+        # Determine priority
+        if not health_status.is_healthy:
+            priority = EventPriority.HIGH
+        elif health_status.market_status and health_status.market_status.status.value == "auth_error":
+            priority = EventPriority.HIGH
+        elif health_status.metrics.consecutive_failures > 0:
+            priority = EventPriority.HIGH
+        else:
+            priority = EventPriority.NORMAL
+
+        topic = f"user:{user_id}:broker_health"
+        log.info(
+            f"[WSE_MONITORING_PUBLISHER] Publishing health check - "
+            f"topic: {topic}, broker: {broker_connection_id}, "
+            f"healthy: {health_status.is_healthy}, priority: {priority.name}, "
+            f"event_type: {event_data.get('event_type')}, "
+            f"pubsub_bus: {self._pubsub_bus is not None}"
+        )
+
+        # Publish to WSE (UPDATED Nov 13, 2025: broker_health topic)
+        await self._pubsub_bus.publish(
+            topic,
+            event_data,
+            priority=priority,
+            ttl=600  # 10 minutes
+        )
+
+        # Update throttle cache
+        self._last_publish_times[throttle_key] = datetime.now(timezone.utc)
+
+        log.info(
+            f"[WSE_MONITORING_PUBLISHER] Published health check to WSE: "
+            f"broker={broker_connection_id}, healthy={health_status.is_healthy}, "
+            f"changed={health_state_changed}, level={level}"
+        )
+
+    async def publish_module_health_updates(
+        self,
+        user_id: UUID,
+        broker_connection_id: UUID,
+        module_health: Dict[str, Any],
+        prev_module_health: Dict[str, bool]
+    ) -> Dict[str, bool]:
+        """
+        Publish module-level health updates with change detection.
+
+        Args:
+            user_id: User ID
+            broker_connection_id: Broker connection ID
+            module_health: Dictionary of module -> health status
+            prev_module_health: Previous module health
+
+        Returns:
+            Simple dict of module -> bool health status
+        """
+        try:
+            # Collect changes
+            changed_modules = {}
+            any_unhealthy = False
+
+            for module_name, module_data in module_health.items():
+                # Extract health status
+                if isinstance(module_data, bool):
+                    is_healthy = module_data
+                elif isinstance(module_data, dict):
+                    is_healthy = module_data.get('is_healthy', False)
+                else:
+                    continue
+
+                # Check if changed
+                if module_name not in prev_module_health or prev_module_health.get(module_name) != is_healthy:
+                    changed_modules[module_name] = {
+                        'module_id': module_name,
+                        'module_type': module_name,
+                        'is_healthy': is_healthy,
+                        'status': 'healthy' if is_healthy else 'unhealthy',
+                        'message': f"Module {module_name} is {'healthy' if is_healthy else 'unhealthy'}",
+                        'details': None if is_healthy else {"error": f"Module {module_name} health check failed"},
+                        'last_checked': datetime.now(timezone.utc).isoformat()
+                    }
+
+                    if not is_healthy:
+                        any_unhealthy = True
+
+            # Send bundled update if there are changes
+            if changed_modules:
+                # Transform internal event type to WebSocket-friendly name
+                internal_event_type = 'BrokerConnectionModuleHealthChanged'
+                ws_event_type = INTERNAL_TO_WS_EVENT_TYPE_MAP.get(internal_event_type, internal_event_type)
+
+                event = {
+                    'event_type': ws_event_type,  # Use WebSocket-friendly name
+                    'broker_connection_id': str(broker_connection_id),
+                    'user_id': str(user_id),
+                    'module_updates': changed_modules,
+                    '_metadata': {
+                        'event_id': str(uuid_module.uuid4()),
+                        'timestamp': datetime.now(timezone.utc).isoformat(),
+                        'version': 1,
+                        'priority': EventPriority.HIGH.value if any_unhealthy else EventPriority.NORMAL.value,
+                    }
+                }
+
+                priority = EventPriority.HIGH if any_unhealthy else EventPriority.NORMAL
+
+                await self._pubsub_bus.publish(
+                    f"user:{user_id}:broker_health",
+                    event,
+                    priority=priority,
+                    ttl=600  # 10 minutes
+                )
+
+                log.info(f"Published module health update for {len(changed_modules)} modules to WSE")
+
+            # Return simple bool values
+            return {
+                module_name: (module_data if isinstance(module_data, bool)
+                              else module_data.get('is_healthy', False) if isinstance(module_data, dict)
+                else False)
+                for module_name, module_data in module_health.items()
+            }
+
+        except Exception as e:
+            log.error(f"Failed to publish module health updates: {e}", exc_info=True)
+            return {}
+
+    async def publish_integrity_check_event(
+        self,
+        user_id: UUID,
+        broker_connection_id: UUID,
+        broker_id: str,
+        integrity_result: 'IntegrityCheckResult'
+    ) -> None:
+        """
+        Publish data integrity check result.
+
+        Args:
+            user_id: User ID
+            broker_connection_id: Broker connection ID
+            broker_id: Broker ID
+            integrity_result: IntegrityCheckResult object
+        """
+        now = datetime.now(timezone.utc)
+
+        event = {
+            "event_type": "BrokerConnectionIntegrityChecked",
+            "broker_connection_id": str(broker_connection_id),
+            "user_id": str(user_id),
+            "broker_id": broker_id,
+            "is_consistent": integrity_result.is_consistent,
+            "issues_found": len(integrity_result.issues),
+            "issues": integrity_result.issues[:10],  # Limit to first 10
+            "accounts_checked": integrity_result.accounts_checked,
+            "accounts_recovered": integrity_result.accounts_recovered,
+            "timestamp": now.isoformat(),
+            "_metadata": {
+                "event_id": str(uuid_module.uuid4()),
+                "version": 1,
+                "priority": EventPriority.HIGH.value if not integrity_result.is_consistent else EventPriority.NORMAL.value
+            }
+        }
+
+        priority = EventPriority.HIGH if not integrity_result.is_consistent else EventPriority.NORMAL
+
+        await self._pubsub_bus.publish(
+            f"user:{user_id}:broker_health",
+            event,
+            priority=priority,
+            ttl=1800  # 30 minutes
+        )
+
+        log.info(
+            f"Published integrity check: broker={broker_connection_id}, "
+            f"consistent={integrity_result.is_consistent}, issues={len(integrity_result.issues)}"
+        )
+
+    async def publish_metrics_event(
+        self,
+        broker_connection_id: UUID,
+        user_id: UUID,
+        connection: 'BrokerConnectionDetails',
+        metrics: 'HealthMetrics'
+    ) -> None:
+        """
+        Publish performance metrics.
+
+        Args:
+            broker_connection_id: Broker connection ID
+            user_id: User ID
+            connection: Broker connection details
+            metrics: HealthMetrics object
+        """
+        if not connection:
+            return
+
+        now = datetime.now(timezone.utc)
+
+        from app.broker_connection.events import BrokerConnectionMetricsUpdated
+
+        metrics_event = BrokerConnectionMetricsUpdated(
+            broker_connection_id=broker_connection_id,
+            user_id=user_id,
+            broker_id=connection.broker_id,
+            metrics={
+                "health_checks": {
+                    "total": metrics.total_checks,
+                    "successful": metrics.successful_checks,
+                    "failed": metrics.failed_checks,
+                    "consecutive_failures": metrics.consecutive_failures,
+                    "average_response_ms": metrics.average_response_time
+                },
+                "errors": {
+                    "last_error": metrics.last_error,
+                    "last_error_time": metrics.last_error_time.isoformat() if metrics.last_error_time else None
+                },
+                "integrity": {
+                    "last_check": metrics.last_integrity_check.isoformat() if metrics.last_integrity_check else None,
+                    "failures": metrics.integrity_failures,
+                    "accounts_recovered": metrics.accounts_recovered
+                }
+            },
+            period_start=metrics.first_check_time,
+            period_end=now
+        )
+
+        metrics_event_data = metrics_event.to_dict_for_bus()
+
+        await self._pubsub_bus.publish(
+            f"user:{user_id}:broker_health",
+            metrics_event_data,
+            ttl=3600  # 1 hour
+        )
+
+        log.debug(f"Published metrics to WSE: broker={broker_connection_id}")
+
+    async def publish_repeated_failures_event(
+        self,
+        user_id: UUID,
+        broker_connection_id: UUID,
+        broker_id: str,
+        health_status: 'HealthStatus'
+    ) -> None:
+        """
+        Publish event for repeated health check failures.
+
+        Args:
+            user_id: User ID
+            broker_connection_id: Broker connection ID
+            broker_id: Broker ID
+            health_status: HealthStatus object with failure details
+        """
+        now = datetime.now(timezone.utc)
+
+        event = {
+            "event_type": "BrokerConnectionRepeatedFailures",
+            "broker_connection_id": str(broker_connection_id),
+            "user_id": str(user_id),
+            "broker_id": broker_id,
+            "consecutive_failures": health_status.metrics.consecutive_failures,
+            "reason": health_status.reason,
+            "recommendations": health_status.recommendations,
+            "timestamp": now.isoformat(),
+            "_metadata": {
+                "event_id": str(uuid_module.uuid4()),
+                "version": 1,
+                "priority": EventPriority.CRITICAL.value
+            }
+        }
+
+        await self._pubsub_bus.publish(
+            f"user:{user_id}:broker_health",
+            event,
+            ttl=1800  # 30 minutes
+        )
+
+        log.warning(
+            f"Published repeated failures event: broker={broker_connection_id}, "
+            f"failures={health_status.metrics.consecutive_failures}"
+        )
+
+    async def publish_pool_health_event(
+        self,
+        pool_health: Dict[str, Any],
+        pool_stats: Dict[str, Any],
+        last_pool_metrics: Dict[str, float]
+    ) -> None:
+        """
+        Publish adapter pool health change event.
+
+        Args:
+            pool_health: Pool health status
+            pool_stats: Pool statistics
+            last_pool_metrics: Previous metrics for comparison
+        """
+        now = datetime.now(timezone.utc)
+
+        metrics = pool_stats.get("metrics", {})
+        cache_info = pool_stats.get("cache", {})
+
+        event = {
+            "event_type": "AdapterPoolHealthChanged",
+            "pool_status": pool_health.get("status", "unknown"),
+            "instance_id": pool_health.get("instance_id"),
+            "errors": pool_health.get("errors", []),
+            "warnings": pool_health.get("warnings", []),
+            "recommendations": pool_health.get("recommendations", []),
+            "statistics": {
+                "total_requests": metrics.get("total_requests", 0),
+                "cache_hit_rate": last_pool_metrics.get("cache_hit_rate", 0),
+                "error_rate": last_pool_metrics.get("error_rate", 0),
+                "operations_executed": last_pool_metrics.get("avg_operations_executed", 0),
+                "cache_size": cache_info.get("size", 0),
+                "cache_enabled": cache_info.get("enabled", False)
+            },
+            "timestamp": now.isoformat(),
+            "_metadata": {
+                "event_id": str(uuid_module.uuid4()),
+                "version": 1,
+                "priority": EventPriority.HIGH.value if pool_health.get("status") != "healthy" else EventPriority.NORMAL.value
+            }
+        }
+
+        priority = EventPriority.HIGH if pool_health.get("status") != "healthy" else EventPriority.NORMAL
+
+        await self._pubsub_bus.publish(
+            "system:adapter_pool_events",
+            event,
+            priority=priority,
+            ttl=300  # 5 minutes
+        )
+
+        log.info(f"Published pool health event: status={pool_health.get('status')}")
+
+    async def publish_initial_monitoring_state(
+        self,
+        user_id: UUID,
+        broker_connection_id: UUID,
+        connection: 'BrokerConnectionDetails',
+        is_healthy: bool,
+        reason: str
+    ) -> None:
+        """
+        Publish initial state when monitoring starts.
+
+        Args:
+            user_id: User ID
+            broker_connection_id: Broker connection ID
+            connection: Broker connection details
+            is_healthy: Initial health status
+            reason: Reason/message
+        """
+        if not connection:
+            return
+
+        now = datetime.now(timezone.utc)
+
+        # Transform internal event type to WebSocket-friendly name
+        internal_event_type = 'BrokerConnectionHealthChecked'
+        ws_event_type = INTERNAL_TO_WS_EVENT_TYPE_MAP.get(internal_event_type, internal_event_type)
+
+        event_data = {
+            'event_type': ws_event_type,  # Use WebSocket-friendly name
+            'broker_connection_id': str(broker_connection_id),
+            'user_id': str(user_id),
+            'broker_id': str(connection.broker_id),
+            'environment': str(connection.environment),
+            'is_healthy': is_healthy,
+            'connected': connection.connected,
+            'health_status': 'healthy' if is_healthy else 'unhealthy',
+            'message': f"Initial monitoring state - {reason}",
+            'checked_at': now.isoformat(),
+            'response_time_ms': 0,
+            'timestamp': now.isoformat(),
+            '_metadata': {
+                'event_id': str(uuid_module.uuid4()),
+                'version': 1,
+                'priority': EventPriority.HIGH.value
+            }
+        }
+
+        await self._pubsub_bus.publish(
+            f"user:{user_id}:broker_health",
+            event_data,
+            ttl=600
+        )
+
+        log.info(f"Published initial monitoring state: broker={broker_connection_id}, healthy={is_healthy}")
+
+    # ========================================================================
+    # CONNECTION RECOVERY EVENTS
+    # ========================================================================
+
+    async def publish_recovery_event(
+        self,
+        user_id: UUID,
+        broker_id: str,
+        broker_connection_id: UUID,
+        recovery_status: str,  # "started", "in_progress", "completed", "failed"
+        recovery_details: Dict[str, Any]
+    ) -> None:
+        """
+        Publish connection recovery event.
+
+        Args:
+            user_id: User ID
+            broker_id: Broker ID
+            broker_connection_id: Broker connection ID
+            recovery_status: Recovery status
+            recovery_details: Details about recovery attempt
+        """
+        now = datetime.now(timezone.utc)
+
+        event = {
+            "event_type": "connection_recovery",
+            "broker_id": broker_id,
+            "broker_connection_id": str(broker_connection_id),
+            "recovery_status": recovery_status,
+            "details": recovery_details,
+            "timestamp": now.isoformat()
+        }
+
+        topic = f"user:{user_id}:monitoring"
+        priority = EventPriority.HIGH if recovery_status in ["started", "failed"] else EventPriority.NORMAL
+        await self._pubsub_bus.publish(topic, event, priority=priority)
+
+        log.info(f"Published recovery event: user={user_id}, broker={broker_id}, status={recovery_status}")
+
+    # ========================================================================
+    # UTILITY METHODS
+    # ========================================================================
+
+    def _should_throttle(self, throttle_key: str, interval: int) -> bool:
+        """
+        Check if event should be throttled.
+
+        Args:
+            throttle_key: Key for throttle cache
+            interval: Throttle interval in seconds
+
+        Returns:
+            True if should throttle, False otherwise
+        """
+        if not self._config.enable_throttling:
+            return False
+
+        if throttle_key not in self._last_publish_times:
+            return False
+
+        now = datetime.now(timezone.utc)
+        last_time = self._last_publish_times[throttle_key]
+        elapsed = (now - last_time).total_seconds()
+
+        return elapsed < interval
+
+    def clear_throttle_cache(self) -> None:
+        """Clear throttle cache (for testing or manual reset)."""
+        self._last_publish_times.clear()
+        log.info("Throttle cache cleared")
+
+    async def health_check(self) -> Dict[str, Any]:
+        """
+        Health check for monitoring publisher.
+
+        Returns:
+            Health status dictionary
+        """
+        return {
+            "publisher": "wse_monitoring",
+            "status": "healthy" if self._pubsub_bus else "degraded",
+            "reactive_bus_connected": self._pubsub_bus is not None,
+            "throttle_cache_size": len(self._last_publish_times),
+            "throttling_enabled": self._config.enable_throttling
+        }
+
+    async def shutdown(self) -> None:
+        """
+        Shutdown the WSE Monitoring Publisher.
+
+        Clears throttle cache and logs shutdown completion.
+        """
+        self.clear_throttle_cache()
+        log.info("WSE Monitoring Publisher shutdown complete")
