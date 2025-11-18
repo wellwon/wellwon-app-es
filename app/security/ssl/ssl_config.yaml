@@ -1,0 +1,133 @@
+#file: noinspection SpellCheckingInspection
+# =============================================================================
+# File: config/ssl_config.yaml
+# Description: SSL/TLS configuration for different environments
+# =============================================================================
+
+# Production environment - strictest security
+production:
+  verification_mode: "strict"
+  minimum_tls_version: "TLSv1.3"
+  check_hostname: true
+  verify_cert_chain: true
+  verify_cert_dates: true
+  pin_certificates: true
+  check_ocsp: true
+  ocsp_timeout: 5
+  alert_on_cert_expiry_days: 30
+  log_cert_details: true
+
+  # Certificate pinning for critical services
+  pinned_certificates:
+    api.alpaca.markets: "sha256:1234567890abcdef..."
+    api.tradestation.com: "sha256:fedcba0987654321..."
+
+  # Allowed certificate hosts (additional validation)
+  allowed_cert_hosts:
+    - "*.alpaca.markets"
+    - "*.tradestation.com"
+    - "api.tradier.com"
+
+# Staging environment - balanced security
+staging:
+  verification_mode: "relaxed"
+  minimum_tls_version: "TLSv1.2"
+  check_hostname: true
+  verify_cert_chain: true
+  verify_cert_dates: true
+  pin_certificates: false
+  check_ocsp: false
+  alert_on_cert_expiry_days: 14
+  log_cert_details: true
+
+  # Allow internal staging certificates
+  custom_ca_bundle: "/etc/ssl/staging-ca-bundle.pem"
+
+# Development environment - relaxed for local development
+development:
+  verification_mode: "dev"
+  minimum_tls_version: "TLSv1.2"
+  check_hostname: false
+  verify_cert_chain: true
+  verify_cert_dates: true
+  pin_certificates: false
+  check_ocsp: false
+  alert_on_cert_expiry_days: 7
+  log_cert_details: true
+
+  # Allow localhost and internal IPs
+  allowed_cert_hosts:
+    - "localhost"
+    - "*.local"
+    - "127.0.0.1"
+    - "192.168.*.*"
+    - "10.*.*.*"
+
+# Test environment - minimal verification for CI/CD
+test:
+  verification_mode: "disabled"
+  minimum_tls_version: "TLSv1.2"
+  check_hostname: false
+  verify_cert_chain: false
+  verify_cert_dates: false
+  pin_certificates: false
+  check_ocsp: false
+  log_cert_details: false
+
+# Broker-specific overrides
+broker_overrides:
+  alpaca:
+    production:
+      pinned_certificates:
+        api.alpaca.markets: "sha256:actual_fingerprint_here"
+        paper-api.alpaca.markets: "sha256:actual_fingerprint_here"
+        data.alpaca.markets: "sha256:actual_fingerprint_here"
+
+  tradestation:
+    production:
+      # TradeStation requires client certificates
+      client_cert_path: "/secure/certs/tradestation-client.pem"
+      client_key_path: "/secure/certs/tradestation-client.key"
+
+  interactive_brokers:
+    all:
+      # IB has specific cipher requirements
+      ciphers: "ECDHE+AESGCM:DHE+AESGCM:ECDHE+AES256:DHE+AES256"
+
+# Certificate monitoring and alerting
+monitoring:
+  # Prometheus metrics
+  export_metrics: true
+  metrics_port: 9090
+
+  # Alert destinations
+  alerts:
+    - type: "email"
+      enabled: true
+      recipients:
+        - "security@tradecore.com"
+        - "devops@tradecore.com"
+
+    - type: "slack"
+      enabled: true
+      webhook_url: "${SLACK_SECURITY_WEBHOOK}"
+      channel: "#security-alerts"
+
+    - type: "pagerduty"
+      enabled: true
+      service_key: "${PAGERDUTY_SECURITY_KEY}"
+      severity: "critical"
+
+  # Certificate expiry thresholds
+  expiry_alerts:
+    critical: 7    # Days before expiry
+    warning: 30
+    info: 60
+
+# Security headers for API responses
+security_headers:
+  Strict-Transport-Security: "max-age=31536000; includeSubDomains; preload"
+  X-Content-Type-Options: "nosniff"
+  X-Frame-Options: "DENY"
+  X-XSS-Protection: "1; mode=block"
+  Content-Security-Policy: "default-src 'self'"
