@@ -117,7 +117,7 @@ SYNC_PROJECTION_ERRORS_PREFIX = "wellwon:sync_projections:errors:"
 # INFRASTRUCTURE ENDPOINTS
 # =============================================================================
 
-REDPANDA_BOOTSTRAP_SERVERS = os.getenv("REDPANDA_BOOTSTRAP_SERVERS", "localhost:9092")
+REDPANDA_BOOTSTRAP_SERVERS = os.getenv("REDPANDA_BOOTSTRAP_SERVERS", "localhost:29092")
 
 # Admin endpoints configuration (if enabled)
 ADMIN_ENDPOINT_HOST = os.getenv("WORKER_ADMIN_HOST", "127.0.0.1")  # Localhost only by default
@@ -129,20 +129,6 @@ ADMIN_API_KEY = os.getenv("WORKER_ADMIN_API_KEY", "")  # Required if admin endpo
 # =============================================================================
 
 USER_ACCOUNT_EVENTS_TOPIC = os.getenv("USER_ACCOUNT_EVENTS_TOPIC", "transport.user-account-events")
-BROKER_ACCOUNT_EVENTS_TOPIC = os.getenv("BROKER_ACCOUNT_EVENTS_TOPIC", "transport.account-events")
-BROKER_CONNECTION_EVENTS_TOPIC = os.getenv("BROKER_CONNECTION_EVENTS_TOPIC", "transport.entity-events")
-
-# Order events topic
-ORDER_EVENTS_TOPIC = os.getenv("ORDER_EVENTS_TOPIC", "transport.order-events")
-
-# Position events topic
-POSITION_EVENTS_TOPIC = os.getenv("POSITION_EVENTS_TOPIC", "transport.position-events")
-
-# Virtual Broker events topic
-VIRTUAL_BROKER_EVENTS_TOPIC = os.getenv("VIRTUAL_BROKER_EVENTS_TOPIC", "transport.virtual-broker-events")
-
-# Automation events topic
-AUTOMATION_EVENTS_TOPIC = os.getenv("AUTOMATION_EVENTS_TOPIC", "transport.automation-events")
 
 # =============================================================================
 # TOPIC CONFIGURATION - SYSTEM
@@ -235,12 +221,6 @@ class WorkerConfig:
     # Topics to consume
     topics: List[str] = field(default_factory=lambda: [
         USER_ACCOUNT_EVENTS_TOPIC,
-        BROKER_ACCOUNT_EVENTS_TOPIC,
-        BROKER_CONNECTION_EVENTS_TOPIC,
-        ORDER_EVENTS_TOPIC,  # Order domain topic
-        POSITION_EVENTS_TOPIC,  # Position domain topic
-        AUTOMATION_EVENTS_TOPIC,  # Automation domain topic
-        VIRTUAL_BROKER_EVENTS_TOPIC  # Virtual broker topic
     ])
 
     # System topics
@@ -249,7 +229,6 @@ class WorkerConfig:
     dlq_topic: str = DLQ_TOPIC
     integration_events_topic: str = INTEGRATION_EVENTS_TOPIC
     gap_detection_events_topic: str = GAP_DETECTION_EVENTS_TOPIC
-    virtual_broker_events_topic: str = VIRTUAL_BROKER_EVENTS_TOPIC
 
     # Database
     processed_events_table: str = PROCESSED_EVENTS_TABLE
@@ -275,10 +254,6 @@ class WorkerConfig:
         # Remove saga topic if saga processing disabled
         if not self.enable_saga_processing and SAGA_EVENTS_TOPIC in self.topics:
             self.topics.remove(SAGA_EVENTS_TOPIC)
-
-        # Remove virtual broker topic if virtual broker disabled
-        if not self.enable_virtual_broker and VIRTUAL_BROKER_EVENTS_TOPIC in self.topics:
-            self.topics.remove(VIRTUAL_BROKER_EVENTS_TOPIC)
 
         # Validate admin endpoint security
         if self.enable_admin_endpoints and not self.admin_api_key:
@@ -307,10 +282,10 @@ class WorkerConfig:
         }
 
     def get_virtual_broker_config(self) -> Dict[str, Any]:
-        """Get virtual broker specific configuration"""
+        """Get virtual broker specific configuration (DISABLED - broker functionality removed)"""
         return {
-            "enabled": self.enable_virtual_broker,
-            "topic": self.virtual_broker_events_topic,
+            "enabled": False,
+            "topic": None,
             "redis_prefix": f"{self.virtual_broker_prefix}{self.worker_id}:"
         }
 

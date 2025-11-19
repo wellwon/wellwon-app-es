@@ -148,7 +148,7 @@ class WSESnapshotPublisher:
             return
 
         try:
-            topic = "transport.entity-events"
+            topic = "saga.events"
 
             log.info(f"Subscribing to saga events on topic: {topic}")
 

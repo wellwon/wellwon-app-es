@@ -130,47 +130,17 @@ class ProjectionRebuilder:
         self._shutdown = False
 
     def _get_default_configs(self) -> Dict[str, ProjectionConfig]:
-        """FIXED: Enhanced default projection configurations"""
+        """Enhanced default projection configurations"""
         return {
             "users": ProjectionConfig(
                 name="users",
                 aggregate_type="user_account",
                 event_types=["UserAccountCreated", "UserCreated", "UserPasswordChanged",
-                             "UserAccountDeleted", "UserDeleted", "UserEmailVerified"],
+                             "UserAccountDeleted", "UserDeleted", "UserEmailVerified",
+                             "UserProfileUpdated"],
                 transport_topic="transport.user-account-events",
                 batch_size=50  # Smaller batches for user events
             ),
-            "broker_connections": ProjectionConfig(
-                name="broker_connections",
-                aggregate_type="broker_connection",
-                event_types=None,  # All events
-                transport_topic="transport.entity-events",
-                batch_size=100
-            ),
-            "broker_accounts": ProjectionConfig(
-                name="broker_accounts",
-                aggregate_type="broker_account",
-                event_types=None,
-                transport_topic="transport.account-events",
-                dependencies=["broker_connections"],  # Depends on broker connections
-                batch_size=150
-            ),
-            "orders": ProjectionConfig(
-                name="orders",
-                aggregate_type="order",
-                event_types=None,
-                transport_topic="transport.order-events",
-                dependencies=["broker_accounts"],  # Depends on accounts
-                batch_size=200
-            ),
-            "positions": ProjectionConfig(
-                name="positions",
-                aggregate_type="position",
-                event_types=None,
-                transport_topic="transport.position-events",
-                dependencies=["broker_accounts", "orders"],  # Depends on both
-                batch_size=100
-            )
         }
 
     def register_projection(self, config: ProjectionConfig) -> None:

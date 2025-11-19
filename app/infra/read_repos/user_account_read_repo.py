@@ -44,7 +44,15 @@ class UserAccountReadRepo:
 
     def __init__(self, cache_manager: Optional[CacheManager] = None):
         """Initialize with optional cache manager injection"""
-        self.cache = cache_manager or get_cache_manager()
+        if cache_manager:
+            self.cache = cache_manager
+        else:
+            # Try to get global cache manager, but don't fail if Redis not initialized
+            try:
+                self.cache = get_cache_manager()
+            except Exception as e:
+                log.warning(f"Cache manager not available: {e}. Cache operations will be skipped.")
+                self.cache = None
 
     # ==========================================================================
     # PostgreSQL (Auth Data) Methods - CREATE/UPDATE for Projectors

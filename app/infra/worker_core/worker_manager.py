@@ -160,7 +160,7 @@ class WorkerManager:
 
             # Initialize event bus
             redpanda_adapter = RedpandaTransportAdapter(
-                bootstrap_servers=os.getenv("REDPANDA_BOOTSTRAP_SERVERS", "localhost:9092"),
+                bootstrap_servers=os.getenv("REDPANDA_BOOTSTRAP_SERVERS", "localhost:29092"),
                 client_id=f"manager-{self.config.manager_id}",
                 producer_config={
                     'acks': 'all',

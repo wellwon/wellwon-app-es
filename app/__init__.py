@@ -58,7 +58,7 @@ def _get_version() -> str:
         pass  # Fallback failed
 
     # Last resort fallback (should never happen)
-    return "0.5.1-unknown"
+    return "0.1.0-unknown"
 
 
 __version__: str = _get_version()

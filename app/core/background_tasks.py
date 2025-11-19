@@ -55,7 +55,6 @@ async def reconciliation_task(app_instance: FastAPI) -> None:
     - Events in KurrentDB (EventStore) but NOT in outbox table
     - Old pending events stuck in outbox
 
-    Part of TRUE Exactly-Once Implementation (2025-11-13).
     Runs every 6 hours, checks last 24 hours of events.
     """
     global _stop_requested
@@ -99,130 +98,6 @@ async def reconciliation_task(app_instance: FastAPI) -> None:
             await asyncio.sleep(300)  # 5 min backoff on error
 
 
-async def _streaming_restoration_task(adapter_monitoring_service, query_bus) -> None:
-    """
-    Background task for streaming restoration after server restart.
-
-    Restores broker streaming for ALL connected brokers to ensure data integrity.
-    This prevents race conditions and ensures order fills are never missed.
-
-    PROTOCOL-AGNOSTIC: Works with all broker protocols:
-    - Alpaca: WebSocket streaming
-    - TradeStation: HTTP Chunks (Server-Sent Events)
-    - Virtual: Simulated streaming
-
-    Critical for:
-    - Order fill tracking (real-time via broker streaming)
-    - Position tracking and pyramiding
-    - Risk management
-    - P&L calculations
-
-    Runs AFTER server startup complete (not during startup phase).
-
-    REFACTORED (Phase 2): Now uses AdapterMonitoringService.restore_streaming_for_user()
-    which delegates to StreamingLifecycleManager for proper separation of concerns.
-    """
-    try:
-        # CRITICAL FIX: Wait longer for all services to be ready
-        # This prevents race conditions with WSE connections from frontend
-        # that also try to create adapters on user login
-        await asyncio.sleep(3.0)
-
-        logger.info("Starting streaming restoration for all connected brokers...")
-
-        # Query for ALL connected brokers (regardless of automations or login status)
-        # from app.broker_connection.queries import GetAllConnectionsQuery
-
-        query = GetAllConnectionsQuery(
-            only_active=True,  # Only get connected brokers
-            include_disconnected=False  # Exclude disconnected brokers
-        )
-        all_connections = await query_bus.query(query)
-
-        if not all_connections:
-            logger.info("No connected brokers found, skipping streaming restoration")
-            return
-
-        # Extract unique user IDs
-        unique_users = {}
-        for conn in all_connections:
-            # Skip Virtual Broker - doesn't use real streaming (Redis-based simulation)
-            if conn.broker_id == "virtual":
-                continue
-
-            user_id = conn.user_id
-            if user_id not in unique_users:
-                unique_users[user_id] = []
-            unique_users[user_id].append({
-                'broker_id': conn.broker_id,
-                'environment': conn.environment,
-                'connection_id': conn.id
-            })
-
-        logger.info(
-            f"Found {len(all_connections)} connected broker(s) across {len(unique_users)} user(s)"
-        )
-
-        # Restore streaming for each user (REFACTORED: Now uses AdapterMonitoringService)
-        total_restored = 0
-        total_monitors_started = 0
-        for user_id, connections in unique_users.items():
-            try:
-                # Restore streaming connections (market data + trading data)
-                await adapter_monitoring_service.restore_streaming_for_user(user_id)
-
-                # CRITICAL: Also start continuous monitoring (health checks)
-                # This ensures broker_health_update and broker_streaming_update are published every 30s
-                # Best practice: Startup initialization pattern (not event-driven)
-                monitor_ids = await adapter_monitoring_service.start_user_monitoring(user_id)
-                total_monitors_started += len(monitor_ids)
-
-                logger.info(
-                    f"Started {len(monitor_ids)} continuous monitors for user {user_id} "
-                    f"(REST API + Streaming health checks)"
-                )
-
-                # Log each restored connection
-                for conn_info in connections:
-                    logger.info(
-                        f"Restored streaming for user {user_id}: "
-                        f"{conn_info['broker_id']} ({conn_info['environment']}) - "
-                        f"connection: {conn_info['connection_id']}"
-                    )
-
-                total_restored += len(connections)
-
-            except Exception as e:
-                # CRITICAL FIX: Gracefully handle errors during restoration
-                # This prevents one failed adapter from crashing the entire restoration
-                # Common errors: lock contention, missing credentials, network issues
-                error_msg = str(e)
-
-                # Credentials not loaded yet - this is EXPECTED after restart
-                # They will be loaded when user logs in
-                if "No authentication credentials" in error_msg or "credentials" in error_msg.lower():
-                    logger.info(
-                        f"Skipped streaming restoration for user {user_id} "
-                        f"({len(connections)} connection(s)) - credentials not yet loaded. "
-                        f"Streaming will be established when user logs in."
-                    )
-                else:
-                    # Other errors (network, lock contention, etc.) - log as warning
-                    logger.warning(
-                        f"Skipped streaming restoration for user {user_id} "
-                        f"({len(connections)} connection(s)): {e}"
-                    )
-                    logger.debug(f"Restoration error details for user {user_id}", exc_info=True)
-
-        logger.info(
-            f"Streaming restoration complete: restored streaming for "
-            f"{total_restored} connection(s) across {len(unique_users)} user(s)"
-        )
-
-    except Exception as e:
-        logger.error(f"Error during streaming restoration: {e}", exc_info=True)
-
-
 async def start_background_tasks(app: FastAPI) -> None:
     """Start all background tasks"""
     global _stop_requested
@@ -240,24 +115,6 @@ async def start_background_tasks(app: FastAPI) -> None:
         reconciliation_task(app)
     )
     logger.info("EventStore reconciliation task started (interval=6h, lookback=24h)")
-
-    # Start streaming restoration task for ALL connected brokers (REFACTORED: Phase 2)
-    if (hasattr(app.state, 'adapter_monitoring_service') and app.state.adapter_monitoring_service and
-        hasattr(app.state, 'query_bus') and app.state.query_bus):
-        app.state.streaming_restoration_task = asyncio.create_task(
-            _streaming_restoration_task(
-                adapter_monitoring_service=app.state.adapter_monitoring_service,
-                query_bus=app.state.query_bus
-            )
-        )
-        logger.info("Streaming restoration task started for all connected brokers (using AdapterMonitoringService)")
-
-    # Add other background tasks here as needed
-    # Example:
-    # if hasattr(app.state, 'monitoring_service') and app.state.monitoring_service:
-    #     app.state.monitoring_task = asyncio.create_task(
-    #         monitor_system_health(app)
-    #     )
 
 
 async def stop_background_tasks(app: FastAPI) -> None:
@@ -283,16 +140,6 @@ async def stop_background_tasks(app: FastAPI) -> None:
             pass
         logger.info("Reconciliation task stopped")
 
-    # Cancel streaming restoration task (if still running)
-    if hasattr(app.state, 'streaming_restoration_task') and app.state.streaming_restoration_task:
-        if not app.state.streaming_restoration_task.done():
-            app.state.streaming_restoration_task.cancel()
-            try:
-                await app.state.streaming_restoration_task
-            except asyncio.CancelledError:
-                pass
-            logger.info("Streaming restoration task stopped")
-
     # Stop outbox publisher
     if hasattr(app.state, 'outbox_publisher') and app.state.outbox_publisher:
         try:
@@ -300,6 +147,3 @@ async def stop_background_tasks(app: FastAPI) -> None:
             logger.info("Outbox publisher stopped")
         except Exception as e:
             logger.error(f"Error stopping outbox publisher: {e}")
-
-    # Cancel other background tasks here
-    # Add similar cleanup for any other background tasks

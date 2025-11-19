@@ -15,12 +15,12 @@ export interface Profile {
   email_verified: boolean;
   mfa_enabled: boolean;
   user_number?: number;
+  user_type?: string;
   created_at: string;
   updated_at: string;
   last_login: string | null;
   last_password_change: string | null;
   security_alerts_enabled: boolean;
-  connected_brokers: string[];
   active_sessions_count: number;
 }
 

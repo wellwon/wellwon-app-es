@@ -2,16 +2,14 @@
 # =============================================================================
 # File: app/core/shutdown.py
 # Description: Graceful shutdown logic for all services
-# UPDATED: Added DLQ Service shutdown
 # =============================================================================
 
-import os
 import asyncio
 import logging
 from typing import Any
 from app.core.fastapi_types import FastAPI
 
-from app.infra.persistence.pg_client import close_db_pool, close_vb
+from app.infra.persistence.pg_client import close_db_pool
 from app.infra.persistence.redis_client import close_global_client as close_redis
 
 logger = logging.getLogger("wellwon.shutdown")
@@ -71,25 +69,17 @@ async def shutdown_application_services(app: FastAPI) -> None:
 
     # Shutdown services in reverse order of initialization
     services_to_shutdown = [
-        ("data_integrity_monitor", "Data Integrity Monitor"),
         ("projection_rebuilder", "Projection Rebuilder"),
         ("wse_domain_publisher", "WSE Domain Publisher"),
-        ("market_data_service", "Platform Market Data Service"),  # NEW - Platform market data coordinator
-        ("wse_market_data_publisher", "WSE Market Data Publisher"),  # NEW - WebSocket market data publisher
-        # NOTE: BrokerStreamingService merged into BrokerOperationService
-        ("virtual_market_data_service", "Virtual Market Data Service"),
-        ("virtual_broker_service", "Virtual Broker Service"),
+        ("wse_snapshot_publisher", "WSE Snapshot Publisher"),
         ("saga_service", "Saga Service"),
-        ("adapter_monitoring_service", "Broker Monitoring Service"),
-        ("broker_operation_service", "Broker Operation Service"),  # Handles streaming cleanup
-        ("broker_auth_service", "Broker Authentication Service"),
     ]
 
     for attr_name, service_name in services_to_shutdown:
         service = getattr(app.state, attr_name, None)
         if service and hasattr(service, 'shutdown'):
             try:
-                # Add timeout to prevent hanging (especially for saga_service with Kafka consumers)
+                # Add timeout to prevent hanging
                 async with asyncio.timeout(10.0):
                     await service.shutdown()
                 logger.info(f"{service_name} shut down")
@@ -97,24 +87,6 @@ async def shutdown_application_services(app: FastAPI) -> None:
                 logger.error(f"{service_name} shutdown timed out after 10s, continuing...")
             except Exception as e:
                 logger.error(f"Error shutting down {service_name}: {e}")
-
-    # Special case: Adapter pool with extended timeout
-    adapter_pool = getattr(app.state, "adapter_pool", None)
-    if adapter_pool and hasattr(adapter_pool, 'shutdown'):
-        try:
-            # Adapter pool needs more time to clean up connections
-            async with asyncio.timeout(15.0):
-                # Try to call shutdown - handle both with and without timeout parameter
-                try:
-                    await adapter_pool.shutdown(timeout=10.0)
-                except TypeError:
-                    # If timeout parameter not supported, call without it
-                    await adapter_pool.shutdown()
-            logger.info("Adapter Pool shut down")
-        except TimeoutError:
-            logger.error("Adapter Pool shutdown timed out after 15s, forcing cleanup")
-        except Exception as pool_error:
-            logger.error(f"Error shutting down adapter pool: {pool_error}")
 
 
 async def shutdown_infrastructure_services(app: FastAPI) -> None:
@@ -183,22 +155,6 @@ async def shutdown_databases(app: FastAPI) -> None:
         logger.info("Main database pool closed")
     except Exception as main_db_error:
         logger.error(f"Error closing main database pool: {main_db_error}")
-
-    # Close VB database pool if it was initialized
-    # Check if VB database was initialized by looking for a flag or service
-    vb_initialized = (
-            getattr(app.state, 'virtual_broker_service', None) is not None or
-            os.getenv("ENABLE_VB_DATABASE", "true").lower() == "true"
-    )
-
-    if vb_initialized:
-        try:
-            await close_vb()
-            logger.info("Virtual Broker database pool closed")
-        except Exception as vb_db_close_error:
-            # Only log if it's not a "pool not initialized" error
-            if "not initialized" not in str(vb_db_close_error).lower():
-                logger.error(f"Error closing VB database pool: {vb_db_close_error}")
 
 
 async def shutdown_redis() -> None:

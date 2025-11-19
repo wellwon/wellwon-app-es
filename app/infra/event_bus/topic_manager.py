@@ -108,7 +108,7 @@ class TopicManager:
     Manages Redpanda/Kafka topics with best practices.
 
     Usage:
-        topic_manager = TopicManager("localhost:9092")
+        topic_manager = TopicManager("localhost:29092")
         await topic_manager.ensure_topics_exist()
         await topic_manager.validate_retention_policies()
 
@@ -144,48 +144,6 @@ class TopicManager:
             segment_ms=7 * 24 * 60 * 60 * 1000,
         ),
         TopicSpec(
-            name="eventstore.entity-events",
-            partitions=6,
-            replication_factor=3,
-            retention_policy=RetentionPolicy.EVENT_STORE,
-            cleanup_policy="delete",
-        ),
-        TopicSpec(
-            name="eventstore.account-events",
-            partitions=6,
-            replication_factor=3,
-            retention_policy=RetentionPolicy.EVENT_STORE,
-            cleanup_policy="delete",
-        ),
-        TopicSpec(
-            name="eventstore.automation-events",
-            partitions=12,  # High volume expected
-            replication_factor=3,
-            retention_policy=RetentionPolicy.EVENT_STORE,
-            cleanup_policy="delete",
-        ),
-        TopicSpec(
-            name="eventstore.order-events",
-            partitions=12,
-            replication_factor=3,
-            retention_policy=RetentionPolicy.EVENT_STORE,
-            cleanup_policy="delete",
-        ),
-        TopicSpec(
-            name="eventstore.position-events",
-            partitions=12,
-            replication_factor=3,
-            retention_policy=RetentionPolicy.EVENT_STORE,
-            cleanup_policy="delete",
-        ),
-        TopicSpec(
-            name="eventstore.virtual-broker-events",
-            partitions=12,
-            replication_factor=3,
-            retention_policy=RetentionPolicy.EVENT_STORE,
-            cleanup_policy="delete",
-        ),
-        TopicSpec(
             name="eventstore.saga-events",
             partitions=6,
             replication_factor=3,
@@ -205,30 +163,6 @@ class TopicManager:
             compression_type="producer",  # Client-side compression (zstd recommended)
             segment_ms=7 * 24 * 60 * 60 * 1000,  # 7-day segments
         ),
-        TopicSpec(
-            name="eventstore.snapshots-broker-account",
-            partitions=3,
-            replication_factor=3,
-            retention_policy=RetentionPolicy.SNAPSHOT,
-            cleanup_policy="compact,delete",
-            compression_type="producer",
-        ),
-        TopicSpec(
-            name="eventstore.snapshots-automation",
-            partitions=6,  # Higher for automation volume
-            replication_factor=3,
-            retention_policy=RetentionPolicy.SNAPSHOT,
-            cleanup_policy="compact,delete",
-            compression_type="producer",
-        ),
-        TopicSpec(
-            name="eventstore.snapshots-virtual-broker",
-            partitions=6,
-            replication_factor=3,
-            retention_policy=RetentionPolicy.SNAPSHOT,
-            cleanup_policy="compact,delete",
-            compression_type="producer",
-        ),
 
         # =====================================================================
         # TRANSPORT TOPICS (7-day retention)
@@ -240,54 +174,6 @@ class TopicManager:
             retention_policy=RetentionPolicy.TRANSPORT,
             cleanup_policy="delete",
             compression_type="producer",  # Use producer compression (lz4)
-        ),
-        TopicSpec(
-            name="transport.entity-events",
-            partitions=6,
-            replication_factor=3,
-            retention_policy=RetentionPolicy.TRANSPORT,
-            cleanup_policy="delete",
-            compression_type="producer",
-        ),
-        TopicSpec(
-            name="transport.account-events",
-            partitions=6,
-            replication_factor=3,
-            retention_policy=RetentionPolicy.TRANSPORT,
-            cleanup_policy="delete",
-            compression_type="producer",
-        ),
-        TopicSpec(
-            name="transport.automation-events",
-            partitions=12,  # High volume
-            replication_factor=3,
-            retention_policy=RetentionPolicy.TRANSPORT,
-            cleanup_policy="delete",
-            compression_type="producer",
-        ),
-        TopicSpec(
-            name="transport.order-events",
-            partitions=12,
-            replication_factor=3,
-            retention_policy=RetentionPolicy.TRANSPORT,
-            cleanup_policy="delete",
-            compression_type="producer",
-        ),
-        TopicSpec(
-            name="transport.position-events",
-            partitions=12,
-            replication_factor=3,
-            retention_policy=RetentionPolicy.TRANSPORT,
-            cleanup_policy="delete",
-            compression_type="producer",
-        ),
-        TopicSpec(
-            name="transport.virtual-broker-events",
-            partitions=12,
-            replication_factor=3,
-            retention_policy=RetentionPolicy.TRANSPORT,
-            cleanup_policy="delete",
-            compression_type="producer",
         ),
     ]
 
@@ -564,7 +450,7 @@ def create_topic_manager(
     Factory function to create TopicManager.
 
     Usage:
-        topic_manager = create_topic_manager("localhost:9092")
+        topic_manager = create_topic_manager("localhost:29092")
         topic_manager.ensure_topics_exist()
     """
     return TopicManager(

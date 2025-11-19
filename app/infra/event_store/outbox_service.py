@@ -96,48 +96,14 @@ class TransportOutboxService:
     UPDATED: Integrated with centralized DLQ Service
     """
 
-    # Default transport topic mappings - Virtual Broker events now included
+    # Default transport topic mappings
     DEFAULT_TRANSPORT_TOPICS = {
         # User domain events
         "UserAccountCreated": "transport.user-account-events",
         "UserPasswordChanged": "transport.user-account-events",
         "UserAccountDeleted": "transport.user-account-events",
         "UserEmailVerified": "transport.user-account-events",
-
-        # Broker connection events
-        "BrokerConnectionInitiated": "transport.entity-events",
-        "BrokerConnectionEstablished": "transport.entity-events",
-        "BrokerConnectionAttemptFailed": "transport.entity-events",
-        "BrokerDisconnected": "transport.entity-events",
-        "BrokerConnectionHealthUpdated": "transport.entity-events",
-        "BrokerTokensSuccessfullyStored": "transport.entity-events",
-        "BrokerConnectionHealthChecked": "transport.entity-events",
-
-        # Account events
-        "BrokerAccountLinked": "transport.account-events",
-        "AccountDataFromBrokerUpdated": "transport.account-events",
-
-        # Order events
-        "OrderPlaced": "transport.order-events",
-        "OrderFilled": "transport.order-events",
-        "OrderCancelled": "transport.order-events",
-
-        # Position events
-        "PositionOpened": "transport.position-events",
-        "PositionClosed": "transport.position-events",
-        "PositionUpdated": "transport.position-events",
-
-        # Virtual Broker events - FIXED: Now included in transport mappings
-        "VirtualAccountCreated": "transport.virtual-broker-events",
-        "VirtualAccountsDeleted": "transport.virtual-broker-events",
-        "VirtualAccountBalanceUpdated": "transport.virtual-broker-events",
-        "VirtualOrderPlaced": "transport.virtual-broker-events",
-        "VirtualOrderExecuted": "transport.virtual-broker-events",
-        "VirtualOrderCancelled": "transport.virtual-broker-events",
-        "VirtualPositionOpened": "transport.virtual-broker-events",
-        "VirtualPositionClosed": "transport.virtual-broker-events",
-        "VirtualPositionUpdated": "transport.virtual-broker-events",
-        # Add more Virtual events as needed
+        "UserProfileUpdated": "transport.user-account-events",
     }
 
     def __init__(

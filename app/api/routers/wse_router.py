@@ -28,8 +28,6 @@ router = APIRouter()
 # Constants
 PROTOCOL_VERSION = 2
 DEFAULT_TOPICS = [
-    'broker_connection_events',
-    'broker_account_events',
     'user_account_events',
     'system_events',
     'monitoring_events'

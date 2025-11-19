@@ -33,7 +33,7 @@ class EventStoreConfig(BaseSettings):
     # =========================================================================
     # Connection Settings
     # =========================================================================
-    connection_string: str = "esdb://localhost:2113?tls=false"
+    connection_string: str = "esdb://localhost:12113?tls=false"
     """
     KurrentDB connection string.
 
@@ -413,7 +413,7 @@ class EventStoreConfig(BaseSettings):
         Returns:
             EventStoreConfig instance
         """
-        connection_string = os.getenv("KURRENTDB_CONNECTION_STRING", "esdb://localhost:2113?tls=false")
+        connection_string = os.getenv("KURRENTDB_CONNECTION_STRING", "esdb://localhost:12113?tls=false")
 
         return cls(
             connection_string=connection_string,

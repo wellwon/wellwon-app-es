@@ -97,8 +97,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           last_login: profileData.last_login,
           last_password_change: profileData.last_password_change,
           security_alerts_enabled: profileData.security_alerts_enabled,
-          connected_brokers: profileData.connected_brokers,
           active_sessions_count: profileData.active_sessions_count,
+          // WellWon fields
+          first_name: profileData.first_name || null,
+          last_name: profileData.last_name || null,
+          avatar_url: profileData.avatar_url || null,
+          bio: profileData.bio || null,
+          phone: profileData.phone || null,
         };
         setProfile(mappedProfile);
       }
@@ -173,8 +178,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             last_login: profileData.last_login,
             last_password_change: profileData.last_password_change,
             security_alerts_enabled: profileData.security_alerts_enabled,
-            connected_brokers: profileData.connected_brokers,
             active_sessions_count: profileData.active_sessions_count,
+            // WellWon fields
+            first_name: profileData.first_name || null,
+            last_name: profileData.last_name || null,
+            avatar_url: profileData.avatar_url || null,
+            bio: profileData.bio || null,
+            phone: profileData.phone || null,
           };
 
           setUser(userObj);
@@ -268,8 +278,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           last_login: profileData.last_login,
           last_password_change: profileData.last_password_change,
           security_alerts_enabled: profileData.security_alerts_enabled,
-          connected_brokers: profileData.connected_brokers,
           active_sessions_count: profileData.active_sessions_count,
+          // WellWon fields
+          first_name: profileData.first_name || null,
+          last_name: profileData.last_name || null,
+          avatar_url: profileData.avatar_url || null,
+          bio: profileData.bio || null,
+          phone: profileData.phone || null,
         };
 
         setUser(userObj);

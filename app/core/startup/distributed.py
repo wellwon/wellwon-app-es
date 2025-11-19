@@ -2,7 +2,6 @@
 # =============================================================================
 # File: app/core/startup/distributed.py
 # Description: Initialize distributed features (Event Store, locks, outbox, DLQ)
-# UPDATED: All features enabled by default, no environment variables
 # =============================================================================
 
 import asyncio
@@ -15,6 +14,7 @@ from app.infra.reliability.distributed_lock import DistributedLockManager
 from app.infra.event_store.sequence_tracker import EventSequenceTracker
 from app.infra.event_store.outbox_service import create_transport_outbox, OutboxPublisher
 from app.infra.event_store.dlq_service import create_dlq_service
+from app.infra.event_store.stream_archival_service import create_and_start_archival_service
 
 # Import decorator-based sync projection system
 from app.infra.event_store.sync_decorators import auto_register_sync_projections
@@ -99,22 +99,14 @@ async def initialize_dlq_service(app: FastAPI) -> None:
 async def initialize_outbox_service(app: FastAPI) -> None:
     """Initialize transactional outbox pattern"""
 
-    # Define custom event-to-topic mappings
+    # Define custom event-to-topic mappings for WellWon domains
     custom_mappings = {
         "UserAccountCreated": "transport.user-account-events",
         "UserDeleted": "transport.user-account-events",
-        "BrokerConnectionEstablished": "transport.entity-events",
-        "BrokerConnectionRestored": "transport.entity-events",  # ADDED: Connection restoration
-        "BrokerDisconnected": "transport.entity-events",
-        "BrokerAccountLinked": "transport.account-events",
-        "OrderPlaced": "transport.order-events",
-        "PositionOpened": "transport.position-events",
+        "UserProfileUpdated": "transport.user-account-events",
         "SagaStarted": "saga.events",
         "SagaCompleted": "saga.events",
         "SagaFailed": "saga.events",
-        "AccountRecoveryInitiated": "saga.events",
-        "AccountRecoveryCompleted": "saga.events",
-        "AccountRecoveryFailed": "saga.events",
     }
 
     # Create outbox service with DLQ support
@@ -138,17 +130,17 @@ async def start_outbox_publisher(app: FastAPI) -> None:
     sync_event_types = get_all_sync_events()
 
     # Create and start the outbox publisher
-    # ENHANCED (2025-11-14): Uses PostgreSQL LISTEN/NOTIFY for near-zero latency
+    # Uses PostgreSQL LISTEN/NOTIFY for near-zero latency
     outbox_publisher = OutboxPublisher(
         outbox_service=app.state.outbox_service,
         poll_interval_seconds=0.1,  # 100ms fallback polling
         batch_size=50,
         synchronous_mode=True,  # Always enabled
         synchronous_event_types=sync_event_types,
-        use_listen_notify=True  # BEST PRACTICE: Instant processing via PostgreSQL NOTIFY
+        use_listen_notify=True  # Instant processing via PostgreSQL NOTIFY
     )
 
-    # FIXED: Start publisher as background task, not blocking!
+    # Start publisher as background task
     asyncio.create_task(outbox_publisher.start())
     app.state.outbox_publisher = outbox_publisher
 
@@ -161,14 +153,12 @@ async def start_outbox_publisher(app: FastAPI) -> None:
 async def initialize_event_store(app: FastAPI) -> None:
     """Initialize KurrentDB event store with all distributed features"""
     from app.infra.event_store.projection_checkpoint_service import create_projection_checkpoint_service
-    from app.infra.persistence import pg_client  # Import pg_client module (FIXED 2025-11-14)
+    from app.infra.persistence import pg_client
 
     # Load KurrentDB configuration from environment
     esdb_config = EventStoreConfig.from_env()
 
-    # REFACTORED (2025-11-14): Create checkpoint service instead of passing pg_client directly
-    # This separates checkpoint persistence logic from EventStore (like OutboxService pattern)
-    # pg_client is a module with async database helpers (get_pool, execute, fetchrow, etc.)
+    # Create checkpoint service
     checkpoint_service = create_projection_checkpoint_service(pg_client=pg_client)
 
     # Create KurrentDB event store with config object
@@ -178,7 +168,7 @@ async def initialize_event_store(app: FastAPI) -> None:
         saga_manager=None,  # Will be set by saga service
         sequence_tracker=app.state.sequence_tracker,
         dlq_service=app.state.dlq_service if hasattr(app.state, 'dlq_service') else None,
-        checkpoint_service=checkpoint_service,  # REFACTORED: Use service instead of pg_client
+        checkpoint_service=checkpoint_service,
         cache_manager=app.state.cache_manager if hasattr(app.state, 'cache_manager') else None
     )
 
@@ -212,15 +202,43 @@ async def initialize_event_store(app: FastAPI) -> None:
     else:
         logger.info("Snapshots disabled")
 
+    # Initialize Stream Archival Service
+    # Archives EventStore streams when entities are deleted from read model
+    await initialize_archival_service(app)
+
+
+async def initialize_archival_service(app: FastAPI) -> None:
+    """
+    Initialize Stream Archival Service.
+
+    Archives EventStore streams when entities are deleted from read model,
+    keeping PostgreSQL and EventStore in sync.
+    """
+    if not hasattr(app.state, 'event_bus') or not app.state.event_bus:
+        logger.warning("EventBus not available, stream archival service disabled")
+        return
+
+    if not hasattr(app.state, 'event_store') or not app.state.event_store:
+        logger.warning("EventStore not available, stream archival service disabled")
+        return
+
+    try:
+        archival_service = await create_and_start_archival_service(
+            event_bus=app.state.event_bus,
+            event_store=app.state.event_store
+        )
+        app.state.archival_service = archival_service
+        logger.info("Stream Archival Service initialized and started")
+    except Exception as e:
+        logger.warning(f"Failed to start Stream Archival Service: {e}")
+        # Non-critical, don't raise
+
 
 async def register_sync_projections_phase(app: FastAPI) -> None:
     """
     Register synchronous projections using decorator system.
     This is called after all services and projectors are initialized.
     """
-
-    # Always enabled
-    enable_sync_projections = True
 
     if not app.state.event_store:
         logger.info("Event store not available for sync projections")
@@ -231,10 +249,6 @@ async def register_sync_projections_phase(app: FastAPI) -> None:
     # Import all projector modules to trigger decorator registration
     modules_to_import = [
         "app.user_account.projectors",
-        "app.broker_connection.projectors",
-        "app.broker_account.projectors",
-        "app.virtual_broker.projectors",
-        "app.order.projectors"
     ]
 
     for module in modules_to_import:
@@ -252,52 +266,6 @@ async def register_sync_projections_phase(app: FastAPI) -> None:
         from app.user_account.projectors import UserAccountProjector
         projector_instances["user_account"] = UserAccountProjector(
             app.state.user_account_read_repo
-        )
-
-    # Broker Connection Projector
-    if hasattr(app.state, 'broker_connection_state') and hasattr(app.state, 'broker_auth_service'):
-        # from app.broker_connection.projectors import BrokerConnectionProjector
-        projector_instances["broker_connection"] = BrokerConnectionProjector(
-            app.state.broker_connection_state,
-            app.state.broker_auth_service
-        )
-
-    # Broker Account Projector
-    if hasattr(app.state, 'account_state'):
-        # from app.broker_account.projectors import BrokerAccountProjector
-        from app.infra.persistence.cache_manager import get_cache_manager
-
-        # CQRS COMPLIANCE (Nov 11, 2025): Removed reactive_event_bus from projector
-        # WSEDomainPublisher handles all domain event forwarding to WebSocket
-        # Cache manager kept for Redis FastPath optimization (read side performance)
-
-        cache_manager = get_cache_manager()
-
-        projector_instances["broker_account"] = BrokerAccountProjector(
-            broker_account_read_repo=app.state.account_state,
-            event_bus=app.state.event_bus,
-            cache_manager=cache_manager  # Redis FastPath (2025-11-10)
-        )
-
-    # Virtual Broker Projector
-    if hasattr(app.state, 'virtual_broker_read_repo'):
-        from app.virtual_broker.projectors import VirtualBrokerProjectorService
-        from app.infra.persistence.cache_manager import get_cache_manager
-
-        # Get cache manager for Redis fast path (2025-11-10)
-        cache_manager = get_cache_manager()
-
-        projector_instances["virtual_broker"] = VirtualBrokerProjectorService(
-            app,
-            app.state.virtual_broker_read_repo,
-            cache_manager=cache_manager  # ADDED (2025-11-10)
-        )
-
-    # Order Projector
-    if hasattr(app.state, 'order_read_repo'):
-        from app.order.projectors import OrderProjector
-        projector_instances["order"] = OrderProjector(
-            app.state.order_read_repo
         )
 
     # Store projector instances in app state for debugging

@@ -26,7 +26,7 @@ from app.core.startup.cqrs import (
 )
 
 from app.core.startup.adapters import (
-    initialize_broker_adapters
+    initialize_adapters
 )
 
 __all__ = [
@@ -35,7 +35,7 @@ __all__ = [
     "initialize_event_infrastructure",
     "initialize_read_repositories",
     "initialize_distributed_features",
-    "initialize_broker_adapters",
+    "initialize_adapters",
     "initialize_services",
     "initialize_cqrs_and_handlers",
     "initialize_optional_services",

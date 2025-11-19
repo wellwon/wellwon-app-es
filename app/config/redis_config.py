@@ -41,8 +41,8 @@ class RedisConfig(BaseSettings):
     # =========================================================================
 
     redis_url: str = Field(
-        default="redis://localhost:6379/0",
-        description="Redis connection URL"
+        default="redis://localhost:6379/1",
+        description="Redis connection URL (db 1 for WellWon)"
     )
 
     redis_mode: RedisMode = Field(

@@ -70,9 +70,6 @@ class EventMetadata:
     compressed: bool = False
     encrypted: bool = False
     user_id: Optional[str] = None
-    broker_connection_id: Optional[str] = None
-    account_id: Optional[str] = None
-    strategy_id: Optional[str] = None
 
 
 @dataclass

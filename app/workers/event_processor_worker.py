@@ -82,7 +82,8 @@ class EventProcessingWorker(BaseWorker):
         super().__init__(WorkerType.EVENT_PROCESSOR, config)
 
         # EventProcessor-specific components
-        self.domain_registry = create_domain_registry()
+        # domain_registry created in _setup_infrastructure_worker_specific after Redis init
+        self.domain_registry = None
         self.event_processor: Optional[EventProcessor] = None
         self.consumer_manager: Optional[ConsumerManager] = None
 
@@ -130,6 +131,10 @@ class EventProcessingWorker(BaseWorker):
         """Setup event processing components with sync projections awareness"""
         self.logger.info("Setting up event processing...")
 
+        # Create domain registry NOW (after Redis is initialized)
+        self.domain_registry = create_domain_registry()
+        self.logger.info("Domain registry created")
+
         # Initialize domain projectors with cache manager
         # The domain registry will create read repos with cache manager internally
         await self.domain_registry.initialize_all(
@@ -139,23 +144,20 @@ class EventProcessingWorker(BaseWorker):
         )
 
         # Collect all sync events from domain registry
-        self.sync_events_registry = self.domain_registry.get_all_sync_events()
+        self.sync_events_registry = set(self.domain_registry.get_all_sync_events())
         self.logger.info(f"Loaded {len(self.sync_events_registry)} sync events from domain registry")
 
-        # Log sync events by domain for visibility
-        sync_events_by_domain = {}
-        for domain in self.domain_registry.get_enabled_domains():
-            if domain.sync_events:
-                sync_events_by_domain[domain.name] = len(domain.sync_events)
-                # Log first few events for each domain
-                sample_events = list(domain.sync_events)[:5]
-                self.logger.debug(
-                    f"Domain '{domain.name}' sync events ({len(domain.sync_events)} total): "
-                    f"{sample_events}{'...' if len(domain.sync_events) > 5 else ''}"
-                )
+        # Log sync events for visibility
+        enabled_domains = self.domain_registry.get_enabled_domains()
+        sync_events_by_domain = {domain: len(self.sync_events_registry) for domain in enabled_domains}
 
-        if sync_events_by_domain:
-            self.logger.info(f"Sync events by domain: {sync_events_by_domain}")
+        if self.sync_events_registry:
+            sample_events = list(self.sync_events_registry)[:5]
+            self.logger.debug(
+                f"Sync events ({len(self.sync_events_registry)} total): "
+                f"{sample_events}{'...' if len(self.sync_events_registry) > 5 else ''}"
+            )
+            self.logger.info(f"Enabled domains: {enabled_domains}")
 
         # Create event processor with CQRS buses and sync events
         self.event_processor = EventProcessor(
@@ -632,11 +634,7 @@ class EventProcessingWorker(BaseWorker):
             },
             "sync_projections": {
                 "total_sync_events": len(self.sync_events_registry),
-                "sync_events_by_domain": {
-                    domain_name: len(domain.sync_events)
-                    for domain_name, domain in self.domain_registry._domains.items()
-                    if domain.sync_events
-                },
+                "enabled_domains": self.domain_registry.get_enabled_domains(),
                 "sync_monitoring_enabled": self.config.enable_sync_projection_monitoring,
                 "sync_events_processed_async": projection_metrics.get('sync_events_skipped', 0),
                 "sync_event_warnings": len(self.sync_event_warnings_logged),

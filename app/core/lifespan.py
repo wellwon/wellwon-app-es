@@ -2,10 +2,8 @@
 # =============================================================================
 # File: app/core/lifespan.py
 # Description: Application lifespan management (startup/shutdown)
-# UPDATED: Added sync projection registration using decorator system
 # =============================================================================
 
-import os
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -26,7 +24,6 @@ from app.core.startup.services import (
    initialize_optional_services
 )
 from app.core.startup.distributed import initialize_distributed_features, register_sync_projections_phase
-from app.core.startup.adapters import initialize_broker_adapters, configure_adapter_factory_services
 from app.core.startup.cqrs import initialize_cqrs_and_handlers
 from app.core.shutdown import shutdown_all_services
 
@@ -48,59 +45,49 @@ async def lifespan(app_instance: FastAPI):
    try:
        # Phase 1: Core Infrastructure
        logger.info("Phase 1: Initializing core infrastructure...")
-       vb_database_initialized = await initialize_databases(app_instance)
+       await initialize_databases(app_instance)
        await initialize_cache(app_instance)
        await initialize_event_infrastructure(app_instance)
 
-       # Phase 2: Read Repositories (still needed for non-CQRS services)
+       # Phase 2: Read Repositories
        logger.info("Phase 2: Initializing read repositories...")
-       await initialize_read_repositories(app_instance, vb_database_initialized)
+       await initialize_read_repositories(app_instance)
 
        # Phase 3: Distributed Features (Event Store, Locks, etc.)
        logger.info("Phase 3: Initializing distributed features...")
        await initialize_distributed_features(app_instance)
 
-       # Phase 4: Broker Adapters
-       logger.info("Phase 4: Initializing broker adapters...")
-       await initialize_broker_adapters(app_instance)
-
-       # Phase 5: CQRS Infrastructure and Services
-       logger.info("Phase 5: Initializing CQRS and services...")
-       # Initialize CQRS buses first
+       # Phase 4: CQRS Infrastructure
+       logger.info("Phase 4: Initializing CQRS...")
        from app.infra.cqrs.command_bus import CommandBus
        from app.infra.cqrs.query_bus import QueryBus
 
        # Create command bus
-       # NOTE: Event Store versioning provides natural idempotency through optimistic locking
        command_bus = CommandBus()
 
        app_instance.state.command_bus = command_bus
        app_instance.state.query_bus = QueryBus(enable_caching=True)
        logger.info("CQRS buses initialized")
 
-       # Phase 6: Core Services (now can use CQRS buses)
-       logger.info("Phase 6: Initializing core services...")
-       await initialize_services(app_instance, vb_database_initialized)
+       # Phase 5: Core Services
+       logger.info("Phase 5: Initializing core services...")
+       await initialize_services(app_instance)
 
-       # Phase 6.5: Configure adapter factory with services
-       logger.info("Phase 6.5: Configuring adapter factory with services...")
-       await configure_adapter_factory_services(app_instance)
-
-       # Phase 7: CQRS Handlers and Saga Service
-       logger.info("Phase 7: Initializing CQRS handlers and saga service...")
+       # Phase 6: CQRS Handlers and Saga Service
+       logger.info("Phase 6: Initializing CQRS handlers and saga service...")
        await initialize_cqrs_and_handlers(app_instance)
 
-       # Phase 8: Optional Services (Data Integrity, Projection Rebuilder)
-       logger.info("Phase 8: Initializing optional services...")
+       # Phase 7: Optional Services (Projection Rebuilder)
+       logger.info("Phase 7: Initializing optional services...")
        await initialize_optional_services(app_instance)
 
-       # Phase 8.5: Register Synchronous Projections (NEW!)
-       logger.info("Phase 8.5: Registering synchronous projections...")
+       # Phase 8: Register Synchronous Projections
+       logger.info("Phase 8: Registering synchronous projections...")
        await register_sync_projections_phase(app_instance)
 
        # Phase 9: Database Schemas
        logger.info("Phase 9: Running database schemas...")
-       await run_database_schemas(vb_database_initialized)
+       await run_database_schemas()
 
        # Phase 10: Background Tasks
        logger.info("Phase 10: Starting background tasks...")
@@ -124,8 +111,7 @@ async def lifespan(app_instance: FastAPI):
        # Graceful shutdown with timeout to prevent hanging
        logger.info(f"WellWon v{__version__} API shutting down...")
        try:
-           # Use timeout to prevent hanging during shutdown (known aiokafka bug)
-           # This ensures Ctrl-C and reload work properly
+           # Use timeout to prevent hanging during shutdown
            async with asyncio.timeout(30.0):
                await stop_background_tasks(app_instance)
                await shutdown_all_services(app_instance)

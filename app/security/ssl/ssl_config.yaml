@@ -105,8 +105,8 @@ monitoring:
     - type: "email"
       enabled: true
       recipients:
-        - "security@tradecore.com"
-        - "devops@tradecore.com"
+        - "security@wellwon.app"
+        - "devops@wellwon.app"
 
     - type: "slack"
       enabled: true

@@ -6,19 +6,33 @@
 
 import { useQuery, useQueryClient, UseQueryOptions, QueryKey } from '@tanstack/react-query';
 import { useEffect } from 'react';
-import { useWSE } from './useWSE';
 import { logger } from '../utils/logger';
 
 /**
  * Hook that combines React Query with WSE realtime updates
  *
+ * Uses window CustomEvents dispatched by EventHandlers.ts for reactive cache invalidation.
+ * When a matching WSE event is received, the query is automatically invalidated and refetched.
+ *
  * @example
+ * // Listen for user profile updates
  * const { data, isLoading } = useWSEQuery(
- *   ['messages', chatId],
- *   () => axios.get(`/api/chats/${chatId}/messages`),
- *   'message_sent',
+ *   queryKeys.user.profile(),
+ *   () => axios.get('/api/auth/me'),
+ *   'userAccountUpdated',
  *   {
- *     invalidateOn: (event) => event.p.chat_id === chatId
+ *     invalidateOn: (eventData) => eventData.user_id === currentUserId
+ *   }
+ * );
+ *
+ * @example
+ * // Listen for multiple event types
+ * const { data } = useWSEQuery(
+ *   queryKeys.companies.list(),
+ *   () => axios.get('/api/companies'),
+ *   ['entityUpdated', 'notification'],
+ *   {
+ *     invalidateOn: (eventData) => eventData.entityType === 'company'
  *   }
  * );
  */
@@ -40,7 +54,6 @@ export function useWSEQuery<TData = unknown>(
   }
 ) {
   const queryClient = useQueryClient();
-  const wse = useWSE();
 
   // Setup React Query
   const query = useQuery({
@@ -49,25 +62,24 @@ export function useWSEQuery<TData = unknown>(
     ...options?.queryOptions
   });
 
-  // Setup WSE realtime invalidation
+  // Setup WSE realtime invalidation via window CustomEvents
   useEffect(() => {
-    if (!wse || !wse.sendMessage) {
-      // WSE not initialized yet
-      logger.debug('[useWSEQuery] WSE not ready yet');
-      return;
-    }
-
     const events = Array.isArray(wseEventTypes) ? wseEventTypes : [wseEventTypes];
     logger.debug(`[useWSEQuery] Setting up listeners for events: ${events.join(', ')}`);
 
-    const handlers: Array<{ eventType: string; handler: (event: any) => void }> = [];
+    // Create handlers for each event type
+    const handlers: Array<{ eventType: string; handler: (event: Event) => void }> = [];
 
     events.forEach(eventType => {
-      const handler = (event: any) => {
-        logger.debug(`[useWSEQuery] Received event ${eventType}`, event);
+      const handler = (event: Event) => {
+        const customEvent = event as CustomEvent;
+        const eventData = customEvent.detail;
+
+        logger.debug(`[useWSEQuery] Received event ${eventType}`, eventData);
 
         // Check if we should invalidate
-        if (!options?.invalidateOn || options.invalidateOn(event)) {
+        // Pass the event detail (payload) to the filter function
+        if (!options?.invalidateOn || options.invalidateOn(eventData)) {
           logger.info(`[useWSEQuery] Invalidating query ${JSON.stringify(queryKey)} due to ${eventType}`);
           queryClient.invalidateQueries({ queryKey });
         } else {
@@ -75,20 +87,23 @@ export function useWSEQuery<TData = unknown>(
         }
       };
 
-      // Subscribe to WSE event
-      // Note: WSE useWSE hook doesn't expose .on() method directly
-      // Events are handled through EventHandlers registration
-      // We'll use a different approach - listen to store updates
-
+      // Subscribe to WSE CustomEvent via window
+      // EventHandlers.ts dispatches events like 'userAccountUpdated', 'entityUpdated', etc.
+      window.addEventListener(eventType, handler);
       handlers.push({ eventType, handler });
+
+      logger.debug(`[useWSEQuery] Subscribed to ${eventType}`);
     });
 
-    // Cleanup
+    // Cleanup - remove all event listeners
     return () => {
       logger.debug(`[useWSEQuery] Cleaning up listeners for ${events.join(', ')}`);
-      // Cleanup would go here if we had direct event subscription
+      handlers.forEach(({ eventType, handler }) => {
+        window.removeEventListener(eventType, handler);
+        logger.debug(`[useWSEQuery] Unsubscribed from ${eventType}`);
+      });
     };
-  }, [queryKey, wseEventTypes, wse, queryClient, options?.invalidateOn]);
+  }, [queryKey, wseEventTypes, queryClient, options?.invalidateOn]);
 
   return query;
 }

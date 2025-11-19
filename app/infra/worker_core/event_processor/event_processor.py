@@ -29,9 +29,6 @@ from app.infra.worker_core.worker_config import (
 from app.infra.cqrs.command_bus import CommandBus
 from app.infra.cqrs.query_bus import QueryBus
 
-# Enum imports
-from app.infra.broker_adapters.common.adapter_enums import BrokerConnectionStatusEnum
-
 # Type checking imports
 if TYPE_CHECKING:
     from app.infra.event_store.dlq_service import DLQService
@@ -590,14 +587,13 @@ class EventProcessor:
 
         elif event_type == "BrokerConnectionHealthUpdated":
             new_status = event_dict.get("new_status")
-            # FIX (Nov 11, 2025): Use enum constant instead of uppercase comparison
-            # Status values in DB are lowercase, so convert to enum for comparison
-            if new_status and str(new_status).lower() == BrokerConnectionStatusEnum.CONNECTED:
+            # Status values in DB are lowercase
+            if new_status and str(new_status).lower() == "connected":
                 if broker_connection_id_str in self._disconnected_brokers:
                     self._disconnected_brokers.discard(broker_connection_id_str)
                     log.info(
                         f"Removed broker {broker_connection_id} from disconnected cache (health update shows connected)")
-            elif new_status and str(new_status).lower() == BrokerConnectionStatusEnum.DISCONNECTED:
+            elif new_status and str(new_status).lower() == "disconnected":
                 self._disconnected_brokers.add(broker_connection_id_str)
                 log.info(
                     f"Added broker {broker_connection_id} to disconnected cache (health update shows disconnected)")

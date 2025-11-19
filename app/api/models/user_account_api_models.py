@@ -58,26 +58,6 @@ class AuthEventType(str, Enum):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-#  BROKER CONNECTION MODELS (Moved from router)
-# ──────────────────────────────────────────────────────────────────────────────
-class BrokerEnvironmentInfo(BaseModel):
-    """Information about broker environment"""
-    environment: str
-    connected: bool
-    connection_id: str
-    last_connected: Optional[str] = None
-
-
-class ConnectedBrokerInfo(BaseModel):
-    """Model for connected broker information"""
-    broker_id: str
-    broker_name: str
-    environments: List[BrokerEnvironmentInfo] = Field(default_factory=list)
-    total_accounts: int = 0
-    connection_ids: List[str] = Field(default_factory=list)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
 #  AUTHENTICATION MODELS
 # ──────────────────────────────────────────────────────────────────────────────
 class AuthRequest(BaseModel):
@@ -212,10 +192,10 @@ class ChangePasswordPayload(BaseModel):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-#  USER PROFILE (Updated with proper broker info)
+#  USER PROFILE
 # ──────────────────────────────────────────────────────────────────────────────
 class UserProfileResponse(BaseModel):
-    """User profile information with connected brokers."""
+    """User profile information for WellWon platform."""
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     user_id: str
@@ -229,7 +209,6 @@ class UserProfileResponse(BaseModel):
     last_login: Optional[datetime] = None
     last_password_change: Optional[datetime] = None
     security_alerts_enabled: bool = True
-    connected_brokers: List[ConnectedBrokerInfo] = Field(default_factory=list)
     active_sessions_count: int = Field(default=0, description="Number of active sessions")
     preferences: Dict[str, Any] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)

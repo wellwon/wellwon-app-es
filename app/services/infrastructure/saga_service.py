@@ -276,29 +276,18 @@ class SagaService:
 
     def _register_sagas(self) -> None:
         """Register all saga types with the saga manager"""
-        from app.infra.saga.user_deletion_saga import UserDeletionSaga
-        from app.infra.saga.broker_connection_saga import BrokerConnectionSaga
-        from app.infra.saga.broker_disconnection_saga import BrokerDisconnectionSaga
-        from app.infra.saga.connection_recovery_saga import ConnectionRecoverySaga
-        from app.infra.saga.account_recovery_saga import AccountRecoverySaga
-        from app.infra.saga.order_execution_saga import OrderExecutionSaga
-        from app.infra.saga.position_management_saga import PositionManagementSaga
-        from app.infra.saga.automation_execution_saga import AutomationExecutionSaga
+        # TODO: Create WellWon-specific sagas
+        # from app.infra.saga.user_deletion_saga import UserDeletionSaga
 
         saga_types = [
-            UserDeletionSaga,
-            BrokerConnectionSaga,
-            BrokerDisconnectionSaga,
-            ConnectionRecoverySaga,  # ✅ ADDED: Connection failure recovery
-            AccountRecoverySaga,
-            OrderExecutionSaga,
-            PositionManagementSaga,
-            AutomationExecutionSaga
+            # UserDeletionSaga,  # Not yet implemented for WellWon
         ]
 
         for saga_type in saga_types:
             self.saga_manager.register_saga(saga_type)
             log.info(f"Registered saga type: {saga_type.__name__}")
+
+        log.info("No sagas registered yet - WellWon sagas to be implemented")
 
     async def _should_trigger_connection_saga(self, event: Dict[str, Any]) -> bool:
         """
@@ -378,419 +367,31 @@ class SagaService:
 
     def _configure_triggers(self) -> None:
         """Configure saga triggers with enhanced race condition protection"""
-        from app.infra.saga.user_deletion_saga import UserDeletionSaga
-        from app.infra.saga.broker_connection_saga import BrokerConnectionSaga
-        from app.infra.saga.broker_disconnection_saga import BrokerDisconnectionSaga
-        from app.infra.saga.connection_recovery_saga import ConnectionRecoverySaga
-        from app.infra.saga.account_recovery_saga import AccountRecoverySaga
-        from app.infra.saga.order_execution_saga import OrderExecutionSaga
-        from app.infra.saga.position_management_saga import PositionManagementSaga
-        from app.infra.saga.automation_execution_saga import AutomationExecutionSaga
+        # TODO: Create WellWon-specific sagas and configure triggers
+        # from app.infra.saga.user_deletion_saga import UserDeletionSaga
 
-        # User domain triggers
-        self._trigger_configs["transport.user-account-events"] = [
-            SagaTriggerConfig(
-                event_types=["UserAccountDeleted", "UserDeleted"],
-                saga_class=UserDeletionSaga,
-                context_builder=lambda event: {
-                    'user_id': event['user_id'],
-                    'reason': event.get('reason', 'user_deletion'),
-                    'grace_period': event.get('grace_period', 0),
-                    'has_virtual_broker': event.get('has_virtual_broker', False),
-                    'correlation_id': event.get('correlation_id', event.get('event_id')),
-                    'causation_id': event.get('event_id'),
-                    'original_event_type': event.get('event_type'),
-                    'triggered_from': 'saga_service'
-                },
-                dedupe_key_builder=lambda event: f"user_deletion:{event['user_id']}",
-                dedupe_window_seconds=600,
-                description="Triggers user deletion saga to clean up all user resources"
-            )
-        ]
+        # User domain triggers - commented out until sagas are implemented
+        # self._trigger_configs["transport.user-account-events"] = [
+        #     SagaTriggerConfig(
+        #         event_types=["UserAccountDeleted", "UserDeleted"],
+        #         saga_class=UserDeletionSaga,
+        #         context_builder=lambda event: {
+        #             'user_id': event['user_id'],
+        #             'reason': event.get('reason', 'user_deletion'),
+        #             'grace_period': event.get('grace_period', 0),
+        #             'correlation_id': event.get('correlation_id', event.get('event_id')),
+        #             'causation_id': event.get('event_id'),
+        #             'original_event_type': event.get('event_type'),
+        #             'triggered_from': 'saga_service'
+        #         },
+        #         dedupe_key_builder=lambda event: f"user_deletion:{event['user_id']}",
+        #         dedupe_window_seconds=600,
+        #         description="Triggers user deletion saga to clean up all user resources"
+        #     )
+        # ]
 
-        # Enhanced broker connection triggers with tighter windows
-        self._trigger_configs["transport.entity-events"] = [
-            SagaTriggerConfig(
-                event_types=["BrokerConnectionEstablished"],
-                saga_class=BrokerConnectionSaga,
-                context_builder=lambda event: {
-                    # CRITICAL FIX (Nov 16, 2025): Convert UUID objects to strings for JSON serialization
-                    # Bug: UUID objects in context cause "Object of type UUID is not JSON serializable"
-                    # when saga state is persisted with json.dumps(state.to_dict())
-                    'broker_connection_id': str(event['broker_connection_id']),
-                    'user_id': str(event['user_id']),
-                    'broker_id': event.get('broker_id'),
-                    'environment': event.get('environment'),
-                    'auth_method': event.get('auth_method'),
-                    'correlation_id': event.get('correlation_id', event.get('event_id')),
-                    'causation_id': event.get('event_id'),
-                    'original_event_type': event.get('event_type'),
-                    'event_timestamp': event.get('timestamp'),
-                    'event_version': event.get('aggregate_version', 0),
-                    'triggered_from': 'saga_service'
-                },
-                dedupe_key_builder=lambda
-                    event: f"connection_setup:{event['broker_connection_id']}:{event.get('timestamp', '')[:19]}",
-                dedupe_window_seconds=3,  # Very short window
-                should_dedupe=self._should_trigger_connection_saga,
-                fast_track=True,
-                conflict_key_builder=lambda event: f"broker_connection:{event['broker_connection_id']}",
-                allow_concurrent=False,
-                pre_trigger_delay_ms=lambda event: saga_config.get_cold_start_delay_ms(
-                    is_virtual='virtual' in str(event.get('broker_id', '')).lower()
-                ),
-                description="Triggers connection setup saga to discover accounts",
-                priority=SagaPriority.HIGH,
-                auto_retry_on_conflict=True,
-                max_retry_attempts=saga_config.pending_saga_max_retries
-            ),
-            SagaTriggerConfig(
-                event_types=["BrokerDisconnected"],
-                saga_class=BrokerDisconnectionSaga,
-                context_builder=lambda event: {
-                    'broker_connection_id': event.get('aggregate_id') or event.get('broker_connection_id'),
-                    'user_id': event.get('user_id'),
-                    'broker_id': event.get('broker_id') or event.get('metadata', {}).get('broker_id'),
-                    'environment': event.get('environment') or event.get('metadata', {}).get('environment', 'paper'),
-                    'reason': event.get('reason', 'disconnection'),
-                    'disconnect_reason': event.get('reason', 'User requested disconnection'),
-                    # TRUE SAGA: Extract enriched account IDs from event (NO queries needed!)
-                    'linked_account_ids': event.get('linked_account_ids', []),
-                    'virtual_account_ids': event.get('virtual_account_ids', []),
-                    'active_automation_ids': event.get('active_automation_ids', []),
-                    'correlation_id': event.get('correlation_id', event.get('event_id')),
-                    'causation_id': event.get('event_id'),
-                    'original_event_type': event.get('event_type'),
-                    'event_timestamp': event.get('timestamp'),
-                    'event_version': event.get('aggregate_version', 0),
-                    'original_event_timestamp': event.get('timestamp'),
-                    'aggregate_version': event.get('aggregate_version'),
-                    'triggered_from': 'saga_service'
-                },
-                dedupe_key_builder=lambda
-                    event: f"disconnection:{event.get('aggregate_id') or event.get('broker_connection_id')}:{event.get('event_id', '')}",
-                dedupe_window_seconds=5,
-                conflict_key_builder=lambda
-                    event: f"broker_connection:{event.get('aggregate_id') or event.get('broker_connection_id')}",
-                allow_concurrent=False,
-                state_sync_grace_period_ms=int(saga_config.disconnection_grace_period_seconds * 500),
-                pre_trigger_check=self._validate_disconnection_timing,
-                description="Triggers disconnection saga to clean up accounts",
-                priority=SagaPriority.NORMAL,
-                auto_retry_on_conflict=False  # Don't retry disconnection
-            ),
-            SagaTriggerConfig(
-                event_types=["BrokerConnectionFailed"],
-                saga_class=ConnectionRecoverySaga,
-                context_builder=lambda event: {
-                    'broker_connection_id': event.get('broker_connection_id'),
-                    'user_id': event['user_id'],
-                    'broker_id': event.get('broker_id', 'unknown'),
-                    'environment': event.get('environment', 'unknown'),
-                    'failure_reason': event.get('failure_reason', 'unknown'),
-                    'error_message': event.get('error_message'),
-                    'http_status_code': event.get('http_status_code'),
-                    'is_recoverable': event.get('is_recoverable', True),
-                    'requires_user_action': event.get('requires_user_action', False),
-                    'consecutive_failures': event.get('consecutive_failures', 1),
-                    'correlation_id': event.get('correlation_id', event.get('event_id')),
-                    'causation_id': event.get('event_id'),
-                    'original_event_type': event.get('event_type'),
-                    'event_timestamp': event.get('timestamp'),
-                    'occurred_at': event.get('occurred_at'),
-                    'triggered_from': 'saga_service'
-                },
-                dedupe_key_builder=lambda event: f"connection_failure:{event.get('broker_connection_id')}:{event.get('failure_reason')}:{event.get('consecutive_failures', 1)}",
-                dedupe_window_seconds=10,  # Allow new failure after 10 seconds
-                fast_track=True,  # High priority for connection failures
-                conflict_key_builder=lambda event: f"broker_connection:{event.get('broker_connection_id')}",
-                allow_concurrent=False,  # Only one recovery saga per connection at a time
-                description="Triggers connection recovery saga when REST API/Auth fails",
-                priority=SagaPriority.HIGH,  # High priority for connection failures
-                auto_retry_on_conflict=True,  # Retry if another saga is running
-                max_retry_attempts=3
-            )
-        ]
+        log.info("No saga triggers configured yet - WellWon sagas to be implemented")
 
-        # Account recovery saga triggers
-        self._trigger_configs["transport.admin-events"] = [
-            SagaTriggerConfig(
-                event_types=["StartAccountRecovery"],
-                saga_class=AccountRecoverySaga,
-                context_builder=lambda event: {
-                    'broker_connection_id': event['broker_connection_id'],
-                    'user_id': event['user_id'],
-                    'reason': event.get('reason', 'manual_recovery'),
-                    'triggered_by': event.get('triggered_by', 'admin'),
-                    'recovery_options': event.get('recovery_options', {}),
-                    'force_sync': event.get('force_sync', False),
-                    'correlation_id': event.get('correlation_id', event.get('event_id')),
-                    'causation_id': event.get('event_id'),
-                    'original_event_type': event.get('event_type'),
-                    'event_timestamp': event.get('timestamp'),
-                    'triggered_from': 'saga_service'
-                },
-                dedupe_key_builder=lambda
-                    event: f"account_recovery:{event['broker_connection_id']}:{event.get('timestamp', '')[:19]}",
-                dedupe_window_seconds=60,
-                fast_track=True,
-                conflict_key_builder=lambda event: f"broker_connection:{event['broker_connection_id']}",
-                allow_concurrent=False,
-                description="Triggers account recovery saga to sync missing accounts",
-                priority=SagaPriority.CRITICAL,
-                auto_retry_on_conflict=True,
-                max_retry_attempts=3
-            )
-        ]
-
-        # Order execution saga triggers
-        self._trigger_configs["transport.order-events"] = [
-            SagaTriggerConfig(
-                event_types=["OrderPlacedEvent"],
-                saga_class=OrderExecutionSaga,
-                context_builder=lambda event: {
-                    # CRITICAL FIX (Nov 16, 2025): Convert UUID objects to strings for JSON serialization
-                    # and add missing broker_connection_id field
-                    'order_id': str(event['order_id']),
-                    'user_id': str(event['user_id']),
-                    'account_id': str(event['account_id']),
-                    'broker_connection_id': str(event['broker_connection_id']),  # CRITICAL FIX: Was missing!
-                    'automation_id': str(event['automation_id']) if event.get('automation_id') else None,
-                    'symbol': event['symbol'],
-                    'order_type': event['order_type'],
-                    'side': event['side'],
-                    'quantity': event['quantity'],
-                    'price': event.get('price'),
-                    'stop_price': event.get('stop_price'),
-                    'time_in_force': event['time_in_force'],
-                    'extended_hours': event.get('extended_hours', False),
-                    'client_order_id': event.get('client_order_id'),
-                    'origin': event.get('origin', 'internal'),  # CRITICAL: Pass origin to saga for broker order detection
-                    'correlation_id': event.get('correlation_id', event.get('event_id')),
-                    'causation_id': event.get('event_id'),
-                    'original_event_type': event.get('event_type'),
-                    'event_timestamp': event.get('timestamp'),
-                    'triggered_from': 'saga_service'
-                },
-                dedupe_key_builder=lambda event: f"order_execution:{event['order_id']}",
-                dedupe_window_seconds=10,
-                fast_track=True,
-                conflict_key_builder=lambda event: f"order:{event['order_id']}",
-                allow_concurrent=False,
-                description="Triggers order execution saga to submit order to broker",
-                priority=SagaPriority.HIGH,
-                auto_retry_on_conflict=True,
-                max_retry_attempts=3
-            ),
-            # TEMPORARILY DISABLED (2025-11-16): Position management saga
-            # Reason: Positions should sync from broker via REST/streaming, not created from OrderFilledEvent
-            # This saga is needed for pyramiding in the future, but for now we're pulling positions directly from broker
-            # TODO: Re-enable after position sync is fully implemented and tested
-            # SagaTriggerConfig(
-            #     event_types=["OrderFilledEvent"],
-            #     saga_class=PositionManagementSaga,
-            #     context_builder=lambda event: {
-            #         # CRITICAL FIX (Nov 16, 2025): Convert UUID objects to strings for JSON serialization
-            #         'order_id': str(event['order_id']),
-            #         'user_id': str(event['user_id']),
-            #         'account_id': str(event['account_id']),
-            #         'symbol': event['symbol'],
-            #         'side': event['side'],  # OrderFilledEvent now has side field
-            #         'quantity': event['quantity'],
-            #         'price': event['price'],
-            #         'commission': event.get('commission', 0),
-            #         'is_partial': event.get('is_partial', False),
-            #         'correlation_id': event.get('correlation_id', event.get('event_id')),
-            #         'causation_id': event.get('event_id'),
-            #         'original_event_type': event.get('event_type'),
-            #         'event_timestamp': event.get('timestamp'),
-            #         'triggered_from': 'saga_service'
-            #     },
-            #     dedupe_key_builder=lambda event: f"position_mgmt:{event['order_id']}:{event.get('fill_id', 'complete')}",
-            #     dedupe_window_seconds=30,
-            #     fast_track=True,
-            #     conflict_key_builder=lambda event: f"position:{event['account_id']}:{event['symbol']}",
-            #     allow_concurrent=False,
-            #     description="Triggers position management saga to create/update positions from order fills",
-            #     priority=SagaPriority.HIGH,
-            #     auto_retry_on_conflict=True,
-            #     max_retry_attempts=3
-            # ),
-            # Automation execution saga trigger - execute orders from webhook signals
-            SagaTriggerConfig(
-                event_types=["WebhookSignalReceivedEvent"],
-                saga_class=AutomationExecutionSaga,
-                context_builder=lambda event: {
-                    'signal_id': event['signal_id'],
-                    'automation_id': event['automation_id'],
-                    'user_id': event['user_id'],
-                    'action': event['action'],
-                    'symbol': event['symbol'],
-                    'sentiment': event.get('sentiment'),
-                    'quantity': event.get('quantity'),
-                    'price': event.get('price'),
-                    'asset_type': event.get('asset_type', 'stock'),
-                    'account_ids': event.get('account_ids', []),
-                    'correlation_id': event.get('correlation_id', event.get('event_id')),
-                    'causation_id': event.get('event_id'),
-                    'original_event_type': event.get('event_type'),
-                    'event_timestamp': event.get('timestamp'),
-                    'triggered_from': 'saga_service'
-                },
-                dedupe_key_builder=lambda event: f"automation_exec:{event['signal_id']}",
-                dedupe_window_seconds=60,
-                fast_track=True,
-                conflict_key_builder=lambda event: f"automation:{event['automation_id']}:{event['symbol']}",
-                allow_concurrent=False,
-                description="Triggers automation execution saga to create orders from webhook signals",
-                priority=SagaPriority.HIGH,
-                auto_retry_on_conflict=True,
-                max_retry_attempts=3
-            )
-        ]
-
-        # Saga event triggers for account recovery monitoring
-        self._trigger_configs["saga.events"] = [
-            SagaTriggerConfig(
-                event_types=["AccountRecoveryInitiated"],
-                saga_class=AccountRecoverySaga,
-                context_builder=lambda event: {
-                    'broker_connection_id': event['broker_connection_id'],
-                    'user_id': event['user_id'],
-                    'reason': event.get('reason', 'automatic_recovery'),
-                    'triggered_by': event.get('triggered_by', 'system'),
-                    'expected_accounts': event.get('expected_accounts', 0),
-                    'recovery_strategy': event.get('recovery_strategy', 'full_sync'),
-                    'correlation_id': event.get('correlation_id', event.get('event_id')),
-                    'causation_id': event.get('event_id'),
-                    'original_event_type': event.get('event_type'),
-                    'saga_id': event.get('saga_id'),
-                    'triggered_from': 'saga_service'
-                },
-                dedupe_key_builder=lambda
-                    event: f"recovery_initiated:{event['broker_connection_id']}:{event.get('saga_id', '')}",
-                dedupe_window_seconds=300,
-                fast_track=True,
-                conflict_key_builder=lambda event: f"broker_connection:{event['broker_connection_id']}",
-                allow_concurrent=False,
-                description="Triggers account recovery from data integrity monitor",
-                priority=SagaPriority.CRITICAL,
-                auto_retry_on_conflict=True
-            )
-        ]
-
-        # CQRS COMPLIANT: Integrity check completion triggers saga (not worker commands)
-        self._trigger_configs["system.data-integrity-events"] = [
-            # HYBRID APPROACH: Immediate recovery for CRITICAL issues
-            SagaTriggerConfig(
-                event_types=["IntegrityIssueDetected"],
-                saga_class=AccountRecoverySaga,
-                context_builder=lambda event: {
-                    'broker_connection_id': event['connection_id'],
-                    'user_id': event['user_id'],
-                    'reason': f"integrity_issue_{event.get('issue_type', 'unknown').lower()}",
-                    'triggered_by': 'integrity_issue_detected',
-                    'recovery_options': {
-                        'sync_strategy': 'smart',
-                        'validate_only': False,
-                        'issue_type': event.get('issue_type'),
-                        'severity': event.get('severity'),
-                        'immediate': event.get('severity') == 'CRITICAL'
-                    },
-                    'correlation_id': event.get('correlation_id', event.get('issue_id')),
-                    'causation_id': event.get('event_id'),
-                    'original_event_type': event.get('event_type'),
-                    'event_timestamp': event.get('timestamp'),
-                    'triggered_from': 'saga_service',
-                    'issue_id': event.get('issue_id'),
-                    'issue_details': event.get('details', {}),
-                    'idempotency_key': event.get('details', {}).get('idempotency_key', f"issue-{event.get('issue_id')}")
-                },
-                dedupe_key_builder=lambda event: event.get('details', {}).get('idempotency_key', f"issue:{event['connection_id']}:{event.get('issue_id', '')}"),
-                dedupe_window_seconds=600,  # 10 minutes for issues
-                fast_track=lambda event: event.get('severity') == 'CRITICAL',
-                conflict_key_builder=lambda event: f"broker_connection:{event['connection_id']}",
-                allow_concurrent=False,
-                # Trigger for CRITICAL/HIGH severity issues that are auto-recoverable
-                pre_trigger_check=lambda event: (
-                    event.get('auto_recoverable', False) and
-                    event.get('severity') in ['CRITICAL', 'HIGH'] and
-                    event.get('issue_type') in ['MISSING_ACCOUNTS', 'MANUAL_FORCE_RECOVERY', 'DISCOVERY_TIMEOUT_RETRY', 'BATCH_DISCOVERY']
-                ),
-                description="Triggers immediate recovery saga when critical integrity issues are detected",
-                priority=SagaPriority.CRITICAL,
-                auto_retry_on_conflict=True,
-                max_retry_attempts=5
-            ),
-            # HYBRID APPROACH: Scheduled recovery for regular checks
-            SagaTriggerConfig(
-                event_types=["IntegrityCheckCompleted"],
-                saga_class=AccountRecoverySaga,
-                context_builder=lambda event: {
-                    'broker_connection_id': event['connection_id'],
-                    'user_id': event['user_id'],
-                    'reason': 'integrity_check_completed',
-                    'triggered_by': 'data_integrity_monitor',
-                    'recovery_options': {
-                        'sync_strategy': 'smart',
-                        'validate_only': event.get('missing_accounts', 0) == 0
-                    },
-                    'correlation_id': event.get('correlation_id', event.get('check_id')),
-                    'causation_id': event.get('event_id'),
-                    'original_event_type': event.get('event_type'),
-                    'event_timestamp': event.get('timestamp'),
-                    'triggered_from': 'saga_service',
-                    'expected_accounts': event.get('missing_accounts', 0),
-                    'check_id': event.get('check_id'),
-                    'status': event.get('status')
-                },
-                dedupe_key_builder=lambda event: f"integrity_recovery:{event['connection_id']}:{event.get('check_id', '')}",
-                dedupe_window_seconds=300,  # 5 minutes
-                fast_track=True,
-                conflict_key_builder=lambda event: f"broker_connection:{event['connection_id']}",
-                allow_concurrent=False,
-                # Only trigger if there are missing accounts AND recovery not already in progress
-                pre_trigger_check=lambda event: (
-                    event.get('missing_accounts', 0) > 0 and
-                    not event.get('recovery_in_progress', False) and
-                    event.get('status') in ['CRITICAL', 'DEGRADED']
-                ),
-                description="Triggers account recovery saga when integrity check finds missing accounts",
-                priority=SagaPriority.CRITICAL,
-                auto_retry_on_conflict=True,
-                max_retry_attempts=3
-            )
-        ]
-
-        # Connection recovery triggers
-        self._trigger_configs["alerts.connection-recovery"] = [
-            SagaTriggerConfig(
-                event_types=["ConnectionRecoveryNeeded"],
-                saga_class=BrokerConnectionSaga,
-                context_builder=lambda event: {
-                    'broker_connection_id': event['connection_id'],
-                    'user_id': event['user_id'],
-                    'broker_id': event.get('broker_id'),
-                    'environment': event.get('environment', 'paper'),
-                    'triggered_by': 'connection_recovery_service',
-                    'is_recovery': True,
-                    'recovery_reason': event.get('alert_type'),
-                    'consecutive_failures': event.get('consecutive_failures', 0),
-                    'correlation_id': event.get('correlation_id', event.get('event_id')),
-                    'causation_id': event.get('event_id')
-                },
-                dedupe_key_builder=lambda event: f"connection_recovery:{event['connection_id']}:{event.get('timestamp', '')[:19]}",
-                dedupe_window_seconds=300,
-                conflict_key_builder=lambda event: f"broker_connection:{event['connection_id']}",
-                allow_concurrent=False,
-                description="Triggers connection saga for automatic reconnection on health check failures",
-                priority=SagaPriority.HIGH,
-                fast_track=True,
-                auto_retry_on_conflict=False
-            )
-        ]
-
-        log.info("Configured saga triggers with enhanced race condition protection")
 
     async def _setup_event_consumers(self) -> None:
         """

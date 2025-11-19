@@ -75,7 +75,7 @@ log = logging.getLogger("wellwon.infra.redis_client")
 # Default Configuration (used when RedisConfig is not available)
 # -----------------------------------------------------------------------------
 # These defaults match the RedisConfig defaults for consistency
-DEFAULT_REDIS_URL = "redis://localhost:6379/0"
+DEFAULT_REDIS_URL = "redis://localhost:6379/1"
 DEFAULT_SOCKET_TIMEOUT = 15.0
 DEFAULT_SOCKET_CONNECT_TIMEOUT = 5.0
 DEFAULT_SOCKET_KEEPALIVE_INTERVAL = 60

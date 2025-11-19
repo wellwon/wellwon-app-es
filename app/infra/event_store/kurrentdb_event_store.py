@@ -792,6 +792,68 @@ class KurrentDBEventStore:
             log.error(f"Error getting version for {stream_name}: {type(e).__name__}: {e}")
             raise EventStoreError(f"Failed to get aggregate version: {e}") from e
 
+    async def archive_stream(
+        self,
+        aggregate_id: uuid.UUID,
+        aggregate_type: str,
+        reason: str = "Entity deleted from read model"
+    ) -> bool:
+        """
+        Archive (soft-delete) an aggregate stream in KurrentDB.
+
+        The stream is tombstoned but events are preserved for audit/compliance.
+        This is used by StreamArchivalService to keep PostgreSQL (read model)
+        and EventStore (write model) in sync when entities are deleted.
+
+        Args:
+            aggregate_id: Aggregate UUID
+            aggregate_type: Aggregate type (e.g., "user_account")
+            reason: Reason for archival (for logging)
+
+        Returns:
+            True if stream was archived (or already deleted), False on error
+        """
+        stream_name = self._get_stream_name(aggregate_id, aggregate_type)
+
+        if not self._initialized or not self._client:
+            log.warning(f"Cannot archive stream {stream_name}: KurrentDB not initialized")
+            return False
+
+        try:
+            # KurrentDB soft-delete: deletes stream but keeps events for audit
+            await self._client.delete_stream(stream_name)
+
+            log.info(f"Archived stream '{stream_name}': {reason}")
+
+            # Also archive snapshot stream if exists
+            snapshot_stream = self._get_snapshot_stream_name(aggregate_id, aggregate_type)
+            try:
+                await self._client.delete_stream(snapshot_stream)
+                log.debug(f"Archived snapshot stream '{snapshot_stream}'")
+            except StreamNotFoundError:
+                pass  # Snapshot may not exist
+            except Exception as e:
+                log.debug(f"Could not archive snapshot stream '{snapshot_stream}': {e}")
+
+            # Invalidate version cache
+            if self._cache_manager and self._version_cache_enabled:
+                cache_key = self._cache_manager._make_key(
+                    "event_store", "version", aggregate_type, str(aggregate_id)
+                )
+                await self._cache_manager.delete(cache_key)
+                log.debug(f"Invalidated version cache for {stream_name}")
+
+            return True
+
+        except StreamNotFoundError:
+            # Stream already deleted or never existed
+            log.debug(f"Stream '{stream_name}' not found (already deleted or never existed)")
+            return True
+
+        except Exception as e:
+            log.error(f"Error archiving stream {stream_name}: {e}")
+            return False
+
     # =========================================================================
     # Snapshot Operations
     # =========================================================================

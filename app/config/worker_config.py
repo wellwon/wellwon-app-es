@@ -107,14 +107,14 @@ class WorkerConfig(BaseSettings):
 
     # Redpanda/Kafka
     redpanda_servers: str = Field(
-        default="localhost:9092",
-        description="Redpanda bootstrap servers (use 9092 for Docker, 19092 for native)"
+        default="localhost:29092",
+        description="Redpanda bootstrap servers for WellWon"
     )
 
     # Redis
     redis_url: str = Field(
-        default="redis://localhost:6379/0",
-        description="Redis connection URL"
+        default="redis://localhost:6379/1",
+        description="Redis connection URL (db 1 for WellWon)"
     )
 
     # PostgreSQL

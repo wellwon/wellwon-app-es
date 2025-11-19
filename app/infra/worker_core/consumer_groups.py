@@ -173,14 +173,6 @@ class WorkerConsumerGroups:
         description="Processes all domain events and updates read models",
         topics=[
             "transport.user-account-events",
-            "transport.entity-events",
-            "transport.account-events",
-            "transport.automation-events",  # Automation domain
-            "transport.admin-events",  # Admin events
-            "transport.order-events",
-            "transport.position-events",
-            # NOTE: transport.trade-events REMOVED (monolithic, replaced by order/position/automation)
-            "transport.virtual-broker-events",
         ],
         max_poll_records=1000,  # High throughput
         auto_offset_reset="earliest",  # Don't miss events
@@ -223,13 +215,6 @@ class WorkerConsumerGroups:
             "system.data-integrity-events",
             "system.data-integrity-metrics",
             "alerts.data-integrity",
-
-            # Monitor connection events for new connections
-            "transport.entity-events",
-
-            # Recovery coordination
-            # NOTE: system.recovery-commands REMOVED (orphan - CQRS replaced with sagas)
-            # NOTE: system.recovery-status REMOVED (orphan - CQRS replaced with sagas)
 
             # Worker control
             "system.worker-control.data-integrity",
@@ -311,22 +296,10 @@ class WorkerConsumerGroups:
         topics=[
             # User events that might trigger notifications
             "transport.user-account-events",
-            "transport.entity-events",
-            "transport.order-events",
 
             # Alerts
             "alerts.data-integrity",
-            # NOTE: alerts.recovery REMOVED (orphan - never published to)
             "alerts.system",
-
-            # NOTE: realtime.websocket-events REMOVED (orphan topic, never used)
-            # WSE uses Redis Pub/Sub (wse:*) for WebSocket coordination
-
-            # Monitoring events
-            "monitoring.accounts_missing",
-            # NOTE: integrity.* topics removed - replaced by worker.data-sync.*
-            # "integrity.balance_mismatch",
-            # "integrity.issues_detected",
         ],
         max_poll_records=500,
         instances_min=1,
@@ -334,15 +307,12 @@ class WorkerConsumerGroups:
         auto_offset_reset="latest",  # Only care about new notifications
     )
 
-    # Market Data Worker - Processes market data
+    # Market Data Worker - Processes market data (DISABLED - broker functionality removed)
     MARKET_DATA = WorkerConsumerConfig(
         worker_type=WorkerType.MARKET_DATA,
         consumer_group="market-data-workers",
-        description="Processes real-time market data updates",
-        topics=[
-            "transport.market-data-events",
-            # NOTE: realtime.price-updates REMOVED (orphan topic, never used)
-        ],
+        description="DISABLED: Broker functionality removed",
+        topics=[],
         max_poll_records=2000,  # Very high throughput
         session_timeout_ms=10000,  # Lower timeout for fast processing
         heartbeat_interval_ms=3000,
@@ -350,23 +320,22 @@ class WorkerConsumerGroups:
         instances_max=50,
         fetch_max_wait_ms=50,  # Ultra low latency
         max_partition_fetch_bytes=10485760,  # 10MB for bulk data
-        enabled=os.getenv("ENABLE_MARKET_DATA_WORKER", "false").lower() == "true",
+        enabled=False,  # Disabled - broker functionality removed
     )
 
-    # Account Sync Worker - Syncs account data
+    # Account Sync Worker - Syncs account data (DISABLED - broker functionality removed)
     ACCOUNT_SYNC = WorkerConsumerConfig(
         worker_type=WorkerType.ACCOUNT_SYNC,
         consumer_group="account-sync-workers",
-        description="Periodically syncs account data with brokers",
+        description="DISABLED: Broker functionality removed",
         topics=[
             "system.sync-commands",
-            "transport.account-events",
         ],
         max_poll_records=100,
         max_poll_interval_ms=1800000,  # 30 minutes for batch syncs
         instances_min=1,
         instances_max=5,
-        enabled=os.getenv("ENABLE_ACCOUNT_SYNC_WORKER", "false").lower() == "true",
+        enabled=False,  # Disabled - broker functionality removed
         supports_commands=True,
         supports_queries=True,
     )
@@ -458,9 +427,12 @@ class WorkerConsumerGroups:
 
     @classmethod
     def validate_all_configs(cls) -> Dict[WorkerType, List[str]]:
-        """Validate all worker configurations"""
+        """Validate all enabled worker configurations"""
         issues = {}
         for worker_type, config in cls.get_all_configs().items():
+            # Skip validation for disabled workers
+            if not config.enabled:
+                continue
             worker_issues = config.validate_config()
             if worker_issues:
                 issues[worker_type] = worker_issues

@@ -33,7 +33,7 @@ class KafkaConfig:
     - 10ms linger for optimal batching without excessive latency
     - 64MB buffer for better buffering capacity
     """
-    bootstrap_servers: str = "localhost:9092"
+    bootstrap_servers: str = "localhost:29092"
     client_id: str = "wellwon-synapse"
 
     # ========================================================================
@@ -124,7 +124,7 @@ class KafkaConfig:
     def from_env(cls) -> 'KafkaConfig':
         """Create config from environment variables"""
         return cls(
-            bootstrap_servers=os.getenv("REDPANDA_BOOTSTRAP_SERVERS", "localhost:9092"),
+            bootstrap_servers=os.getenv("REDPANDA_BOOTSTRAP_SERVERS", "localhost:29092"),
             client_id=os.getenv("REDPANDA_CLIENT_ID", "wellwon"),
 
             # Producer settings - OPTIMIZED DEFAULTS (can be overridden via env)
@@ -261,63 +261,6 @@ class EventBusConfig:
                 partitions=9,
                 retention_ms=604800000,  # 7 days
                 consumer_group="event-processor-workers"  # From WorkerConsumerGroups
-            ),
-            "transport.entity-events": TopicConfig(
-                name="transport.entity-events",
-                type=TopicType.STREAM,
-                partitions=9,
-                retention_ms=604800000,
-                consumer_group="event-processor-workers"
-            ),
-            "transport.account-events": TopicConfig(
-                name="transport.account-events",
-                type=TopicType.STREAM,
-                partitions=9,
-                retention_ms=604800000,
-                consumer_group="event-processor-workers"
-            ),
-            "transport.order-events": TopicConfig(
-                name="transport.order-events",
-                type=TopicType.STREAM,
-                partitions=12,
-                retention_ms=604800000,
-                consumer_group="event-processor-workers"
-            ),
-            "transport.position-events": TopicConfig(
-                name="transport.position-events",
-                type=TopicType.STREAM,
-                partitions=9,
-                retention_ms=604800000,
-                consumer_group="event-processor-workers"
-            ),
-            # NOTE: transport.trade-events REMOVED (monolithic, split into order/position/automation)
-            "transport.virtual-broker-events": TopicConfig(
-                name="transport.virtual-broker-events",
-                type=TopicType.STREAM,
-                partitions=9,
-                retention_ms=604800000,
-                consumer_group="event-processor-workers"
-            ),
-            "transport.automation-events": TopicConfig(
-                name="transport.automation-events",
-                type=TopicType.STREAM,
-                partitions=6,
-                retention_ms=604800000,  # 7 days
-                consumer_group="event-processor-workers"
-            ),
-            "transport.admin-events": TopicConfig(
-                name="transport.admin-events",
-                type=TopicType.STREAM,
-                partitions=3,
-                retention_ms=2592000000,  # 30 days (longer for audit)
-                consumer_group="event-processor-workers"
-            ),
-            "transport.market-data-events": TopicConfig(
-                name="transport.market-data-events",
-                type=TopicType.STREAM,
-                partitions=24,  # High throughput
-                retention_ms=86400000,  # 1 day
-                consumer_group="market-data-workers"
             ),
 
             # System topics
@@ -539,7 +482,7 @@ class EventBusConfig:
         """Configuration optimized for testing"""
         config = cls(
             kafka=KafkaConfig(
-                bootstrap_servers="localhost:9092",
+                bootstrap_servers="localhost:29092",
                 producer_retries=1,
                 consumer_session_timeout_ms=6000,
             ),
@@ -579,13 +522,6 @@ class TransportConfig:
     # Default transport topics (for outbox pattern)
     default_transport_topics: List[str] = field(default_factory=lambda: [
         "transport.user-account-events",
-        "transport.entity-events",
-        "transport.account-events",
-        "transport.order-events",
-        "transport.position-events",
-        "transport.trade-events",
-        "transport.virtual-broker-events",
-        "transport.market-data-events",  # Added
     ])
 
     # Outbox settings
@@ -620,49 +556,6 @@ class TransportConfig:
             "UserPasswordChanged": "transport.user-account-events",
             "UserEmailVerified": "transport.user-account-events",
 
-            # Broker connection events
-            "BrokerConnectionInitiated": "transport.entity-events",
-            "BrokerConnectionEstablished": "transport.entity-events",
-            "BrokerDisconnected": "transport.entity-events",
-            "BrokerConnectionFailed": "transport.entity-events",  # ✅ Connection failure recovery
-
-            # Broker account events
-            "BrokerAccountLinked": "transport.account-events",
-            "AccountDataFromBrokerUpdated": "transport.account-events",
-
-            # Order events
-            "OrderPlaced": "transport.order-events",
-            "OrderFilled": "transport.order-events",
-            "OrderCancelled": "transport.order-events",
-
-            # Position events
-            "PositionOpened": "transport.position-events",
-            "PositionClosed": "transport.position-events",
-            "PositionUpdated": "transport.position-events",
-
-            # Virtual broker events
-            "VirtualAccountCreated": "transport.virtual-broker-events",
-            "VirtualAccountsDeleted": "transport.virtual-broker-events",  # FIXED: Added routing for deletion event
-            "VirtualOrderPlaced": "transport.virtual-broker-events",
-            "VirtualOrderExecuted": "transport.virtual-broker-events",
-
-            # Market data events
-            "MarketDataReceived": "transport.market-data-events",
-            # NOTE: PriceUpdate mapping removed - realtime.price-updates topic deleted
-
-            # Integrity events
-            "IntegrityCheckStarted": "system.data-integrity-events",
-            "IntegrityCheckCompleted": "system.data-integrity-events",
-            "IntegrityMetricsUpdate": "system.data-integrity-metrics",
-
-            # Connection recovery metrics
-            "ConnectionRecoveryMetrics": "system.connection-recovery-metrics",
-
-            # Recovery events
-            "AccountRecoveryInitiated": "saga.account-recovery",
-            "AccountRecoveryCompleted": "saga.account-recovery",
-            "AccountRecoveryFailed": "saga.account-recovery",
-
             # Worker control events
             "WorkerControlCommand": "system.worker-control.{worker_type}",
             "WorkerHeartbeat": "system.worker-heartbeats",
@@ -670,10 +563,6 @@ class TransportConfig:
             # Projection rebuild events
             "ProjectionRebuildRequested": "system.projection-rebuild-commands",
             "ProjectionRebuildCompleted": "saga.events",
-
-            # Sync events
-            "AccountSyncRequested": "system.sync-commands",
-            "AccountSyncCompleted": "transport.account-events",
         }
 
     def get_topic_for_event(self, event_type: str, **kwargs) -> Optional[str]:

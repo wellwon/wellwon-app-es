@@ -35,8 +35,15 @@ export interface UserProfileResponse {
   last_login: string | null;
   last_password_change: string | null;
   security_alerts_enabled: boolean;
-  connected_brokers: string[];
   active_sessions_count: number;
+  // WellWon Platform fields
+  first_name?: string | null;
+  last_name?: string | null;
+  avatar_url?: string | null;
+  bio?: string | null;
+  phone?: string | null;
+  user_type?: string;
+  user_number?: number | null;
 }
 
 export interface RegisterRequest {

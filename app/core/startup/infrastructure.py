@@ -2,7 +2,6 @@
 # =============================================================================
 # File: app/core/startup/infrastructure.py
 # Description: Core infrastructure initialization (DB, Redis, EventBus, Cache)
-# UPDATED: Changed ENABLE_VB_DATABASE default to true
 # =============================================================================
 
 import os
@@ -10,7 +9,7 @@ import logging
 from app.core.fastapi_types import FastAPI
 
 from app.infra.persistence.pg_client import (
-    init_db_pool, init_vb, run_schema, run_vb_schema
+    init_db_pool, run_schema
 )
 from app.infra.persistence.redis_client import (
     init_global_client as init_redis,
@@ -43,31 +42,13 @@ except ImportError as cache_import_error:
         pass
 
 
-async def initialize_databases(app: FastAPI) -> bool:
+async def initialize_databases(app: FastAPI) -> None:
     """
-    Initialize PostgreSQL databases (main and virtual broker)
-    Returns: bool indicating if VB database was initialized
+    Initialize PostgreSQL database
     """
     # Main PostgreSQL Database
     await init_db_pool()
     logger.info("PostgreSQL pool initialized.")
-
-    # Virtual Broker Database (optional)
-    # CHANGED: Default to true for production use
-    enable_vb_database = os.getenv("ENABLE_VB_DATABASE", "true").lower() == "true"
-    vb_database_initialized = False
-
-    if enable_vb_database:
-        try:
-            await init_vb()
-            vb_database_initialized = True
-            logger.info("Virtual Broker PostgreSQL pool initialized.")
-        except Exception as vb_db_error:
-            logger.error(f"Failed to initialize VB database: {vb_db_error}")
-            logger.warning("Continuing without VB database - VB operations will use main database")
-            vb_database_initialized = False
-
-    return vb_database_initialized
 
 
 async def initialize_cache(app: FastAPI) -> None:
@@ -95,7 +76,6 @@ async def initialize_cache(app: FastAPI) -> None:
                 "key_prefix": cache_manager.key_prefix,
                 "cleanup_on_startup": cache_manager.cleanup_on_startup,
                 "cleanup_interval_hours": cache_manager.cleanup_interval_hours,
-                "aggressive_cleanup": cache_manager.broker_aggressive_cleanup,
                 "is_running": cache_manager.is_running,
                 "background_tasks": bg_tasks
             }
@@ -115,7 +95,7 @@ async def initialize_event_infrastructure(app: FastAPI) -> None:
     # Initialize EventBus with RedPanda transport
     try:
         redpanda_adapter = RedpandaTransportAdapter(
-            bootstrap_servers=os.getenv("REDPANDA_BOOTSTRAP_SERVERS", "localhost:9092"),
+            bootstrap_servers=os.getenv("REDPANDA_BOOTSTRAP_SERVERS", "localhost:29092"),
             client_id=f"wellwon-api-{os.getenv('INSTANCE_ID', 'default')}",
             producer_config={
                 'acks': 'all',
@@ -136,7 +116,7 @@ async def initialize_event_infrastructure(app: FastAPI) -> None:
         )
 
         # Mark critical channels for enhanced reliability
-        critical_channels = os.getenv("CRITICAL_CHANNELS", "orders,payments,accounts,broker_connections,sagas")
+        critical_channels = os.getenv("CRITICAL_CHANNELS", "user_accounts,payments,sagas")
         for channel in critical_channels.split(","):
             if channel.strip():
                 initialized_event_bus.mark_channel_as_critical(channel.strip())
@@ -157,8 +137,8 @@ async def initialize_event_infrastructure(app: FastAPI) -> None:
     logger.info("PubSubBus initialized - using global Redis connection pool")
 
 
-async def run_database_schemas(vb_database_initialized: bool) -> None:
-    """Run database schemas for main and VB databases"""
+async def run_database_schemas() -> None:
+    """Run database schemas for main database"""
     # Main database schema
     schema_file_path = "database/wellwon.sql"
     try:
@@ -168,16 +148,3 @@ async def run_database_schemas(vb_database_initialized: bool) -> None:
         logger.warning(f"Main schema file not found, skipping schema run.")
     except Exception as schema_error:
         logger.error(f"Error running main schema: {schema_error}")
-
-    # Virtual Broker schema
-    if vb_database_initialized:
-        vb_schema_path = os.getenv("VB_SCHEMA_PATH", "database/wellwon_vb.sql")
-        if os.getenv("VB_RUN_SCHEMA", "true").lower() == "true":
-            try:
-                await run_vb_schema(vb_schema_path)
-                logger.info("Virtual Broker schema checked/applied.")
-            except FileNotFoundError:
-                logger.warning(f"VB schema file not found at {vb_schema_path}, skipping.")
-            except Exception as vb_schema_error:
-                logger.error(f"Error running VB schema: {vb_schema_error}")
-                # Continue anyway - schema might already exist

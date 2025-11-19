@@ -40,8 +40,6 @@ from app.api.models.user_account_api_models import (
     ActiveSessionsResponse,
     DeviceInfo,
     UserProfileResponse,
-    ConnectedBrokerInfo,
-    BrokerEnvironmentInfo,
     TerminateSessionRequest,
 )
 
@@ -60,7 +58,6 @@ from app.user_account.commands import (
 # CQRS Queries - USE THESE INSTEAD OF DIRECT REDIS ACCESS
 from app.user_account.queries import (
     GetUserProfileQuery,
-    GetUserConnectedBrokersQuery,
     GetUserActiveSessionsQuery,
     ValidateUserCredentialsQuery,
     CreateUserSessionQuery,
@@ -86,10 +83,10 @@ jwt_manager = JwtTokenManager()
 security = HTTPBearer()
 
 # Configuration
-FINGERPRINT_COOKIE_NAME = "tc_fp"
+FINGERPRINT_COOKIE_NAME = "ww_fp"
 FINGERPRINT_EXPIRE_DAYS = 30
 SECURE_COOKIES = True
-SESSION_COOKIE_NAME = "tc_sid"
+SESSION_COOKIE_NAME = "ww_sid"
 MAX_CONCURRENT_SESSIONS = 5
 REFRESH_ROTATE_AFTER_DAYS = 7
 REFRESH_SLIDING_WINDOW_DAYS = 14
@@ -409,38 +406,9 @@ async def get_me(
     if not profile_data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    # Query connected brokers
-    brokers_query = GetUserConnectedBrokersQuery(user_id=user_uuid)
-    connected_brokers_data = await query_bus.query(brokers_query)
-
     # Get active sessions count
     session_count_query = GetActiveSessionCountQuery(user_id=user_uuid)
     session_count_result = await query_bus.query(session_count_query)
-
-    # Convert broker data to API models
-    connected_brokers_list = []
-    for broker in connected_brokers_data:
-        environments = []
-        for env in broker.environments:
-            if isinstance(env, dict):
-                env_info = BrokerEnvironmentInfo(**env)
-            else:
-                env_info = BrokerEnvironmentInfo(
-                    environment=env.environment,
-                    connected=env.connected,
-                    connection_id=str(env.connection_id),
-                    last_connected=env.last_connected
-                )
-            environments.append(env_info)
-
-        broker_info = ConnectedBrokerInfo(
-            broker_id=broker.broker_id,
-            broker_name=broker.broker_name,
-            environments=environments,
-            total_accounts=broker.total_accounts,
-            connection_ids=[str(cid) for cid in broker.connection_ids]
-        )
-        connected_brokers_list.append(broker_info)
 
     return UserProfileResponse(
         user_id=str(profile_data.id),
@@ -454,7 +422,6 @@ async def get_me(
         last_login=profile_data.last_login,
         last_password_change=profile_data.last_password_change,
         security_alerts_enabled=profile_data.security_alerts_enabled,
-        connected_brokers=connected_brokers_list,
         active_sessions_count=session_count_result['active_sessions'],
         preferences=profile_data.preferences,
         metadata=profile_data.metadata
