@@ -18,7 +18,7 @@ import axios, {
 // Axios base client for all REST API calls
 // -----------------------------------------------------------------------------
 export const API: AxiosInstance = axios.create({
-  baseURL: import.meta.env?.VITE_API_URL || "http://localhost:5001/",
+  baseURL: import.meta.env?.VITE_API_URL || "http://localhost:5002/",
   timeout: 10_000,
   headers: {
     "Content-Type": "application/json",
@@ -185,7 +185,7 @@ API.interceptors.response.use(
 // Helper function to make requests without auth interceptor (for auth endpoints)
 // -----------------------------------------------------------------------------
 export const APIWithoutAuth = axios.create({
-  baseURL: import.meta.env?.VITE_API_URL || "http://localhost:5001/",
+  baseURL: import.meta.env?.VITE_API_URL || "http://localhost:5002/",
   timeout: 10_000,
   headers: {
     "Content-Type": "application/json",

@@ -27,6 +27,7 @@ from app.user_account.events import (
 
 from app.user_account.queries import (
     GetUserByUsernameQuery,
+    GetUserByEmailQuery,
     GetUserProfileQuery,
     ValidateUserCredentialsQuery,
     HashPasswordQuery,
@@ -34,6 +35,8 @@ from app.user_account.queries import (
 
 from app.infra.cqrs.command_bus import ICommandHandler
 from app.infra.cqrs.decorators import command_handler
+from app.common.base.base_command_handler import BaseCommandHandler
+from app.user_account.aggregate import UserAccountAggregate
 
 if TYPE_CHECKING:
     from app.infra.cqrs.handler_dependencies import HandlerDependencies
@@ -42,16 +45,21 @@ log = logging.getLogger("wellwon.users.auth_handlers")
 
 
 # -----------------------------------------------------------------------------
-# CreateUserHandler - Pure CQRS
+# CreateUserHandler - Event Sourcing Pattern
 # -----------------------------------------------------------------------------
 @command_handler(CreateUserAccountCommand)
-class CreateUserAccountHandler(ICommandHandler):
-    """Handles the CreateUserAccountCommand using only buses."""
+class CreateUserAccountHandler(BaseCommandHandler):
+    """Handles the CreateUserAccountCommand using Event Sourcing pattern."""
 
     def __init__(self, deps: 'HandlerDependencies'):
-        self.command_bus = deps.command_bus
+        # Initialize base with event infrastructure
+        super().__init__(
+            event_bus=deps.event_bus,
+            transport_topic="transport.user-account-events",
+            event_store=deps.event_store
+        )
+        # Store additional dependencies
         self.query_bus = deps.query_bus
-        self.event_bus = deps.event_bus
 
     async def handle(self, command: CreateUserAccountCommand) -> uuid.UUID:
         log.info(f"Creating user account for username: {command.username}")
@@ -75,19 +83,25 @@ class CreateUserAccountHandler(ICommandHandler):
         )
         log.info(f"DEBUG HANDLER: secret='{command.secret}' (len={len(command.secret)}), hashed_secret starts with: {hashed_secret[:20]}")
 
-        # Create and publish UserAccountCreated event
-        event = UserAccountCreated(
-            user_id=command.user_id,
+        # Create aggregate
+        user_aggregate = UserAccountAggregate(user_id=command.user_id)
+
+        # Call aggregate command method (emits UserAccountCreated event)
+        user_aggregate.create_new_user(
             username=command.username,
             email=command.email,
             role=command.role,
             hashed_password=hashed_password,
             hashed_secret=hashed_secret,
+            first_name=command.first_name,
+            last_name=command.last_name,
         )
 
-        await self.event_bus.publish(
-            "transport.user-account-events",
-            event.model_dump()
+        # Publish events to EventStore + Transport (via BaseCommandHandler)
+        await self.publish_and_commit_events(
+            aggregate=user_aggregate,
+            aggregate_type="UserAccount",
+            expected_version=None,  # New aggregate
         )
 
         log.info(f"User account created with ID: {command.user_id}")
@@ -95,38 +109,49 @@ class CreateUserAccountHandler(ICommandHandler):
 
 
 # -----------------------------------------------------------------------------
-# AuthenticateUserHandler - Pure CQRS
+# AuthenticateUserHandler - Query-like with Audit Events
 # -----------------------------------------------------------------------------
 @command_handler(AuthenticateUserCommand)
-class AuthenticateUserHandler(ICommandHandler):
+class AuthenticateUserHandler(BaseCommandHandler):
     """
-    Handles the AuthenticateUserCommand using only buses.
-    Authentication is a query-like operation but returns data.
+    Handles the AuthenticateUserCommand.
+    Authentication is a query-like operation that emits audit events.
+    Note: Uses BaseCommandHandler for consistent event publishing, but no aggregate.
     """
 
     def __init__(self, deps: 'HandlerDependencies'):
-        self.command_bus = deps.command_bus
+        super().__init__(
+            event_bus=deps.event_bus,
+            transport_topic="transport.user-account-events",
+            event_store=deps.event_store
+        )
         self.query_bus = deps.query_bus
-        self.event_bus = deps.event_bus
 
     async def handle(self, command: AuthenticateUserCommand) -> Tuple[uuid.UUID, str, str]:
         log.info(f"Authenticating user: {command.username}")
 
-        # Get user by username using query bus
-        user = await self.query_bus.query(
-            GetUserByUsernameQuery(username=command.username)
-        )
-
-        log.info(f"DEBUG AUTH: GetUserByUsernameQuery returned: {user is not None}, is_active={user.is_active if user else 'N/A'}")
+        # Check if username is actually an email (contains @)
+        if '@' in command.username:
+            # Get user by email
+            user = await self.query_bus.query(
+                GetUserByEmailQuery(email=command.username)
+            )
+            log.info(f"DEBUG AUTH: GetUserByEmailQuery returned: {user is not None}, is_active={user.is_active if user else 'N/A'}")
+        else:
+            # Get user by username
+            user = await self.query_bus.query(
+                GetUserByUsernameQuery(username=command.username)
+            )
+            log.info(f"DEBUG AUTH: GetUserByUsernameQuery returned: {user is not None}, is_active={user.is_active if user else 'N/A'}")
 
         if not user or not user.is_active:
-            # Publish failed authentication event
+            # Publish failed authentication event (audit only, no state change)
             event = UserAuthenticationFailed(
                 username_attempted=command.username,
                 reason="User not found or inactive"
             )
             await self.event_bus.publish(
-                "transport.user-account-events",
+                self.transport_topic,
                 event.model_dump()
             )
             raise ValueError("Invalid username or password.")
@@ -140,25 +165,25 @@ class AuthenticateUserHandler(ICommandHandler):
         )
 
         if not credentials_result['valid']:
-            # Publish failed authentication event
+            # Publish failed authentication event (audit only, no state change)
             event = UserAuthenticationFailed(
                 username_attempted=command.username,
                 reason="Invalid password"
             )
             await self.event_bus.publish(
-                "transport.user-account-events",
+                self.transport_topic,
                 event.model_dump()
             )
             raise ValueError("Invalid username or password.")
 
-        # Publish success event (projection will update last login)
+        # Publish success event (audit only, projection may update last_login)
         event = UserAuthenticationSucceeded(
             user_id=user.id,
             username=user.username,
             role=user.role,
         )
         await self.event_bus.publish(
-            "transport.user-account-events",
+            self.transport_topic,
             event.model_dump()
         )
 
@@ -167,50 +192,49 @@ class AuthenticateUserHandler(ICommandHandler):
 
 
 # -----------------------------------------------------------------------------
-# DeleteUserHandler - Pure CQRS with TRUE SAGA Pattern
+# DeleteUserHandler - Event Sourcing Pattern
 # -----------------------------------------------------------------------------
 @command_handler(DeleteUserAccountCommand)
-class DeleteUserHandler(ICommandHandler):
+class DeleteUserHandler(BaseCommandHandler):
     """
-    Handles the DeleteUserAccountCommand using TRUE SAGA Pattern.
-    ENRICHED EVENT: Includes owned resource IDs to eliminate query_bus dependency in saga.
+    Handles the DeleteUserAccountCommand using Event Sourcing pattern.
     """
 
     def __init__(self, deps: 'HandlerDependencies'):
-        self.command_bus = deps.command_bus
+        super().__init__(
+            event_bus=deps.event_bus,
+            transport_topic="transport.user-account-events",
+            event_store=deps.event_store
+        )
         self.query_bus = deps.query_bus
-        self.event_bus = deps.event_bus
 
     async def handle(self, command: DeleteUserAccountCommand) -> None:
         log.info(f"Deleting user account: {command.user_id}, reason: {command.reason}")
 
-        # Verify user exists
+        # Load aggregate from read model to get current version
         user = await self.query_bus.query(
             GetUserProfileQuery(user_id=command.user_id)
         )
         if not user:
             raise ValueError("User not found.")
 
-        # TRUE SAGA PATTERN: Enrich event with owned resource IDs
-        # This eliminates the need for query_bus in saga (performance + reliability)
+        # Create aggregate (in production, would load from event store)
+        # For now, using simplified approach
+        user_aggregate = UserAccountAggregate(user_id=command.user_id)
+        # Note: In full Event Sourcing, would replay events here
+        # user_aggregate.version = user.version (if available)
 
-        # TODO: Query owned resources from WellWon domains when implemented
-        # (companies, shipments, documents, etc.)
-        owned_resource_ids = []
-        owned_entity_ids = []
-
-        # Simplified event for WellWon
-        event = UserAccountDeleted(
-            user_id=command.user_id,
+        # Call aggregate command method
+        user_aggregate.delete(
             reason=command.reason,
-            grace_period=command.grace_period,
-            owned_resource_ids=owned_resource_ids,
-            owned_entity_ids=owned_entity_ids,
+            grace_period=command.grace_period
         )
 
-        await self.event_bus.publish(
-            "transport.user-account-events",
-            event.model_dump()
+        # Publish events
+        await self.publish_and_commit_events(
+            aggregate=user_aggregate,
+            aggregate_type="UserAccount",
+            expected_version=None,  # Simplified for now
         )
 
         log.info(f"User account deleted (soft): {command.user_id}")
@@ -220,13 +244,16 @@ class DeleteUserHandler(ICommandHandler):
 # VerifyUserEmailHandler - Pure CQRS
 # -----------------------------------------------------------------------------
 @command_handler(VerifyUserEmailCommand)
-class VerifyUserEmailHandler(ICommandHandler):
-    """Handles the VerifyUserEmailCommand using only buses."""
+class VerifyUserEmailHandler(BaseCommandHandler):
+    """Handles the VerifyUserEmailCommand using Event Sourcing pattern."""
 
     def __init__(self, deps: 'HandlerDependencies'):
-        self.command_bus = deps.command_bus
+        super().__init__(
+            event_bus=deps.event_bus,
+            transport_topic="transport.user-account-events",
+            event_store=deps.event_store
+        )
         self.query_bus = deps.query_bus
-        self.event_bus = deps.event_bus
 
     async def handle(self, command: VerifyUserEmailCommand) -> None:
         log.info(f"Verifying email for user: {command.user_id}")
@@ -242,16 +269,17 @@ class VerifyUserEmailHandler(ICommandHandler):
             log.info(f"Email already verified for user {command.user_id}")
             return  # Idempotent
 
-        # TODO: Validate verification token
+        # Create aggregate
+        user_aggregate = UserAccountAggregate(user_id=command.user_id)
 
-        # Publish email verified event
-        event = UserEmailVerified(
-            user_id=command.user_id,
-        )
+        # Call aggregate command method
+        user_aggregate.verify_email()
 
-        await self.event_bus.publish(
-            "transport.user-account-events",
-            event.model_dump()
+        # Publish events
+        await self.publish_and_commit_events(
+            aggregate=user_aggregate,
+            aggregate_type="UserAccount",
+            expected_version=None,
         )
 
         log.info(f"Email verified for user: {command.user_id}")

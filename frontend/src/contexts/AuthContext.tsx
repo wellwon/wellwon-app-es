@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { logger } from '@/utils/logger';
 import type { Profile, SignUpMetadata, AuthResponse } from '@/types/auth';
-import { login as apiLogin, register as apiRegister, fetchMe as apiGetProfile } from '@/api/user_account';
+import { login as apiLogin, register as apiRegister, fetchMe as apiGetProfile, logout as apiLogout } from '@/api/user_account';
 import { API } from '@/api/core';
 
 // Simplified User type (no Supabase dependency)
@@ -34,13 +34,14 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const useAuth = () => {
+// Hook moved to separate export for better HMR compatibility
+export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-};
+}
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -53,7 +54,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const profileLoadingRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
+    // Reset to true on mount (important for React StrictMode)
+    console.log('[AuthContext] Component mounted, isMountedRef set to true');
+    isMountedRef.current = true;
     return () => {
+      console.log('[AuthContext] Component unmounting, isMountedRef set to false');
       isMountedRef.current = false;
     };
   }, []);
@@ -82,11 +87,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           username: profileData.username,
           email: profileData.email,
           role: profileData.role,
-          first_name: null,
-          last_name: null,
-          avatar_url: null,
-          bio: null,
-          phone: null,
+          first_name: profileData.first_name || null,
+          last_name: profileData.last_name || null,
+          avatar_url: profileData.avatar_url || null,
+          bio: profileData.bio || null,
+          phone: profileData.phone || null,
           active: profileData.is_active,
           is_active: profileData.is_active,
           is_developer: false,
@@ -98,12 +103,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           last_password_change: profileData.last_password_change,
           security_alerts_enabled: profileData.security_alerts_enabled,
           active_sessions_count: profileData.active_sessions_count,
-          // WellWon fields
-          first_name: profileData.first_name || null,
-          last_name: profileData.last_name || null,
-          avatar_url: profileData.avatar_url || null,
-          bio: profileData.bio || null,
-          phone: profileData.phone || null,
         };
         setProfile(mappedProfile);
       }
@@ -163,11 +162,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             username: profileData.username,
             email: profileData.email,
             role: profileData.role,
-            first_name: null,
-            last_name: null,
-            avatar_url: null,
-            bio: null,
-            phone: null,
+            first_name: profileData.first_name || null,
+            last_name: profileData.last_name || null,
+            avatar_url: profileData.avatar_url || null,
+            bio: profileData.bio || null,
+            phone: profileData.phone || null,
             active: profileData.is_active,
             is_active: profileData.is_active,
             is_developer: false,
@@ -179,12 +178,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             last_password_change: profileData.last_password_change,
             security_alerts_enabled: profileData.security_alerts_enabled,
             active_sessions_count: profileData.active_sessions_count,
-            // WellWon fields
-            first_name: profileData.first_name || null,
-            last_name: profileData.last_name || null,
-            avatar_url: profileData.avatar_url || null,
-            bio: profileData.bio || null,
-            phone: profileData.phone || null,
           };
 
           setUser(userObj);
@@ -215,16 +208,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signUp = async (email: string, password: string, metadata?: SignUpMetadata) => {
     try {
       // Call new backend register API
+      // Use email as username (simplest approach, OAuth-ready)
       await apiRegister(
-        email.split('@')[0], // Use email prefix as username
+        email, // username = email
         email,
         password,
-        (metadata as any)?.secret || 'default',  // TODO: Add secret to form
-        true // terms_accepted
+        undefined, // secret - optional, uses default on backend
+        true, // terms_accepted
+        false, // marketing_consent
+        undefined, // referral_code
+        metadata?.first_name, // WellWon profile field
+        metadata?.last_name   // WellWon profile field
       );
 
-      // Auto-login after registration
-      return await signIn(email, password);
+      // Don't auto-login - let event projector process first
+      // User will be redirected to login page
+      logger.info('Registration successful, please login', { component: 'AuthContext' });
+      return { error: null };
     } catch (error: any) {
       logger.error('Registration error', error, { component: 'AuthContext' });
       return { error: error?.response?.data || error };
@@ -234,7 +234,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signIn = async (email: string, password: string) => {
     try {
       // Call new backend login API
+      console.log('[AuthContext] signIn: calling apiLogin...');
       const authResponse = await apiLogin(email, password);
+      console.log('[AuthContext] signIn: login successful, storing tokens...');
 
       // Store JWT tokens
       localStorage.setItem('auth', JSON.stringify({
@@ -245,56 +247,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(authResponse.access_token);
 
       // Load profile
+      console.log('[AuthContext] signIn: loading profile...');
       const profileData = await apiGetProfile();
+      console.log('[AuthContext] signIn: profile loaded:', profileData);
 
-      if (isMountedRef.current) {
-        const userObj: User = {
-          id: profileData.user_id,
-          user_id: profileData.user_id,
-          username: profileData.username,
-          email: profileData.email,
-          role: profileData.role || 'user'
-        };
+      const userObj: User = {
+        id: profileData.user_id,
+        user_id: profileData.user_id,
+        username: profileData.username,
+        email: profileData.email,
+        role: profileData.role || 'user'
+      };
 
-        // Map API response to Profile type
-        const mappedProfile: Profile = {
-          id: profileData.user_id,
-          user_id: profileData.user_id,
-          username: profileData.username,
-          email: profileData.email,
-          role: profileData.role,
-          first_name: null,
-          last_name: null,
-          avatar_url: null,
-          bio: null,
-          phone: null,
-          active: profileData.is_active,
-          is_active: profileData.is_active,
-          is_developer: false,
-          email_verified: profileData.email_verified,
-          mfa_enabled: profileData.mfa_enabled,
-          created_at: profileData.created_at,
-          updated_at: profileData.created_at,
-          last_login: profileData.last_login,
-          last_password_change: profileData.last_password_change,
-          security_alerts_enabled: profileData.security_alerts_enabled,
-          active_sessions_count: profileData.active_sessions_count,
-          // WellWon fields
-          first_name: profileData.first_name || null,
-          last_name: profileData.last_name || null,
-          avatar_url: profileData.avatar_url || null,
-          bio: profileData.bio || null,
-          phone: profileData.phone || null,
-        };
+      // Map API response to Profile type
+      const mappedProfile: Profile = {
+        id: profileData.user_id,
+        user_id: profileData.user_id,
+        username: profileData.username,
+        email: profileData.email,
+        role: profileData.role,
+        first_name: profileData.first_name || null,
+        last_name: profileData.last_name || null,
+        avatar_url: profileData.avatar_url || null,
+        bio: profileData.bio || null,
+        phone: profileData.phone || null,
+        active: profileData.is_active,
+        is_active: profileData.is_active,
+        is_developer: false,
+        email_verified: profileData.email_verified,
+        mfa_enabled: profileData.mfa_enabled,
+        created_at: profileData.created_at,
+        updated_at: profileData.created_at,
+        last_login: profileData.last_login,
+        last_password_change: profileData.last_password_change,
+        security_alerts_enabled: profileData.security_alerts_enabled,
+        active_sessions_count: profileData.active_sessions_count,
+      };
 
-        setUser(userObj);
-        setProfile(mappedProfile);
-      }
+      console.log('[AuthContext] signIn: setting user and profile state...');
+      setUser(userObj);
+      setProfile(mappedProfile);
+      console.log('[AuthContext] signIn: state update called, userObj:', userObj);
 
       logger.info('User logged in successfully', { component: 'AuthContext' });
+      console.log('[AuthContext] signIn: returning success');
       return { error: null };
     } catch (error: any) {
       logger.error('Login error', error, { component: 'AuthContext' });
+      console.error('[AuthContext] signIn: error:', error);
       return { error: error?.response?.data || error };
     }
   };
@@ -306,6 +306,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
+    try {
+      // Call backend logout to invalidate server session
+      await apiLogout();
+    } catch (error) {
+      // Log but don't fail - still need to clear local state
+      logger.warn('Backend logout failed, clearing local state anyway', { component: 'AuthContext' });
+    }
+
     try {
       // Clear localStorage
       localStorage.removeItem('auth');
@@ -328,8 +336,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
-      // Call new backend PATCH /api/auth/profile
-      await API.patch('/api/auth/profile', updates);
+      // Call backend PATCH /user/profile
+      await API.patch('/user/profile', updates);
 
       // Update local state
       if (isMountedRef.current) {
@@ -350,8 +358,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { error: new Error('Пользователь не авторизован') };
       }
 
-      // Call new backend POST /api/auth/change-password
-      await API.post('/api/auth/change-password', {
+      // Call backend POST /user/change-password
+      await API.post('/user/change-password', {
         old_password: currentPassword,
         new_password: newPassword
       });

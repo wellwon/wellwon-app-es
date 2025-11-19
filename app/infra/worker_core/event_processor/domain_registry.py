@@ -10,6 +10,7 @@ from typing import Dict, Any, List, Optional, Callable, Type, Set
 from dataclasses import dataclass, field
 
 from app.common.base.base_model import BaseEvent
+from app.infra.event_store.sync_decorators import get_all_sync_events
 
 log = logging.getLogger("wellwon.worker.domain_registry")
 
@@ -65,6 +66,9 @@ class DomainRegistration:
 def create_user_account_domain() -> DomainRegistration:
     """Factory function for user account domain configuration"""
 
+    # Import projector module FIRST to trigger @sync_projection decorator registration
+    import app.user_account.projectors
+
     from app.user_account.events import (
         UserAccountCreated,
         UserAccountDeleted,
@@ -87,12 +91,10 @@ def create_user_account_domain() -> DomainRegistration:
 
         return UserAccountProjector(read_repo)
 
-    sync_events = {
-        "UserAccountCreated",
-        "UserAccountDeleted",
-        "UserEmailVerified",
-        "UserProfileUpdated",
-    }
+    # SYNC events are auto-discovered from @sync_projection decorators
+    # Single source of truth: decorator registry, no manual configuration needed
+    sync_events = get_all_sync_events()
+    sync_event_config = {}
 
     return DomainRegistration(
         name="user_account",
@@ -165,6 +167,10 @@ class DomainRegistry:
     def get_all_sync_events(self) -> List[str]:
         """Get list of all sync event types"""
         return self.sync_events
+
+    def is_sync_event(self, event_type: str) -> bool:
+        """Check if an event type is configured for synchronous projection"""
+        return event_type in self.sync_events
 
     def get_enabled_domains(self) -> List[DomainRegistration]:
         """Get list of enabled domains"""

@@ -67,25 +67,27 @@ class UserAccountReadRepo:
             hashed_secret: str,
             role: str,
             is_active: bool = True,
-            email_verified: bool = False
+            email_verified: bool = False,
+            first_name: str = None,
+            last_name: str = None
     ) -> bool:
         """
         Inserts a new user record into the users projection table (PostgreSQL).
         Called by the UserProjector on UserAccountCreated event.
         """
         sql = """
-              INSERT INTO user_accounts (id, username, email, hashed_password, hashed_secret, \
-                                         role, is_active, email_verified, created_at)
-              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+              INSERT INTO user_accounts (id, username, email, hashed_password, hashed_secret,
+                                         role, is_active, email_verified, first_name, last_name, created_at)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
               ON CONFLICT (id) DO NOTHING
-              RETURNING id; \
+              RETURNING id;
               """
 
         try:
             result = await pg_fetchrow(
                 sql, user_id, username, email,
                 hashed_password, hashed_secret, role,
-                is_active, email_verified
+                is_active, email_verified, first_name, last_name
             )
 
             if result:
@@ -306,6 +308,48 @@ class UserAccountReadRepo:
         return None
 
     @staticmethod
+    async def get_user_auth_details_by_email(email: str) -> Optional[UserAuthDataReadModel]:
+        """Fetches auth details by email address."""
+        sql = """
+              SELECT id, \
+                     username, \
+                     email, \
+                     hashed_password, \
+                     hashed_secret, \
+                     role,
+                     is_active, \
+                     created_at, \
+                     updated_at, \
+                     last_login,
+                     email_verified, \
+                     mfa_enabled, \
+                     security_alerts_enabled,
+                     last_password_change
+              FROM user_accounts
+              WHERE email = $1 \
+              """
+
+        row = await pg_fetchrow(sql, email)
+        if row:
+            return UserAuthDataReadModel(
+                user_id=row["id"],
+                username=row["username"],
+                email=row["email"],
+                hashed_password=row["hashed_password"],
+                hashed_secret=row.get("hashed_secret"),
+                role=row["role"],
+                is_active=row["is_active"],
+                created_at=row["created_at"],
+                updated_at=row.get("updated_at"),
+                last_login=row.get("last_login"),
+                email_verified=row.get("email_verified", False),
+                mfa_enabled=row.get("mfa_enabled", False),
+                security_alerts_enabled=row.get("security_alerts_enabled", True),
+                last_password_change=row.get("last_password_change")
+            )
+        return None
+
+    @staticmethod
     async def get_user_profile_by_user_id(user_id: UUID) -> Optional[UserAccountReadModel]:
         """Fetches user profile data by user ID for API responses."""
         sql = """
@@ -320,7 +364,14 @@ class UserAccountReadRepo:
                      updated_at,
                      mfa_enabled, \
                      security_alerts_enabled, \
-                     last_password_change
+                     last_password_change,
+                     first_name, \
+                     last_name, \
+                     avatar_url, \
+                     bio, \
+                     phone, \
+                     is_developer, \
+                     user_number
               FROM user_accounts
               WHERE id = $1 \
               """
@@ -340,7 +391,14 @@ class UserAccountReadRepo:
                 updated_at=row.get("updated_at"),
                 mfa_enabled=row.get("mfa_enabled", False),
                 security_alerts_enabled=row.get("security_alerts_enabled", True),
-                last_password_change=row.get("last_password_change")
+                last_password_change=row.get("last_password_change"),
+                first_name=row.get("first_name"),
+                last_name=row.get("last_name"),
+                avatar_url=row.get("avatar_url"),
+                bio=row.get("bio"),
+                phone=row.get("phone"),
+                is_developer=row.get("is_developer", False),
+                user_number=row.get("user_number")
             )
         return None
 

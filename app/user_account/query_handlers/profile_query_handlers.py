@@ -110,10 +110,27 @@ class GetUserByEmailQueryHandler(BaseQueryHandler[GetUserByEmailQuery, Optional[
 
     async def handle(self, query: GetUserByEmailQuery) -> UserProfile | None:
         """Find user by email"""
-        # TODO: Implement email-based lookup in repository
-        # For now, we need to iterate through users or add a dedicated method
-        self.log.warning("GetUserByEmailQuery: Repository method not yet implemented")
-        return None
+        # Same-domain query
+        auth_data = await self.user_repo.get_user_auth_details_by_email(query.email)
+
+        if not auth_data:
+            return None
+
+        return UserProfile(
+            id=auth_data.user_id,
+            username=auth_data.username,
+            email=auth_data.email,
+            role=auth_data.role,
+            is_active=auth_data.is_active,
+            email_verified=auth_data.email_verified,
+            mfa_enabled=auth_data.mfa_enabled,
+            created_at=auth_data.created_at,
+            last_login=auth_data.last_login,
+            last_password_change=auth_data.last_password_change,
+            security_alerts_enabled=auth_data.security_alerts_enabled,
+            preferences={},
+            metadata={}
+        )
 
 
 @readonly_query(CheckUserExistsQuery)

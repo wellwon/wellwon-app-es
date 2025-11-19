@@ -59,7 +59,9 @@ const AuthPage: React.FC = () => {
 
   // Перенаправляем авторизованных пользователей (только не во время регистрации)
   useEffect(() => {
+    console.log('[AuthPage] useEffect: user=', user, 'loading=', loading, 'registrationStep=', registrationStep);
     if (user && !loading && registrationStep !== 'success' && registrationStep !== 'completing') {
+      console.log('[AuthPage] useEffect: conditions met, navigating to /platform');
       navigate('/platform');
     }
   }, [user, loading, navigate, registrationStep]);
@@ -116,6 +118,22 @@ const AuthPage: React.FC = () => {
         return false;
       }
       if (mode === 'signup') {
+        if (!formData.firstName || !formData.firstName.trim()) {
+          toast({
+            title: 'Ошибка',
+            description: 'Введите имя',
+            variant: 'error'
+          });
+          return false;
+        }
+        if (!formData.lastName || !formData.lastName.trim()) {
+          toast({
+            title: 'Ошибка',
+            description: 'Введите фамилию',
+            variant: 'error'
+          });
+          return false;
+        }
         if (formData.password !== formData.confirmPassword) {
           toast({
             title: 'Ошибка',
@@ -178,6 +196,7 @@ const AuthPage: React.FC = () => {
             description: 'Вы успешно вошли в систему',
             variant: 'success'
           });
+          // Navigation is handled by useEffect watching user state
         }
       }
     } catch (error) {

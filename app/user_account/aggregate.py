@@ -85,6 +85,8 @@ class UserAccountAggregate:
             role: str,
             hashed_password: str,
             hashed_secret: str,
+            first_name: Optional[str] = None,
+            last_name: Optional[str] = None,
     ) -> None:
         """
         Handle CreateUserCommand:
@@ -104,6 +106,8 @@ class UserAccountAggregate:
             role=role,
             hashed_password=hashed_password,
             hashed_secret=hashed_secret,
+            first_name=first_name,
+            last_name=last_name,
         )
         self._apply_and_record(event)
 
@@ -235,8 +239,8 @@ class UserAccountAggregate:
         self.state.email_verified = False
         self.state.password_hash = event.hashed_password
         self.state.secret_hash = event.hashed_secret
-        self.state.account_mappings.clear()
-        self.state.connected_brokers.clear()
+        self.state.first_name = event.first_name
+        self.state.last_name = event.last_name
         self.state.created_at = event.timestamp
 
     def _on_password_changed(self, event: UserPasswordChanged) -> None:

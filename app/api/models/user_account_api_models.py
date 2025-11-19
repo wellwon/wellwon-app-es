@@ -26,7 +26,7 @@ from pydantic import (
 #  TYPE ALIASES (Pydantic v2 style)
 # ──────────────────────────────────────────────────────────────────────────────
 
-Username = Annotated[str, StringConstraints(min_length=3, max_length=50, pattern=r'^[a-zA-Z0-9_-]+$')]
+Username = Annotated[str, StringConstraints(min_length=3, max_length=100, pattern=r'^[a-zA-Z0-9_.@+-]+$')]
 Password = Annotated[str, StringConstraints(min_length=8, max_length=128)]
 StrongPassword = Annotated[str, StringConstraints(min_length=12, max_length=128)]
 SecretPhrase = Annotated[str, StringConstraints(min_length=6, max_length=100)]
@@ -106,10 +106,13 @@ class RegisterRequest(BaseModel):
     username: Username
     email: EmailStr
     password: Password
-    secret: SecretPhrase
+    secret: Optional[str] = Field(default="default_secret", min_length=6, max_length=100, description="Secret phrase for password recovery (optional)")
     terms_accepted: bool = True
     marketing_consent: bool = False
     referral_code: Optional[str] = None
+    # WellWon profile fields (optional, collected during registration)
+    first_name: Optional[str] = Field(None, max_length=100)
+    last_name: Optional[str] = Field(None, max_length=100)
 
     @field_validator('password')
     def validate_password_strength(cls, v: str) -> str:

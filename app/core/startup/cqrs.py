@@ -142,6 +142,7 @@ async def register_cqrs_handlers(app: FastAPI) -> None:
         event_store=app.state.event_store,
         command_bus=app.state.command_bus,
         query_bus=app.state.query_bus,
+        user_auth_service=app.state.user_auth_service,
         user_read_repo=app.state.user_account_read_repo,
         global_config={},
         saga_manager=app.state.saga_service.saga_manager if app.state.saga_service else None,

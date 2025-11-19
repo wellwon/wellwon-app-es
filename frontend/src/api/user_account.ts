@@ -54,6 +54,9 @@ export interface RegisterRequest {
   terms_accepted: boolean;
   marketing_consent?: boolean;
   referral_code?: string;
+  // WellWon profile fields (optional, collected during registration)
+  first_name?: string;
+  last_name?: string;
 }
 
 export interface VerifyPasswordRequest {
@@ -174,20 +177,28 @@ export async function register(
   username: string,
   email: string,
   password: string,
-  secret: string,
+  secret?: string,
   terms_accepted: boolean = true,
   marketing_consent: boolean = false,
-  referral_code?: string
+  referral_code?: string,
+  first_name?: string,
+  last_name?: string
 ): Promise<StatusResponse> {
-  const { data } = await APIWithoutAuth.post<StatusResponse>("/user/register", {
+  const payload: any = {
     username,
     email,
     password,
-    secret,
     terms_accepted,
     marketing_consent,
-    referral_code,
-  } as RegisterRequest);
+  };
+
+  // Only include optional fields if provided
+  if (secret) payload.secret = secret;
+  if (referral_code) payload.referral_code = referral_code;
+  if (first_name) payload.first_name = first_name;
+  if (last_name) payload.last_name = last_name;
+
+  const { data } = await APIWithoutAuth.post<StatusResponse>("/user/register", payload);
   return data;
 }
 

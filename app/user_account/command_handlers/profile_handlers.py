@@ -15,6 +15,8 @@ from app.user_account.queries import GetUserProfileQuery
 
 from app.infra.cqrs.command_bus import ICommandHandler
 from app.infra.cqrs.decorators import command_handler
+from app.common.base.base_command_handler import BaseCommandHandler
+from app.user_account.aggregate import UserAccountAggregate
 
 if TYPE_CHECKING:
     from app.infra.cqrs.handler_dependencies import HandlerDependencies
@@ -23,16 +25,19 @@ log = logging.getLogger("wellwon.users.profile_handlers")
 
 
 # -----------------------------------------------------------------------------
-# UpdateUserProfileHandler - WellWon Platform
+# UpdateUserProfileHandler - Event Sourcing Pattern
 # -----------------------------------------------------------------------------
 @command_handler(UpdateUserProfileCommand)
-class UpdateUserProfileHandler(ICommandHandler):
-    """Handles the UpdateUserProfileCommand for WellWon platform."""
+class UpdateUserProfileHandler(BaseCommandHandler):
+    """Handles the UpdateUserProfileCommand using Event Sourcing pattern."""
 
     def __init__(self, deps: 'HandlerDependencies'):
-        self.command_bus = deps.command_bus
+        super().__init__(
+            event_bus=deps.event_bus,
+            transport_topic="transport.user-account-events",
+            event_store=deps.event_store
+        )
         self.query_bus = deps.query_bus
-        self.event_bus = deps.event_bus
 
     async def handle(self, command: UpdateUserProfileCommand) -> None:
         log.info(f"Updating profile for user {command.user_id}")
@@ -44,9 +49,11 @@ class UpdateUserProfileHandler(ICommandHandler):
         if not user:
             raise ValueError("User not found.")
 
-        # Publish profile updated event
-        event = UserProfileUpdated(
-            user_id=command.user_id,
+        # Create aggregate
+        user_aggregate = UserAccountAggregate(user_id=command.user_id)
+
+        # Call aggregate command method
+        user_aggregate.update_profile(
             first_name=command.first_name,
             last_name=command.last_name,
             avatar_url=command.avatar_url,
@@ -54,9 +61,11 @@ class UpdateUserProfileHandler(ICommandHandler):
             phone=command.phone,
         )
 
-        await self.event_bus.publish(
-            "transport.user-account-events",
-            event.model_dump()
+        # Publish events
+        await self.publish_and_commit_events(
+            aggregate=user_aggregate,
+            aggregate_type="UserAccount",
+            expected_version=None,
         )
 
         log.info(f"Profile updated for user {command.user_id}")

@@ -30,6 +30,8 @@ from app.user_account.queries import (
 
 from app.infra.cqrs.command_bus import ICommandHandler
 from app.infra.cqrs.decorators import command_handler
+from app.common.base.base_command_handler import BaseCommandHandler
+from app.user_account.aggregate import UserAccountAggregate
 
 if TYPE_CHECKING:
     from app.infra.cqrs.handler_dependencies import HandlerDependencies
@@ -38,16 +40,19 @@ log = logging.getLogger("wellwon.users.password_handlers")
 
 
 # -----------------------------------------------------------------------------
-# ChangeUserPasswordHandler - Pure CQRS
+# ChangeUserPasswordHandler - Event Sourcing Pattern
 # -----------------------------------------------------------------------------
 @command_handler(ChangeUserPasswordCommand)
-class ChangeUserPasswordHandler(ICommandHandler):
-    """Handles the ChangeUserPasswordCommand using only buses."""
+class ChangeUserPasswordHandler(BaseCommandHandler):
+    """Handles the ChangeUserPasswordCommand using Event Sourcing pattern."""
 
     def __init__(self, deps: 'HandlerDependencies'):
-        self.command_bus = deps.command_bus
+        super().__init__(
+            event_bus=deps.event_bus,
+            transport_topic="transport.user-account-events",
+            event_store=deps.event_store
+        )
         self.query_bus = deps.query_bus
-        self.event_bus = deps.event_bus
 
     async def handle(self, command: ChangeUserPasswordCommand) -> None:
         log.info(f"Changing password for user: {command.user_id}")
@@ -75,31 +80,36 @@ class ChangeUserPasswordHandler(ICommandHandler):
             HashPasswordQuery(password=command.new_password)
         )
 
-        # Publish password changed event
-        event = UserPasswordChanged(
-            user_id=command.user_id,
-            new_hashed_password=new_hashed_password,
-        )
+        # Create aggregate
+        user_aggregate = UserAccountAggregate(user_id=command.user_id)
 
-        await self.event_bus.publish(
-            "transport.user-account-events",
-            event.model_dump()
+        # Call aggregate command method
+        user_aggregate.change_password(new_hashed_password=new_hashed_password)
+
+        # Publish events
+        await self.publish_and_commit_events(
+            aggregate=user_aggregate,
+            aggregate_type="UserAccount",
+            expected_version=None,
         )
 
         log.info(f"Password changed for user: {command.user_id}")
 
 
 # -----------------------------------------------------------------------------
-# ResetUserPasswordWithSecretHandler - Pure CQRS
+# ResetUserPasswordWithSecretHandler - Event Sourcing Pattern
 # -----------------------------------------------------------------------------
 @command_handler(ResetUserPasswordWithSecretCommand)
-class ResetUserPasswordWithSecretHandler(ICommandHandler):
-    """Handles the ResetUserPasswordWithSecretCommand using only buses."""
+class ResetUserPasswordWithSecretHandler(BaseCommandHandler):
+    """Handles the ResetUserPasswordWithSecretCommand using Event Sourcing pattern."""
 
     def __init__(self, deps: 'HandlerDependencies'):
-        self.command_bus = deps.command_bus
+        super().__init__(
+            event_bus=deps.event_bus,
+            transport_topic="transport.user-account-events",
+            event_store=deps.event_store
+        )
         self.query_bus = deps.query_bus
-        self.event_bus = deps.event_bus
 
     async def handle(self, command: ResetUserPasswordWithSecretCommand) -> None:
         log.info(f"Resetting password for username: {command.username}")
@@ -129,15 +139,17 @@ class ResetUserPasswordWithSecretHandler(ICommandHandler):
             HashPasswordQuery(password=command.new_password)
         )
 
-        # Publish password reset event
-        event = UserPasswordResetViaSecret(
-            user_id=user.id,
-            new_hashed_password=new_hashed_password,
-        )
+        # Create aggregate
+        user_aggregate = UserAccountAggregate(user_id=user.id)
 
-        await self.event_bus.publish(
-            "transport.user-account-events",
-            event.model_dump()
+        # Call aggregate command method
+        user_aggregate.reset_password_with_secret(new_hashed_password=new_hashed_password)
+
+        # Publish events
+        await self.publish_and_commit_events(
+            aggregate=user_aggregate,
+            aggregate_type="UserAccount",
+            expected_version=None,
         )
 
         log.info(f"Password reset for user: {user.id}")

@@ -22,14 +22,20 @@ class CreateUserAccountCommand(BaseModel):
     secret: str = Field(..., min_length=4, description="Secret word for password reset")
     role: str = Field(default="user", description="User role (user, admin, etc)")
 
+    # WellWon profile fields (optional, set during registration)
+    first_name: Optional[str] = Field(None, max_length=100)
+    last_name: Optional[str] = Field(None, max_length=100)
+
     # ADDED: Saga support
     saga_id: Optional[uuid.UUID] = Field(None, description="ID of orchestrating saga if part of larger workflow")
 
     @field_validator('username')
     @classmethod
     def username_valid(cls, v):
-        if not v.replace('_', '').replace('-', '').isalnum():
-            raise ValueError('Username must be alphanumeric with optional _ or -')
+        # Allow email format: alphanumeric with _ - @ . +
+        cleaned = v.replace('_', '').replace('-', '').replace('@', '').replace('.', '').replace('+', '')
+        if not cleaned.isalnum():
+            raise ValueError('Username must be alphanumeric or valid email format')
         return v.lower()
 
 

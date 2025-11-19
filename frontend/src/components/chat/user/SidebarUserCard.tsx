@@ -18,7 +18,14 @@ const SidebarUserCard = ({ collapsed = false }: SidebarUserCardProps) => {
     if (profile?.first_name || profile?.last_name) {
       return `${profile.first_name || ''} ${profile.last_name || ''}`.trim();
     }
-    // Fallback to email if profile exists but no name
+    // Fallback to username if no name
+    if (profile?.username) {
+      return profile.username;
+    }
+    if (user?.username) {
+      return user.username;
+    }
+    // Last resort fallback
     if (user?.email) {
       return user.email.split('@')[0];
     }

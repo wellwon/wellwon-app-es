@@ -53,6 +53,7 @@ from app.user_account.commands import (
     ChangeUserPasswordCommand,
     ResetUserPasswordWithSecretCommand,
     DeleteUserAccountCommand,
+    UpdateUserProfileCommand,
 )
 
 # CQRS Queries - USE THESE INSTEAD OF DIRECT REDIS ACCESS
@@ -362,6 +363,8 @@ async def register(
         email=payload.email,
         password=payload.password,
         secret=payload.secret,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
     )
 
     try:

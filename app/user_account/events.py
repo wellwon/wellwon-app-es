@@ -37,6 +37,9 @@ class UserAccountCreated(BaseEvent):
     role: str
     hashed_password: str
     hashed_secret: str
+    # WellWon profile fields
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
 @domain_event(category="domain")
 class UserPasswordChanged(BaseEvent):

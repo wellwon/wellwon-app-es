@@ -30,6 +30,15 @@ class UserAccountReadModel(BaseModel):
     security_alerts_enabled: bool = True
     last_password_change: Optional[datetime] = None
 
+    # WellWon Platform profile fields
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    bio: Optional[str] = None
+    phone: Optional[str] = None
+    is_developer: bool = False
+    user_number: Optional[int] = None
+
     # Computed fields
     user_id_str: str = Field(default="", description="String representation of user ID")
 

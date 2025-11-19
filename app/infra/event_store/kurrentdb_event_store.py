@@ -545,7 +545,7 @@ class KurrentDBEventStore:
             cache_key = self._cache_manager._make_key(
                 "event_store", "version", aggregate_type, str(aggregate_id)
             )
-            ttl = self._cache_manager.get_cache_ttl("event_store:version")
+            ttl = self._cache_manager._get_ttl("event_store:version")
             await self._cache_manager.set(cache_key, str(new_version), ttl=ttl)
 
         # Publish to transport via outbox (exactly-once delivery)
@@ -772,7 +772,7 @@ class KurrentDBEventStore:
                     cache_key = self._cache_manager._make_key(
                         "event_store", "version", aggregate_type, str(aggregate_id)
                     )
-                    ttl = self._cache_manager.get_cache_ttl("event_store:version")
+                    ttl = self._cache_manager._get_ttl("event_store:version")
                     await self._cache_manager.set(cache_key, str(version), ttl=ttl)
                     log.debug(f"Version cache UPDATED for {aggregate_type}-{aggregate_id}: {version}")
 

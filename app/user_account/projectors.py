@@ -56,6 +56,8 @@ class UserAccountProjector:
             hashed_password=event_data['hashed_password'],
             hashed_secret=event_data['hashed_secret'],
             role=event_data['role'],
+            first_name=event_data.get('first_name'),
+            last_name=event_data.get('last_name'),
         )
 
     @sync_projection("UserCreated")  # Legacy support
