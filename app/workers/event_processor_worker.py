@@ -149,7 +149,7 @@ class EventProcessingWorker(BaseWorker):
 
         # Log sync events for visibility
         enabled_domains = self.domain_registry.get_enabled_domains()
-        sync_events_by_domain = {domain: len(self.sync_events_registry) for domain in enabled_domains}
+        sync_events_by_domain = {domain.name: len(domain.sync_events) for domain in enabled_domains}
 
         if self.sync_events_registry:
             sample_events = list(self.sync_events_registry)[:5]
@@ -157,7 +157,7 @@ class EventProcessingWorker(BaseWorker):
                 f"Sync events ({len(self.sync_events_registry)} total): "
                 f"{sample_events}{'...' if len(self.sync_events_registry) > 5 else ''}"
             )
-            self.logger.info(f"Enabled domains: {enabled_domains}")
+            self.logger.info(f"Enabled domains: {[d.name for d in enabled_domains]}")
 
         # Create event processor with CQRS buses and sync events
         self.event_processor = EventProcessor(
