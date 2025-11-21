@@ -382,7 +382,9 @@ class UserAccountProjector:
             last_name=event_data.get('last_name'),
             avatar_url=event_data.get('avatar_url'),
             bio=event_data.get('bio'),
-            phone=event_data.get('phone')
+            phone=event_data.get('phone'),
+            user_type=event_data.get('user_type'),
+            is_developer=event_data.get('is_developer')
         )
 
         # Invalidate cache

@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useProfileModal } from '@/contexts/ProfileModalContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
+import { getUserTypeLabel } from '@/constants/userTypes';
 
 // Conditional platform context import to avoid errors on non-platform pages
 let usePlatform: any;
@@ -95,21 +96,14 @@ const UniversalProfileDropdown = ({
     return 'Пользователь';
   };
 
-  const getUserTypeLabel = () => {
-    const currentType = isOnPlatform ? effectiveUserType : (profile?.is_developer ? 'developer' : 'manager');
-    const baseLabel = (() => {
-      switch (currentType) {
-        case 'ww_manager': return 'Менеджер WellWon';
-        case 'ww_developer': return 'Разработчик WellWon';
-        default: return 'Пользователь';
-      }
-    })();
-    
+  const getUserTypeLabelText = () => {
+    const baseLabel = getUserTypeLabel(profile?.user_type);
+
     // Add emulation indicator if in test mode or forced user type
     if (isOnPlatform && forcedUserType) {
       return `${baseLabel} (эмуляция)`;
     }
-    
+
     return baseLabel;
   };
 
@@ -152,7 +146,7 @@ const UniversalProfileDropdown = ({
                 {getUserDisplayName()}
               </h3>
               <p className="text-gray-400 text-sm">
-                {getUserTypeLabel()}
+                {getUserTypeLabelText()}
               </p>
               <p className="text-gray-500 text-xs truncate">
                 {user?.email}

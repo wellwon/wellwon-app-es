@@ -110,7 +110,7 @@ API.interceptors.response.use(
 
           // Make refresh request directly without using the intercepted client
           const refreshResponse = await axios.post(
-            `${import.meta.env?.VITE_API_URL || "http://localhost:5001"}/auth/refresh`,
+            `${import.meta.env?.VITE_API_URL || "http://localhost:5002"}/auth/refresh`,
             { refresh_token: refreshToken },
             {
               headers: {

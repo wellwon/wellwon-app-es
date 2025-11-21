@@ -79,8 +79,7 @@ if __name__ == "__main__":
         "app.server:app",
         "--host", host,
         "--port", str(port),
-        "--http", "2",
-        "--websockets"
+        "--http", "2"
     ]
 
     if reload:

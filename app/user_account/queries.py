@@ -12,6 +12,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.infra.cqrs.query_bus import Query
+from app.user_account.enums import UserType, DEFAULT_USER_TYPE
 
 
 # =============================================================================
@@ -322,6 +323,15 @@ class UserProfile(BaseModel):
     security_alerts_enabled: bool
     preferences: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    # WellWon Platform fields
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    bio: Optional[str] = None
+    phone: Optional[str] = None
+    user_type: str = DEFAULT_USER_TYPE.value
+    user_number: Optional[int] = None
 
 
 class UserSession(BaseModel):

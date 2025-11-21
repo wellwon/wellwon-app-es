@@ -11,6 +11,7 @@ import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { UTMProvider } from '@/contexts/UTMContext';
 
 import { AuthProvider } from './contexts/AuthContext';
+import { WSEProvider } from '@/providers/WSEProvider';
 import { ProfileModalProvider } from '@/contexts/ProfileModalContext';
 import { EnhancedProfileEditModal } from '@/components/shared/EnhancedProfileEditModal';
 import { useProfileModal } from '@/contexts/ProfileModalContext';
@@ -123,11 +124,13 @@ function App() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <ProfileModalProvider>
-            <BrowserRouter>
-              <AppContentWithProfile />
-            </BrowserRouter>
-          </ProfileModalProvider>
+          <WSEProvider>
+            <ProfileModalProvider>
+              <BrowserRouter>
+                <AppContentWithProfile />
+              </BrowserRouter>
+            </ProfileModalProvider>
+          </WSEProvider>
         </AuthProvider>
 
         {/* React Query Devtools (only in dev) */}

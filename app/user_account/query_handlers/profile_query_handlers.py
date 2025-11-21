@@ -21,6 +21,7 @@ from app.user_account.queries import (
     GetUserResourcesQuery,
     UserProfile,
 )
+from app.user_account.enums import UserType, DEFAULT_USER_TYPE
 from app.common.exceptions.exceptions import ResourceNotFoundError
 
 if TYPE_CHECKING:
@@ -63,7 +64,15 @@ class GetUserProfileQueryHandler(BaseQueryHandler[GetUserProfileQuery, UserProfi
             last_password_change=getattr(profile, 'last_password_change', None),
             security_alerts_enabled=getattr(profile, 'security_alerts_enabled', True),
             preferences=getattr(profile, 'preferences', {}) if query.include_preferences else {},
-            metadata=getattr(profile, 'metadata', {})
+            metadata=getattr(profile, 'metadata', {}),
+            # WellWon Platform fields
+            first_name=getattr(profile, 'first_name', None),
+            last_name=getattr(profile, 'last_name', None),
+            avatar_url=getattr(profile, 'avatar_url', None),
+            bio=getattr(profile, 'bio', None),
+            phone=getattr(profile, 'phone', None),
+            user_type=getattr(profile, 'user_type', DEFAULT_USER_TYPE.value),
+            user_number=getattr(profile, 'user_number', None),
         )
 
 

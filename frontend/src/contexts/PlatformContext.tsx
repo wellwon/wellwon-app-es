@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthContext';
-import { getAvailableSections, getDefaultSectionForUser, getUserTheme, isUserAllowedInSection, type SectionId } from '@/components/platform/shared/SectionConfig';
+import { getAvailableSections, getDefaultSectionForUser, getUserTheme, isUserAllowedInSection, type SectionId } from '@/config/SectionConfig';
 import type { Company } from '@/types/realtime-chat';
 import type { SectionConfig as PlatformSectionConfig } from '@/types/platform';
 import { logger } from '@/utils/logger';
@@ -65,6 +65,22 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       navigate(`/platform/${defaultSection}`, { replace: true });
     }
   }, [section, navigate, isValidAndAccessibleSection, isDeveloper]);
+
+  // Auto-redirect when role changes and current section becomes inaccessible
+  useEffect(() => {
+    if (!activeSection) return;
+
+    const allowed = isUserAllowedInSection(activeSection, isDeveloper);
+    if (!allowed) {
+      logger.info('Role changed - current section no longer accessible, redirecting', {
+        section: activeSection,
+        isDeveloper,
+        component: 'PlatformContext'
+      });
+      const defaultSection = getDefaultSectionForUser(isDeveloper);
+      navigate(`/platform/${defaultSection}`, { replace: true });
+    }
+  }, [isDeveloper, activeSection, navigate]);
 
   // Загрузка состояния из localStorage (только один раз)
   useEffect(() => {

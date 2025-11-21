@@ -108,6 +108,8 @@ class UpdateUserProfileCommand(BaseModel):
     avatar_url: Optional[str] = Field(None, max_length=500)
     bio: Optional[str] = Field(None, max_length=1000)
     phone: Optional[str] = Field(None, max_length=20)
+    user_type: Optional[str] = None
+    is_developer: Optional[bool] = None
 
     # ADDED: Saga support
     saga_id: Optional[uuid.UUID] = Field(None, description="ID of orchestrating saga if part of larger workflow")

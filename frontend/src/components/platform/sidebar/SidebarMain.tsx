@@ -15,7 +15,7 @@ import { supabase } from '@/integrations/supabase/client';
 import type { Company } from '@/types/realtime-chat';
 
 import { ChevronRight, ChevronLeft } from 'lucide-react';
-import { getAvailableSectionGroups, getChatSection, getUngroupedSections, SectionConfig, SectionId } from '../shared/SectionConfig';
+import { getAvailableSectionGroups, getChatSection, getUngroupedSections, SectionConfig, SectionId } from '@/config/SectionConfig';
 
 // Вспомогательная функция для рендеринга секции
 const renderSection = (section: SectionConfig, activeSection: SectionId, setActiveSection: (id: SectionId) => void, sidebarCollapsed: boolean, chatMode: 'groups' | 'personal', setChatMode: (mode: 'groups' | 'personal') => void) => {

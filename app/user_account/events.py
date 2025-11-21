@@ -104,6 +104,8 @@ class UserProfileUpdated(BaseEvent):
     avatar_url: Optional[str] = None
     bio: Optional[str] = None
     phone: Optional[str] = None
+    user_type: Optional[str] = None
+    is_developer: Optional[bool] = None
 
 # =============================================================================
 # EOF

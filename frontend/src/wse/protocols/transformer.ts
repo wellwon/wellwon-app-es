@@ -10,6 +10,7 @@ const INTERNAL_TO_WS_EVENT_TYPE_MAP: Record<string, string> = {
   // User account events
   'UserAccountUpdated': 'user_account_update',
   'UserAccountDeleted': 'user_account_remove',
+  'UserProfileUpdated': 'user_profile_updated',
 
   // Generic entity events
   'EntityUpdated': 'entity_update',

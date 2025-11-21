@@ -103,6 +103,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           last_password_change: profileData.last_password_change,
           security_alerts_enabled: profileData.security_alerts_enabled,
           active_sessions_count: profileData.active_sessions_count,
+          user_type: profileData.user_type,
+          user_number: profileData.user_number,
         };
         setProfile(mappedProfile);
       }
@@ -178,6 +180,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             last_password_change: profileData.last_password_change,
             security_alerts_enabled: profileData.security_alerts_enabled,
             active_sessions_count: profileData.active_sessions_count,
+            user_type: profileData.user_type,
+            user_number: profileData.user_number,
           };
 
           setUser(userObj);
@@ -204,6 +208,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       mounted = false;
     };
   }, []);
+
+  // Listen for WSE profile update events
+  useEffect(() => {
+    const handleProfileUpdate = async (event: CustomEvent) => {
+      try {
+        logger.info('Profile update event received via WSE', { component: 'AuthContext' });
+
+        // Refetch profile from backend to get latest data
+        if (profile?.user_id) {
+          await fetchProfile(profile.user_id);
+        }
+      } catch (error) {
+        logger.error('Failed to handle profile update event', error, { component: 'AuthContext' });
+      }
+    };
+
+    window.addEventListener('userProfileUpdated', handleProfileUpdate as EventListener);
+
+    return () => {
+      window.removeEventListener('userProfileUpdated', handleProfileUpdate as EventListener);
+    };
+  }, [profile?.user_id, fetchProfile]);
 
   const signUp = async (email: string, password: string, metadata?: SignUpMetadata) => {
     try {
@@ -238,10 +264,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const authResponse = await apiLogin(email, password);
       console.log('[AuthContext] signIn: login successful, storing tokens...');
 
-      // Store JWT tokens
+      // Store JWT tokens with expiration
       localStorage.setItem('auth', JSON.stringify({
         token: authResponse.access_token,
-        refresh_token: authResponse.refresh_token
+        refresh_token: authResponse.refresh_token,
+        expires_at: Date.now() + (authResponse.expires_in * 1000),
+        token_type: authResponse.token_type,
+        session_id: authResponse.session_id
       }));
 
       setToken(authResponse.access_token);
@@ -282,12 +311,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         last_password_change: profileData.last_password_change,
         security_alerts_enabled: profileData.security_alerts_enabled,
         active_sessions_count: profileData.active_sessions_count,
+        user_type: profileData.user_type,
+        user_number: profileData.user_number,
       };
 
       console.log('[AuthContext] signIn: setting user and profile state...');
       setUser(userObj);
       setProfile(mappedProfile);
       console.log('[AuthContext] signIn: state update called, userObj:', userObj);
+
+      // Dispatch custom event to trigger WSE reconnection
+      console.log('[AuthContext] signIn: dispatching authSuccess event for WSE');
+      window.dispatchEvent(new Event('authSuccess'));
 
       logger.info('User logged in successfully', { component: 'AuthContext' });
       console.log('[AuthContext] signIn: returning success');

@@ -258,7 +258,7 @@ export function useWSE(
   const finalConfig = useMemo<WSEConfig>(() => {
     const endpoints = config?.endpoints || getEndpoints();
     return {
-      endpoints: endpoints.length > 0 ? endpoints : ['ws://localhost:5001/ws/events'],
+      endpoints: endpoints.length > 0 ? endpoints : ['ws://localhost:5002/wse'],
       reconnection: {
         ...DEFAULT_CONFIG.reconnection!,
         ...config?.reconnection,

@@ -1,5 +1,5 @@
 """
-KurrentDB Event Store Implementation for WellWon
+KurrentDB Event Store Implementation for TradeCore
 
 Full-featured production-ready implementation with feature parity to RedPandaEventStore.
 
@@ -19,7 +19,7 @@ Features:
 - Health checks
 - Metrics
 
-Author: WellWon Team
+Author: TradeCore Team
 Date: January 2025
 """
 
@@ -48,7 +48,7 @@ from kurrentdbclient.exceptions import (
     NotFoundError as StreamNotFoundError  # Alias for compatibility
 )
 
-# WellWon imports
+# TradeCore imports
 from app.common.base.base_model import BaseEvent
 from app.infra.event_store.event_envelope import EventEnvelope, AggregateSnapshot
 
@@ -72,7 +72,7 @@ from app.infra.persistence.cache_manager import CacheManager
 if TYPE_CHECKING:
     pass
 
-log = logging.getLogger("wellwon.kurrentdb")
+log = logging.getLogger("tradecore.kurrentdb")
 
 
 # =============================================================================
@@ -135,7 +135,7 @@ class EventStoreStats:
 
 class KurrentDBEventStore:
     """
-    KurrentDB-based Event Store for WellWon.
+    KurrentDB-based Event Store for TradeCore.
 
     Full-featured production implementation with:
     - Feature parity with RedPandaEventStore (61 methods)
@@ -202,7 +202,7 @@ class KurrentDBEventStore:
         self._cache_manager = cache_manager  # Centralized cache manager
         self._aggregate_registry = aggregate_registry or {}  # ADDED (2025-11-14): Aggregate repositories for proper snapshots
 
-        # SYNC projection support (critical for WellWon)
+        # SYNC projection support (critical for TradeCore)
         self._synchronous_event_types: Set[str] = set()
         self._sync_projection_handlers: Dict[str, List[Callable[[EventEnvelope], Awaitable[None]]]] = {}
         self._sync_projections_enabled: bool = True
@@ -545,7 +545,7 @@ class KurrentDBEventStore:
             cache_key = self._cache_manager._make_key(
                 "event_store", "version", aggregate_type, str(aggregate_id)
             )
-            ttl = self._cache_manager._get_ttl("event_store:version")
+            ttl = self._cache_manager.get_cache_ttl("event_store:version")
             await self._cache_manager.set(cache_key, str(new_version), ttl=ttl)
 
         # Publish to transport via outbox (exactly-once delivery)
@@ -772,7 +772,7 @@ class KurrentDBEventStore:
                     cache_key = self._cache_manager._make_key(
                         "event_store", "version", aggregate_type, str(aggregate_id)
                     )
-                    ttl = self._cache_manager._get_ttl("event_store:version")
+                    ttl = self._cache_manager.get_cache_ttl("event_store:version")
                     await self._cache_manager.set(cache_key, str(version), ttl=ttl)
                     log.debug(f"Version cache UPDATED for {aggregate_type}-{aggregate_id}: {version}")
 
@@ -792,6 +792,10 @@ class KurrentDBEventStore:
             log.error(f"Error getting version for {stream_name}: {type(e).__name__}: {e}")
             raise EventStoreError(f"Failed to get aggregate version: {e}") from e
 
+    # =========================================================================
+    # Stream Archival (Soft Delete)
+    # =========================================================================
+
     async def archive_stream(
         self,
         aggregate_id: uuid.UUID,
@@ -801,54 +805,53 @@ class KurrentDBEventStore:
         """
         Archive (soft-delete) an aggregate stream in KurrentDB.
 
-        The stream is tombstoned but events are preserved for audit/compliance.
-        This is used by StreamArchivalService to keep PostgreSQL (read model)
-        and EventStore (write model) in sync when entities are deleted.
+        This should be called when an entity is deleted from PostgreSQL to prevent
+        stale events from being replayed. The stream is tombstoned but events are
+        preserved for audit/compliance.
 
         Args:
-            aggregate_id: Aggregate UUID
-            aggregate_type: Aggregate type (e.g., "user_account")
+            aggregate_id: The aggregate ID
+            aggregate_type: The aggregate type (e.g., "broker_account", "order")
             reason: Reason for archival (for logging)
 
         Returns:
-            True if stream was archived (or already deleted), False on error
+            True if archived successfully, False if stream not found or error
         """
-        stream_name = self._get_stream_name(aggregate_id, aggregate_type)
+        stream_name = f"{aggregate_type}-{aggregate_id}"
 
         if not self._initialized or not self._client:
-            log.warning(f"Cannot archive stream {stream_name}: KurrentDB not initialized")
+            log.warning(f"EventStore not initialized, cannot archive stream {stream_name}")
             return False
 
         try:
-            # KurrentDB soft-delete: deletes stream but keeps events for audit
+            # KurrentDB soft-delete: deletes stream but keeps events
+            # Events can still be read with include_deleted=True
             await self._client.delete_stream(stream_name)
 
-            log.info(f"Archived stream '{stream_name}': {reason}")
+            log.info(
+                f"Archived EventStore stream '{stream_name}': {reason}. "
+                f"Events preserved for audit but stream is tombstoned."
+            )
 
             # Also archive snapshot stream if exists
-            snapshot_stream = self._get_snapshot_stream_name(aggregate_id, aggregate_type)
+            snapshot_stream = f"snapshot-{aggregate_type}-{aggregate_id}"
             try:
                 await self._client.delete_stream(snapshot_stream)
-                log.debug(f"Archived snapshot stream '{snapshot_stream}'")
-            except StreamNotFoundError:
-                pass  # Snapshot may not exist
-            except Exception as e:
-                log.debug(f"Could not archive snapshot stream '{snapshot_stream}': {e}")
+                log.debug(f"Also archived snapshot stream '{snapshot_stream}'")
+            except Exception:
+                # Snapshot stream might not exist, that's OK
+                pass
 
             # Invalidate version cache
-            if self._cache_manager and self._version_cache_enabled:
-                cache_key = self._cache_manager._make_key(
-                    "event_store", "version", aggregate_type, str(aggregate_id)
-                )
+            if self._cache_manager:
+                cache_key = f"event_store:version:{stream_name}"
                 await self._cache_manager.delete(cache_key)
-                log.debug(f"Invalidated version cache for {stream_name}")
 
             return True
 
         except StreamNotFoundError:
-            # Stream already deleted or never existed
-            log.debug(f"Stream '{stream_name}' not found (already deleted or never existed)")
-            return True
+            log.debug(f"Stream '{stream_name}' not found for archival (may already be deleted)")
+            return True  # Consider success - stream doesn't exist
 
         except Exception as e:
             log.error(f"Error archiving stream {stream_name}: {e}")
@@ -1075,7 +1078,7 @@ class KurrentDBEventStore:
             return False
 
     # =========================================================================
-    # SYNC Projections (Critical for WellWon)
+    # SYNC Projections (Critical for TradeCore)
     # =========================================================================
 
     def enable_synchronous_projections(self, event_types: Set[str]) -> None:
@@ -1128,7 +1131,7 @@ class KurrentDBEventStore:
         """
         Process projections synchronously for immediate consistency.
 
-        This is CRITICAL for WellWon's SYNC projections (balances, positions, orders).
+        This is CRITICAL for TradeCore's SYNC projections (balances, positions, orders).
         """
         if not self._sync_projections_enabled:
             return
@@ -1156,10 +1159,24 @@ class KurrentDBEventStore:
                 handler_start = time.time()
 
                 try:
-                    await asyncio.wait_for(
-                        handler(envelope),
-                        timeout=self._sync_projection_timeout
-                    )
+                    # CRITICAL FIX: handler is a ProjectionHandler object, not a function
+                    # We need to check if it has handler_func attribute (decorator pattern)
+                    # or if it's already a callable function (legacy pattern)
+                    if hasattr(handler, 'handler_func'):
+                        # New decorator pattern: ProjectionHandler with handler_func
+                        # Note: We don't have projector_instance here in KurrentDB
+                        # This is a limitation - sync projections should be executed via EventProcessor
+                        log.warning(
+                            f"Sync projection {handler.event_type} called from KurrentDB directly. "
+                            f"This should be handled by EventProcessor with proper projector instances."
+                        )
+                        continue
+                    else:
+                        # Legacy pattern: handler is already a callable
+                        await asyncio.wait_for(
+                            handler(envelope),
+                            timeout=self._sync_projection_timeout
+                        )
 
                     duration = time.time() - handler_start
                     if envelope.event_type not in self._sync_projection_durations:
@@ -1856,6 +1873,31 @@ async def create_and_initialize_kurrentdb_event_store(
     event_store = create_kurrentdb_event_store(config=config, **kwargs)
     await event_store.initialize()
     return event_store
+
+
+# =============================================================================
+# Singleton Instance
+# =============================================================================
+
+_event_store_singleton: Optional[KurrentDBEventStore] = None
+
+
+def set_event_store_singleton(event_store: KurrentDBEventStore) -> None:
+    """
+    Set the global EventStore singleton.
+    Called during application startup after EventStore is initialized.
+    """
+    global _event_store_singleton
+    _event_store_singleton = event_store
+    log.info("EventStore singleton set")
+
+
+def get_event_store_singleton() -> Optional[KurrentDBEventStore]:
+    """
+    Get the global EventStore singleton.
+    Returns None if not yet initialized.
+    """
+    return _event_store_singleton
 
 
 # =============================================================================

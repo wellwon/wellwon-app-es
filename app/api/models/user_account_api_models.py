@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, Dict, Any, List, Annotated
+from typing import Optional, Dict, Any, List, Annotated, Literal
 from datetime import datetime, timezone
 from enum import Enum
 
@@ -21,6 +21,8 @@ from pydantic import (
     StringConstraints,
     model_validator
 )
+
+from app.user_account.enums import UserType, DEFAULT_USER_TYPE
 
 # ──────────────────────────────────────────────────────────────────────────────
 #  TYPE ALIASES (Pydantic v2 style)
@@ -222,7 +224,9 @@ class UserProfileResponse(BaseModel):
     avatar_url: Optional[str] = None
     bio: Optional[str] = None
     phone: Optional[str] = None
-    user_type: str = Field(default="entrepreneur", description="WellWon user type: ww_admin, ww_manager, entrepreneur, investor")
+    user_type: str = Field(
+        description="User type (business role) - any string value allowed"
+    )
     user_number: Optional[int] = None
 
 
@@ -239,6 +243,12 @@ class UpdateProfileRequest(BaseModel):
     avatar_url: Optional[str] = Field(None, max_length=500)
     bio: Optional[str] = Field(None, max_length=1000)
     phone: Optional[str] = Field(None, max_length=20)
+    user_type: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="User type (business role) - any string value allowed"
+    )
+    is_developer: Optional[bool] = Field(None, description="Developer flag")
 
 
 # ──────────────────────────────────────────────────────────────────────────────

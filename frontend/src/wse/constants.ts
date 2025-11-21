@@ -244,7 +244,7 @@ export function getEndpoints(): string[] {
     if (endpoints.length === 0) {
         // DEVELOPMENT: Use localhost directly
         if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-            endpoints.push('ws://localhost:5001');
+            endpoints.push('ws://localhost:5002');
         } else {
             // PRODUCTION: Use current host
             const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';

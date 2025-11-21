@@ -49,7 +49,7 @@ class UserAccountAggregateState(BaseModel):
     avatar_url: Optional[str] = None
     bio: Optional[str] = None
     phone: Optional[str] = None
-    user_type: str = "entrepreneur"  # ww_admin, ww_manager, entrepreneur, investor
+    user_type: str = "client"  # Default user type, can be any string
     user_number: Optional[int] = None  # Auto-increment user number
 
 
@@ -179,7 +179,9 @@ class UserAccountAggregate:
             last_name: Optional[str] = None,
             avatar_url: Optional[str] = None,
             bio: Optional[str] = None,
-            phone: Optional[str] = None
+            phone: Optional[str] = None,
+            user_type: Optional[str] = None,
+            is_developer: Optional[bool] = None
     ) -> None:
         """
         Handle UpdateUserProfileCommand:
@@ -195,7 +197,9 @@ class UserAccountAggregate:
             last_name=last_name,
             avatar_url=avatar_url,
             bio=bio,
-            phone=phone
+            phone=phone,
+            user_type=user_type,
+            is_developer=is_developer
         )
         self._apply_and_record(event)
 
@@ -314,7 +318,7 @@ class UserAccountAggregate:
         self.state.avatar_url = snapshot_data.get("avatar_url")
         self.state.bio = snapshot_data.get("bio")
         self.state.phone = snapshot_data.get("phone")
-        self.state.user_type = snapshot_data.get("user_type", "entrepreneur")
+        self.state.user_type = snapshot_data.get("user_type", "client")
         self.state.user_number = snapshot_data.get("user_number")
 
         if snapshot_data.get("created_at"):

@@ -392,8 +392,8 @@ async def websocket_endpoint(
         adapter_monitoring_service=adapter_monitoring_service
     )
 
-    # Create message handler with snapshot service
-    message_handler = WSEHandler(connection, snapshot_service=snapshot_service)
+    # Create message handler
+    message_handler = WSEHandler(connection)
 
     try:
         # Initialize connection

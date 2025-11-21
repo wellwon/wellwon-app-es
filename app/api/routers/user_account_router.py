@@ -427,7 +427,15 @@ async def get_me(
         security_alerts_enabled=profile_data.security_alerts_enabled,
         active_sessions_count=session_count_result['active_sessions'],
         preferences=profile_data.preferences,
-        metadata=profile_data.metadata
+        metadata=profile_data.metadata,
+        # WellWon Platform fields
+        first_name=profile_data.first_name,
+        last_name=profile_data.last_name,
+        avatar_url=profile_data.avatar_url,
+        bio=profile_data.bio,
+        phone=profile_data.phone,
+        user_type=profile_data.user_type,
+        user_number=profile_data.user_number,
     )
 
 
@@ -458,7 +466,9 @@ async def update_profile(
             last_name=payload.last_name,
             avatar_url=payload.avatar_url,
             bio=payload.bio,
-            phone=payload.phone
+            phone=payload.phone,
+            user_type=payload.user_type,
+            is_developer=payload.is_developer
         )
 
         await command_bus.send(command)

@@ -59,6 +59,8 @@ class UpdateUserProfileHandler(BaseCommandHandler):
             avatar_url=command.avatar_url,
             bio=command.bio,
             phone=command.phone,
+            user_type=command.user_type,
+            is_developer=command.is_developer,
         )
 
         # Publish events

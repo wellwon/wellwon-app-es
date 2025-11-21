@@ -5,6 +5,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { User } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import UniversalProfileDropdown from '@/components/shared/UniversalProfileDropdown';
+import { getUserTypeLabel } from '@/constants/userTypes';
 
 interface SidebarUserCardProps {
   collapsed?: boolean;
@@ -30,6 +31,10 @@ const SidebarUserCard = ({ collapsed = false }: SidebarUserCardProps) => {
       return user.email.split('@')[0];
     }
     return 'Гость';
+  };
+
+  const getUserTypeLabelText = () => {
+    return getUserTypeLabel(profile?.user_type);
   };
 
   const getUserInitials = () => {
@@ -88,9 +93,7 @@ const SidebarUserCard = ({ collapsed = false }: SidebarUserCardProps) => {
             )}
           </div>
           <p className="text-xs text-gray-400">
-            {profile ? (
-              profile.is_developer ? 'Разработчик' : 'Менеджер'
-            ) : 'Системный пользователь'}
+            {profile ? getUserTypeLabelText() : 'Системный пользователь'}
           </p>
         </div>
       </Button>

@@ -28,6 +28,23 @@ export class EventHandlers {
     }
   }
 
+  static handleUserProfileUpdated(message: WSMessage): void {
+    try {
+      const profileData = message.p;
+      logger.info('User profile updated event received:', profileData);
+
+      // Invalidate React Query cache for profile
+      queryClient.invalidateQueries({ queryKey: ['user', 'profile'] });
+
+      // Dispatch event for AuthContext
+      window.dispatchEvent(new CustomEvent('userProfileUpdated', {
+        detail: profileData
+      }));
+    } catch (error) {
+      logger.error('Error handling user profile update:', error);
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Generic Entity Update Handler
   // ─────────────────────────────────────────────────────────────────────────
@@ -235,6 +252,7 @@ export class EventHandlers {
     try {
       // User account events
       messageProcessor.registerHandler('user_account_update', this.handleUserAccountUpdate);
+      messageProcessor.registerHandler('user_profile_updated', this.handleUserProfileUpdated);
 
       // Generic entity events
       messageProcessor.registerHandler('entity_update', this.handleEntityUpdate);

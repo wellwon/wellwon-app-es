@@ -246,7 +246,9 @@ class UserAccountReadRepo:
             last_name: Optional[str] = None,
             avatar_url: Optional[str] = None,
             bio: Optional[str] = None,
-            phone: Optional[str] = None
+            phone: Optional[str] = None,
+            user_type: Optional[str] = None,
+            is_developer: Optional[bool] = None
     ) -> None:
         """
         Updates WellWon platform profile fields (called by projector).
@@ -258,7 +260,9 @@ class UserAccountReadRepo:
             last_name=last_name,
             avatar_url=avatar_url,
             bio=bio,
-            phone=phone
+            phone=phone,
+            user_type=user_type,
+            is_developer=is_developer
         )
 
     # ==========================================================================

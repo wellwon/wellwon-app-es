@@ -1,0 +1,4580 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Common API",
+    "description": "# О продукте\r\n\r\nКонтур.Декларант — это сервис для создания документов и обмена электронными стандартизированными сообщениями между декларантами и ФТС.\r\n\r\nAPI Контур.Декларанта доступен по адресу <https://api-d.kontur.ru/>.\r\nНа тестовой площадке — <https://api-d.testkontur.ru/>.\r\n\r\n# Основные понятия\r\n\r\n**Документооборот** (кратко ДО) — совокупность документов и сообщений обмена с ФТС, относящихся к одной таможенной процедуре.\r\nНапример, документооборот по процедуре импорт 40 будет содержать в себе декларацию на товары, документы по товарам, такие как инвойс, CMR и т.п., регистрационные документы — паспорт декларанта, устав организации, договор с таможенным представителем и т.п. — и сообщения, например, сообщения о регистрации и выпуске. В обиходе документооборот иногда называют декларацией, в частности, в интерфейсе сервиса Контур.Декларант окно создания документооборота называется  «Создать декларацию», что удобно при общении, однако в описании методов API нам понадобится различать эти понятия: декларация — это важный и для многих параметров определяющий документ документооборота, но всё же это только его часть.\r\n\r\n**Организация** — юридическое лицо, физическое лицо или индивидуальный предприниматель, участвующий в электронном документообороте. Когда этот термин используется без уточнений, то это организация, отправляющая ДО в ФТС. Организация получает транспортные реквизиты для работы с транспортом ФТС.\r\n\r\n**Сотрудник**. Сотрудники относятся к организации и обладают правом подписи и отправки документов. Именно они указываются в графе 54 ДТ.\r\n\r\n**Документ** — это набор реквизитов, необходимых для заполнения графы 44, а также, если у документа есть содержимое, то идентификатор этого содержимого.\r\n\r\n**Форма документа** — cодержимое документа, с которым работают методы для заполнения документов. \r\n\r\n# Работа с документооборотом\r\n\r\nВ задачах автоматизации декларирования мы всегда работаем с документооборотом.\r\nДокументооборот можно описать как контейнер, в котором содержатся документы, относящиеся к одной процедуре декларирования.\r\nПоэтому для манипуляций с документами всегда нужно указывать идентификатор документооборота, внутри которого эти манипуляции осуществляются.\r\nПолучить этот идентификатор можно разными способами, самый очевидный из которых — это создание ДО.\r\n\r\n## Создание документооборота\r\n\r\nНа вход метод [POST /common/v1/docflows](https://developer.kontur.ru/doc/declarant.api/method?type=post&path=%2Fcommon%2Fv1%2Fdocflows) принимает структуры со следующими полями:\r\n\r\nНазвание | Описание \r\n-----| ----  \r\n`type` | Тип документооборота\r\n`procedure` | Таможенная процедура\r\n`singularity` | Особенность\r\n`customs` | Таможенный пост, на который будут отправлены документы\r\n`organizationId` | Идентификатор организации, осуществляющей таможенное оформление\r\n`employeeId` | Идентификатор сотрудника организации, который будет подписывать документы для отправки \r\n`name` | Имя документооборота — произвольная строка, используемая для удобства поиска и идентификации ДО \r\n\r\nВ ответ при успешном создании вы получите структуру `DocflowDto`, содержащую основные данные о ДО \r\n\r\nНазвание | Описание \r\n---|---- \r\n`id` | Идентификатор документооборота. Часто используется в методах API как параметр\r\n`name` | Имя документооборота \r\n`declarationType` | Тип документооборота \r\n`procedure` | Таможенная процедура \r\n`status` | Идентификатор статуса документооборота\r\n`statusText` | Человекочитаемый статус \r\n`changed` | Дата изменения. Получение сообщений от таможни так же считаются изменением \r\n`created` | Дата создания \r\n`processId` | Идентификатор процесса декларирования, используемый ФТС \r\n`gtdNumber` | Номер декларации. Появляется после регистрации ДО в ФТС\r\n\r\nОднако часто бывает так, что создавать документооборот через этот метод не является оптимальным решением, так как при создании мы получаем пустой ДО и все данные нам будет необходимо добавить через другие методы API, либо вручную.\r\nЕсли автоматизируемый процесс декларирования устроен таким образом, что целесообразно использовать данные из уже заполненных ДТ, то более удобным является создание ДО через копирование. \r\n\r\n## Копирование документооборота\r\n\r\nМетод [POST /common/v1/docflows/copy](https://developer.kontur.ru/doc/declarant.api/method?type=post&path=%2Fcommon%2Fv1%2Fdocflows%2Fcopy)\r\n\r\nПараметры метода:\r\n\r\nНазвание | Описание \r\n---|---- \r\n`copyFromId` | Идентификатор копируемого ДО \r\n`customs` | В результирующем ДО. Таможенный пост, на который будут отправлены документы \r\n`organizationId` | В результирующем ДО. Идентификатор организации, осуществляющей таможенное оформление \r\n`employeeId` | В результирующем ДО. Идентификатор сотрудника организации, который будет подписывать документы для отправки \r\n`name` | В результирующем ДО. Имя документооборота\r\n\r\nВ данном методе обязательным параметром является только `copyFromId`, остальные параметры, будучи не указанными, будут взяты из копируемого ДО.\r\nВ ответ приходит структура `DocflowDto`, уже описанная выше.\r\nВ данном сценарии основной сложностью является выбор ДО для копирования.\r\nМы настоятельно рекомендуем помещать информацию, которая может помочь с выбором ДО, в имя ДО (параметр `name`), например, «Шаблон для 198069585145».\r\nТак как имя — это произвольная строка, в нём можно указывать и ИНН контрагента, и номера документов, и идентификаторы из ваших внутренних систем — ограничений нет.\r\nПолучить такой документооборот можно при помощи метода поиска.\r\n\r\n## Поиск документоооборта\r\n\r\nМетод [POST /common/v1/docflows/search](https://developer.kontur.ru/doc/declarant.api/method?type=post&path=%2Fcommon%2Fv1%2Fdocflows%2Fsearch)\r\n\r\nВ теле метода отправляется структура с полями:\r\n\r\nНазвание | Описание \r\n---|---- \r\n`query` | Строка поиска по имени \r\n`procedure` | Тип документооборота \r\n`type` | Таможенная процедура \r\n`createdFrom` | Фильтр по дате создания ДО, дата «от»\r\n`createdTo` | Фильтр по дате создания ДО, дата «до»\r\n`documentNumber` | Номер какого-либо документа в ДО\r\n\r\nВсе поля в этой структуре опциональны.\r\nМетод возвращает массив структур `DocflowDto`.\r\nВ случае необходимости, после поиска через этот метод можно дополнительно пройтись по каждому ДО и просмотреть его документы и их содержимое.   \r\nОтметим, что в сервисе есть метод для получения всего списка ДО.\r\n\r\n## Получение списка документооборотов\r\n\r\nМетод [GET /common/v1/docflows](https://developer.kontur.ru/doc/declarant.api/method?type=get&path=%2Fcommon%2Fv1%2Fdocflows) возвращает массив структур `DocflowDto`.\r\n\r\nИспользуя параметры `skip` и `take`, можно организовать постраничную навигацию, а при помощи параметра `changedFrom` можно организовать мониторинг ДО, запрашивая только те документообороты, которые изменились с последнего обращения.\r\nТак же для фильтрации нужных ДО может быть полезен параметр `status`.\r\n\r\n# Работа с документами\r\n\r\nДля комфортного использования методов API, работающих с документами, необходимо иметь доступ к интерфейсу сервиса Контур.Декларант.\r\nИз-за того, что количество типов документов, которые можно создать, достаточно велико, удобнее создать документ в интерфейсе и посмотреть его параметры там, после чего использовать эти параметры при вызове методов.\r\nТак же отметим, что мы разделяем документ и его содержимое, которое мы называем формой, см. [основные понятия](https://developer.kontur.ru/doc/declarant.api?about=1).\r\n\r\n## Создание документа\r\n\r\nМетод [POST /common/v1/docflows/{docflowId}/documents](https://developer.kontur.ru/doc/declarant.api/method?type=post&path=%2Fcommon%2Fv1%2Fdocflows%2F%7BdocflowId%7D%2Fdocuments) \r\n\r\nНазвание | Описание \r\n---|---- \r\n`name` | Название документа. Используется исключительно для удобства поиска и просмотра\r\n`number` | Номер документа \r\n`date` | Дата документа ГГГГ-ММ-ДД\r\n`documentModeId` | Идентификатор формы по альбому форматов ФТС\r\n`grafa44Code` | Код вида документа\r\n`providingIndex` | Признак представления \r\n`isCommon` | В интерфейсе отображать документ в блоке Регистрационные документы \r\n`belongsToAllGoods` | Добавлять документ к каждому товару декларации\r\n`copyDataFromDt` | При создании, скопировать данные из ДТ\r\n`copyIfExists` | Если документ с таким номером и датой уже существует – скопировать из него данные\r\n\r\nВсе параметры ниже `providingIndex` являются опциональными.\r\n\r\nСамые большие сложности связаны с правильным определением `documentModeId` и `grafa44Code`.\r\nПараметр `grafa44Code` – вид документа из [справочника](https://normativ.kontur.ru/document?moduleId=1&documentId=494254#h2100) ФТС, используется для определения смысловой направленности документа.\r\nПараметр `documentModeId` определяет то, какая XML форма используется для формализации документа. Например, документ с `grafa44Code = 04021` «Счет-фактура (инвойс) к договору» может иметь две формы — 1002007E и 1002003E, которые представляют из себя Инвойс и Счёт-фактуру соответственно.\r\n\r\n### Способы определения `documentModeId` и `grafa44Code`. \r\n\r\n1. Узнать у декларанта код вида документа, или попросить у него XML декларации и найти в ней узел `PresentedDocumentModeCode`. Либо поиском в окне создания документа вы можете самостоятельно выбрать вид документа. В интерфейсе сервиса найти нужный код вида документа, создать этот документ. \r\n\r\n![](https://api-d.kontur.ru/images/createDocument.png)\r\n\r\nДалее скачать XML и посмотреть `documentModeId`.\r\n\r\n![](https://api-d.kontur.ru/images/documentModeId.png)\r\n\r\nВам будет нужно проделать эту операцию один раз для каждого из типа документов, которые вы собираетесь создавать через API.\r\n\r\n2. Вы можете посмотреть примеры самых частых документов в файле [массив документов.json](https://api-d.kontur.ru/jsonExamples/Массив документов.json)\r\n\r\nВ ответ получается структура `DocumentRowDto`. Эта структура содержит в себе структуру, отправляемую в запросе создания документа. Дополнительно в структуре ответа есть поле `formId` — идентификатор содержимого документа —  которое используется для заполнения форм.\r\n\r\n## Список документов\r\n\r\nМетод [GET /common/v1/docflows/{docflowId}/documents](https://developer.kontur.ru/doc/declarant.api/method?type=get&path=%2Fcommon%2Fv1%2Fdocflows%2F%7BdocflowId%7D%2Fdocuments) возвращает массив `DocumentRowDto`.\r\n\r\nТак как документов в ДО обычно не критично много, то для поиска конкретного документа проще получить все документы и найти нужный на клиенте.\r\n\r\n## Создание ДТС с использованием калькулятора расходов\r\n\r\nМетод [POST /common/v1/docflows/{docflowId}/documents/createDtsWithCalculator](https://developer.kontur.ru/doc/declarant.api/method?type=post&path=%2Fcommon%2Fv1%2Fdocflows%2F%7BdocflowId%7D%2Fdocuments%2FcreateDtsWithCalculator) принимает параметры `dtsType` — номер ДТС от 1 до 4 и `DistributionItemDto[]` — распределение расходов по товарам.\r\nВ качестве `DistributionItemDto[]` можно передать пустой массив, тогда и ДТС создатся пустой. \r\n\r\nДанный метод создает указанную ДТС, включает связь между ДТ и ДТС и распределяет расходы по товарам.\r\nВ результате заполнятся ДТС и таможенная стоимость в ДТ.\r\nСледует отметить, что в ДТ в каждом товаре должен быть заполнен метод определения таможенной стоимости.\r\n\r\n### Как наполнить структуру `DistributionItemDto[]`\r\n\r\n`DistributionItemDto` соответствует одной строке из «Калькулятора расходов»:\r\n\r\n![](https://api-d.kontur.ru/images/distributionItems.png)\r\n\r\nНазвание | Описание \r\n---|---- \r\n`grafa` | Вид расхода – номер графы в ДТС \r\n`distributeBy` | Распределение: 1 - по весу брутто; 2 - по цене; 3 - вручную\r\n`includeIn` | Включить в...: 1 - цену; 2 - таможенную стоимость; 3 - статистическую стоимость\r\n`currencyCode` | Валюта (трехбуквенный код)\r\n`total` | Сумма в валюте\r\n`borderPlace` | Место прибытия\r\n\r\nРаспределение расходов идет по всем товарам. Если вам нужна более тонкая настройка, то воспользуйтесь интерфейсом сервиса Контур.Декларант.\r\n\r\nСкриншоту выше соответствует такой json:\r\n\r\n\t[\r\n\t\t{\r\n\t\t\t\"grafa\": \"17\",\r\n\t\t\t\"distributeBy\": 1,\r\n\t\t\t\"includeIn\": 2,\r\n\t\t\t\"borderPlace\": \"пограничный пункт\",\r\n\t\t\t\"currencyCode\": \"USD\",\r\n\t\t\t\"total\": 500\r\n\t\t},\r\n\t\t{\r\n\t\t\t\"grafa\": \"13А\",\r\n\t\t\t\"distributeBy\": 2,\r\n\t\t\t\"includeIn\": 2,\r\n\t\t\t\"borderPlace\": \"\",\r\n\t\t\t\"currencyCode\": \"USD\",\r\n\t\t\t\"total\": 500\r\n\t\t},\r\n\t\t{\r\n\t\t\t\"grafa\": \"11Б\",\r\n\t\t\t\"distributeBy\": 2,\r\n\t\t\t\"includeIn\": 2,\r\n\t\t\t\"borderPlace\": \"\",\r\n\t\t\t\"currencyCode\": \"USD\",\r\n\t\t\t\"total\": 100\r\n\t\t}\r\n\t]\r\n\r\n# Работа с формами\r\n\r\nНачнём с самых простых способов заполнить форму.\r\n\r\nЕсли у вас есть документы, которые не меняются – ярким примером такого документа является паспорт, – то такой документ проще всего заполнить в сервисе и копировать, указывая флаг `copyIfExists` при создании документа.\r\nСледующим по простоте случаем заполнения является загрузка данных из файлов в «Документ свободной формы» и «Графические материалы»\r\n\r\n## Загрузка из файла\r\n\r\nМетод [POST /common/v1/docflows/{docflowId}/form/{formId}/upload](https://developer.kontur.ru/doc/declarant.api/method?type=post&path=%2Fcommon%2Fv1%2Fdocflows%2F%7BdocflowId%7D%2Fform%2F%7BformId%7D%2Fupload)\r\n\r\nЭтот метод является универсальным и принимает разные форматы файлов для разных видов форм.\r\nДокументы, форма которых имеет `documentModeID = 1006110E`, называются [FreeBinaryDoc](https://support.kontur.ru/declarant/41267-skan_i_fotodokumenty) и предназначены для передачи в таможню изображений и PDF файлов.\r\nТакие документы можно создавать, загружая через данный метод файлы с расширением .pdf, jpg, jpeg, или tiff размером не более 3 мб.\r\nДокументы, форма которых имеет `documentModeID = 1006088E`, называются [FreeDoc](https://support.kontur.ru/declarant/41268-freedoc_dokument) – Документ свободной формы.\r\nЭти документы можно создавать, загружая данные из файлов word и excel.\r\nПрограмма автоматически преобразует их в структуры FreeDoc.\r\nМы рекомендуем использовать метод `upload` для этих двух типов форм.\r\n\r\nОтметим, что метод можно так же использовать для загрузки XML таможенного формата в любые соответствующие формы, однако трудно придумать сценарий автоматизации, в котором это может быть полезно.\r\n\r\n## Заполнение документов с использованием json\r\n\r\nМетод [POST /common/v1/docflows/{docflowId}/form/{formId}/importJson](https://developer.kontur.ru/doc/declarant.api/method?type=post&path=%2Fcommon%2Fv1%2Fdocflows%2F%7BdocflowId%7D%2Fform%2F%7BformId%7D%2FimportJson)\r\n\r\nЭтот метод является самым универсальным способом заполнения документов: с его помощью можно заполнить любое поле любого документа. Мы не рекомендуем, хоть это и возможно, использовать его для заполнения контрагентов (см. [Контрагенты](https://developer.kontur.ru/doc/declarant.api?about=5)) и заполнения товарной части (см. метод [import](https://developer.kontur.ru/doc/declarant.api/method?type=post&path=%2Fcommon%2Fv1%2Fdocflows%2F%7BdocflowId%7D%2Fform%2F%7BformId%7D%2Fimport)), так как для этого существуют более подходящие методы.\r\n\r\nВ теле запроса указываются данные в форме json, структура которого для каждого вида документа своя.\r\nПока единственным, но достаточно действенным способом понять, какой json нужно формировать, является следующая последовательность действий:\r\n\r\n1. В сервисе Контур.Декларант необходимо создать форму документа того вида, который вы собираетесь заполнять через API.\r\n\r\n2. Заполнить те поля, которые вы собираетесь заполнять через API легко различимыми между собой значениями.\r\n\r\n3. Воспользоваться методом [GET /common/v1/docflows/{docflowId}/form/{formId}/json](https://developer.kontur.ru/doc/declarant.api/method?type=get&path=%2Fcommon%2Fv1%2Fdocflows%2F%7BdocflowId%7D%2Fform%2F%7BformId%7D%2Fjson) для того, чтобы скачать json заполняемой на предыдущем этапе формы.\r\n\r\n4. Найти, куда встали значения, проставляемые в п.2 и удалить все те элементы, которые вы не заполняли, сохраняя структуру json.\r\n\r\n5. Полученный json вы можете использовать как шаблон для заполнения данных в вашей автоматизации.\r\n\r\nДля ускорения процесса воспользуйтесь следующими советами.\r\nСкачивать json можно прямо в интерфейсе [https://api-d.kontur.ru/index.html](https://api-d.kontur.ru/index.html).\r\nПараметры `formId` и `docflowId` можно брать из адресной строки браузера: открыв любой документ в сервисе Контур.Декларант вы обнаружите, что `formId` это второй параметр адресной строки, а `docflowId` – последний\r\nЗначение `auth.sid` можно найти в одноимённой cookie, используя [DevTools](https://developer.chrome.com/docs/devtools/application/cookies?hl=ru). \r\nФормат используемого в этом методе json не зависит от смены альбома форматов.\r\nВы можете заполнять документ как одним json со всеми нужными полями, так и по частям.\r\n\r\nНапример, отправка такого json\r\n\r\n\t{\r\n\t\t\"ESADout_CUGoodsShipment\": \r\n\t\t{\r\n\t\t\t\"ESADout_CUConsignee\":\r\n\t\t\t{\r\n\t\t\t\t\"EqualIndicator\": \"true\"\r\n\t\t\t},\r\n\t\t\t\"ESADout_CUFinancialAdjustingResponsiblePerson\":\r\n\t\t\t{\r\n\t\t\t\t\"DeclarantEqualFlag\": \"true\"\r\n\t\t\t}\r\n\t\t}\r\n\t}\r\n\r\nидентична отправке по отдельности\r\n\r\n\t{\r\n\t\t\"ESADout_CUGoodsShipment\":\r\n\t\t{\r\n\t\t\t\"ESADout_CUFinancialAdjustingResponsiblePerson\":\r\n\t\t\t{\r\n\t\t\t\t\"DeclarantEqualFlag\": \"true\"\r\n\t\t\t}\r\n\t\t}\r\n\t}\r\n\r\nи\r\n\r\n\t{\r\n\t\t\"ESADout_CUGoodsShipment\":\r\n\t\t{\r\n\t\t\t\"ESADout_CUConsignee\":\r\n\t\t\t{\r\n\t\t\t\t\"EqualIndicator\": \"true\"\r\n\t\t\t}\r\n\t\t}\r\n\t}\r\n\r\nПорядок не важен.\r\n\r\n## Загрузка товарной части\r\n\r\nДля загрузки товарной части в документы мы рекомендуем использовать метод [POST /common/v1/docflows/{docflowId}/form/{formId}/import](https://developer.kontur.ru/doc/declarant.api/method?type=post&path=%2Fcommon%2Fv1%2Fdocflows%2F%7BdocflowId%7D%2Fform%2F%7BformId%7D%2Fimport)\r\n\r\nДанный метод позволяет использовать функционал [заполнителя](https://support.kontur.ru/declarant/41200-zagruzka_tovarov_iz_fajla) посредством API.\r\nВыбрать для заполнения товаров данный метод, а не `importJson` стоит по следующим причинам.\r\nВо-первых, данные о товарах обычно содержатся в некоторого вида таблице, и её проще перевести в структуру, принимаемую данным методом, чем в структуру, принимаемую `importJson`.\r\nВо-вторых, данный метод внутри использует алгоритмы по коррекции получаемых данных.\r\nВ частности, в страну происхождения можно указать как «Россия», так и «RU» – заполнитель правильно обработает обе ситуации.\r\nПример данных можно посмотреть в файле [Товары.json](https://api-d.kontur.ru/jsonExamples/Товары.json).\r\nПоля для загрузки с расшифровкой можно посмотреть [здесь](https://api-d.kontur.ru/jsonExamples/Примеры.zip).\r\n\r\n# Контрагенты\r\n\r\nВ данном документе описаны методы API, позволяющие работать со справочником контрагентов.\r\nЭлементы этого справочника используются для заполнения полей, которые по своей сути являются организациями или физическими лицами.\r\nПримером использования справочника являются графы \\[2\\] Отправитель, \\[8\\] Получатель, \\[9\\] Ответственный за финансовое урегулирование, \\[14\\] Декларант.\r\nТакже справочник используется в документах графы 44, например, в Инвойсе для разделов Покупатель, Продавец, Отправитель, Получатель.\r\n\r\n![](https://api-d.kontur.ru/images/contractor.png)\r\n\r\nAPI позволяет создавать контрагентов всех типов, а также заполнять соответствующие графы документов, указывая номер графы и идентификатор контрагента.\r\n\r\n## Особенности структуры `CommonOrg`\r\n\r\nДанную структуру часто принимают и возвращают почти все методы данной категории.\r\n\r\nОписание её можно найти [здесь](https://developer.kontur.ru/doc/declarant.api/models#CommonOrg).\r\nОстановимся на особенностях этой структуры.\r\nПараметр `orgName` это название организации или ИП, а `shortName` – произвольное название для удобства пользователя – оно используется только для отображения в списке справочника контрагента и зачастую совпадает с `orgName`.\r\n\r\n`type` – тип организации, принимаемые значения:\r\n - 0 – Юридическое лицо;\r\n - 1 – ИП;\r\n - 2 – Физическое лицо.\r\n \r\n`dtType`  — устарело и не применяется.\r\n`CommonOrg` содержит два адреса: `legalAddress` и `actualAddress`, для представления юридического адреса и адреса фактического пребывания соответственно.\r\n`actualAddress` заполняется только для юридических лиц и только если отличается от `legalAddress`, иначе его просто не надо указывать.\r\n`person` заполняется только для физических лиц.\r\nПри заполнении физических лиц поля `orgName` и `shortName` не заполняются.\r\n`identityCard` заполняется для ИП и физических лиц, для юридических лиц не заполняется.\r\n`bankRequisites` – банковские реквизиты, оставляйте пустыми.\r\n`branchDescription` – заполняется, если нам надо описать, что мы работаем с обособленным подразделением.\r\n\r\n## Примеры json для создания организаций\r\n\r\nРоссийская организация:\r\n\r\n\t{\r\n\t\t\"type\": 0,\r\n\t\t\"isForeign\": false,\r\n\t\t\"orgName\": \"ООО \"РОМАШКА\",\r\n\t\t\"shortName\": \"РОМАШКА\",\r\n\t\t\"inn\": \"7719483568\",\r\n\t\t\"kpp\": \"111111111\",\r\n\t\t\"ogrn\": \"1187746952821\",\r\n\t\t\"okpo\": \"24123412\",\r\n\t\t\"okato\": \"12341234213\",\r\n\t\t\"oktmo\": \"12341234213\",\r\n\t\t\"legalAddress\":\r\n\t\t{\r\n\t\t\t\"city\": \"г. Москва\",\r\n\t\t\t\"settlement\": \"\",\r\n\t\t\t\"countryName\": \"РОССИЯ\",\r\n\t\t\t\"countryCode\": \"RU\",\r\n\t\t\t\"postalCode\": \"105318\",\r\n\t\t\t\"region\": \"Москва г\",\r\n\t\t\t\"streetHouse\": \"ул. Мироновская\",\r\n\t\t\t\"house\": \"дом 9\",\r\n\t\t\t\"room\": \"кв. 58\",\r\n\t\t}\r\n\t}\r\n\r\nИностранная организация:\r\n\r\n\t{\r\n\t\t\"type\": 0,\r\n\t\t\"isForeign\": true,\r\n\t\t\"orgName\": \"SHANGHAI SHAREINDUSTRY CO.,LTD.\",\r\n\t\t\"shortName\": \"SHANGHAI SHAREINDUSTRY CO.,LTD.\",\r\n\t\t\"legalAddress\":\r\n\t\t{\r\n\t\t\t\"city\": \"TINGLIN TOWN\",\r\n\t\t\t\"settlement\": \"\",\r\n\t\t\t\"countryName\": \"КИТАЙ\",\r\n\t\t\t\"countryCode\": \"CN\",\r\n\t\t\t\"postalCode\": \"201540\",\r\n\t\t\t\"region\": \"JINSHAN DISTRICT SHANGHAI\",\r\n\t\t\t\"streetHouse\": \"SONGYINYUCAI ROAD\",\r\n\t\t\t\"house\": \"BUILDING 1, NO.22, LANE 121\",\r\n\t\t\t\"room\": \"ROOM 1914\"\r\n\t\t}\r\n\t}\r\n\r\n## Метод создания/получения организаций\r\n\r\nМетод [POST /common/v1/commonOrganizations](https://developer.kontur.ru/doc/declarant.api/method?type=post&path=%2Fcommon%2Fv1%2FcommonOrganizations) принимает структуру `CommonOrg`.\r\nДалее метод смотрит, есть ли уже в справочнике организация с таким `orgName`.\r\nЕсли нет, то создаёт и возвращает то, что создал.\r\nЕсли такая организация уже есть, то она обновляется из полученных данных.\r\nДанные обновляются только в справочнике и не влияют на уже заполненные ДТ.\r\nПри обновлении используются только заполненные поля, таким образом, этот метод можно использовать в том числе и для выбора контрагента.\r\nЕсли мы знаем, что организация с конкретным названием уже существует, то мы можем отправить запрос только с параметром `orgName` и получит полную модель организации.\r\n\r\n\t{\r\n\t\t\"orgName\": \"SHANGHAI SHAREINDUSTRY CO.,LTD.\"\r\n\t}\r\n\r\nВозвращаемый `CommonOrg` будет содержать `id`, который понадобится при заполнении граф.\r\n\r\n## Работа с российскими организациями по ИНН\r\n\r\nМетод [POST /common/v1/getOrCreateCommonOrgByInn](https://developer.kontur.ru/doc/declarant.api/method?type=post&path=%2Fcommon%2Fv1%2FgetOrCreateCommonOrgByInn).\r\nПараметр `inn` – это ИНН организации.\r\nКонтрагент имеет достаточно большое количество полей, и программист не всегда имеет их все под рукой; чтобы облегчить жизнь, для российских организаций можно использовать этот метод.\r\nЕсли организации с таким инн нет – она будет создана, основываясь на данных из Контур.Фокуса.\r\nВозвращает `CommonOrg` для организации с указанным ИНН.\r\nМетод используется и для создания, и для поиска.\r\n\r\n## Использование справочника в документах\r\n\r\nМетод [POST /common/v1/docflows/{docflowId}/form/{formId}/setCommonOrg?commonOrgId={commonOrgId}&graphNumber={graphNumber}](https://developer.kontur.ru/doc/declarant.api/method?type=post&path=%2Fcommon%2Fv1%2Fdocflows%2F%7BdocflowId%7D%2Fform%2F%7BformId%7D%2FsetCommonOrg).\r\nВ методе указываются номер графы и идентификатор контрагента, данные которого нужно проставить в графу.\r\n\r\n## Установка флага «Совпадает с Декларантом»\r\n\r\nДля простановки галочки «Совпадает с Декларантом» не предусмотрено специального метода.\r\nДля этой задачи полностью применим метод общего назначения `importJson`.\r\nДля графы 8:\r\n\r\n\t{\r\n\t\t\"ESADout_CUGoodsShipment\":\r\n\t\t{\r\n\t\t\t\"ESADout_CUConsignee\":\r\n\t\t\t{\r\n\t\t\t\t\"EqualIndicator\": \"true\"\r\n\t\t\t}\r\n\t\t}\r\n\t}\r\n\r\nДля графы 9:\r\n\r\n\t{\r\n\t\t\"ESADout_CUGoodsShipment\":\r\n\t\t{\r\n\t\t\t\"ESADout_CUFinancialAdjustingResponsiblePerson\":\r\n\t\t\t{\r\n\t\t\t\t\"DeclarantEqualFlag\": \"true\"\r\n\t\t\t}\r\n\t\t}\r\n\t}\r\n\r\nИ для обеих граф:\r\n\r\n\t{\r\n\t\t\"ESADout_CUGoodsShipment\":\r\n\t\t{\r\n\t\t\t\"ESADout_CUConsignee\":\r\n\t\t\t{\r\n\t\t\t\t\"EqualIndicator\": \"true\"\r\n\t\t\t},\r\n\t\t\t\"ESADout_CUFinancialAdjustingResponsiblePerson\":\r\n\t\t\t{\r\n\t\t\t\t\"DeclarantEqualFlag\": \"true\"\r\n\t\t\t}\r\n\t\t}\r\n\t}\r\n\r\nЭти данные необходимо отправить, используя метод [POST /common/v1/docflows/{docflowId}/form/{formId}/importJson](https://developer.kontur.ru/doc/declarant.api/method?type=post&path=%2Fcommon%2Fv1%2Fdocflows%2F%7BdocflowId%7D%2Fform%2F%7BformId%7D%2FimportJson).",
+    "contact": {
+      "name": "Контур.Декларант",
+      "email": "ermakov@skbkontur.ru"
+    },
+    "version": "common.v1"
+  },
+  "paths": {
+    "/common/v1/commonOrganizations": {
+      "post": {
+        "tags": [
+          "CommonOrgs"
+        ],
+        "summary": "Создание контрагента",
+        "description": " Описание модели `CommonOrg`:\r\n \r\n Название | Описание \r\n ----------|----------\r\n `orgName` | Название ЮЛ или ИП (для ФЛ не заполняется) \r\n `shortName` | Произвольное название для удобства пользователя. Используется только для отображения в списке справочника контрагентов и зачастую совпадает с `orgName` \r\n `type` | Тип организации, принимаемые значения: 0 – ЮЛ; 1 – ИП; 2 – ФЛ \r\n `dtType` | Устарело и не применяется \r\n `legalAddress` | Юридический адрес \r\n `actualAddress` | Фактический адрес, заполняется только для ЮЛ и только если отличается от `legalAddress` \r\n `person` | ФИО и должность, заполняется только для ФЛ \r\n `identityCard` | Паспортные данные, заполняется для ИП и ФЛ, для ЮЛ не заполняется \r\n `bankRequisites` | Банковские реквизиты, не заполняется \r\n `branchDescription` | Обособленное подразделение организации \r\n \r\n Примеры json для создания организаций.\r\n \r\n Российская организация:\r\n ```json\r\n {\r\n     \"type\": 0,\r\n     \"isForeign\": false,\r\n     \"orgName\": \"ООО \"РОМАШКА\",\r\n     \"shortName\": \"РОМАШКА\",\r\n     \"inn\": \"7719483568\",\r\n     \"kpp\": \"111111111\",\r\n     \"ogrn\": \"1187746952821\",\r\n     \"okpo\": \"24123412\",\r\n     \"okato\": \"12341234213\",\r\n     \"oktmo\": \"12341234213\",\r\n     \"legalAddress\":\r\n     {\r\n         \"city\": \"г. Москва\",\r\n         \"settlement\": \"\",\r\n         \"countryName\": \"РОССИЯ\",\r\n         \"countryCode\": \"RU\",\r\n         \"postalCode\": \"105318\",\r\n         \"region\": \"Москва г\",\r\n         \"streetHouse\": \"ул. Мироновская\",\r\n         \"house\": \"дом 9\",\r\n         \"room\": \"кв. 58\",\r\n     }\r\n }        \r\n```\r\n\r\nИностранная организация:\r\n```json\r\n {\r\n     \"type\": 0,\r\n     \"isForeign\": true,\r\n     \"orgName\": \"SHANGHAI SHAREINDUSTRY CO.,LTD.\",\r\n     \"shortName\": \"SHANGHAI SHAREINDUSTRY CO.,LTD.\",\r\n     \"legalAddress\":\r\n     {\r\n         \"city\": \"TINGLIN TOWN\",\r\n         \"settlement\": \"\",\r\n         \"countryName\": \"КИТАЙ\",\r\n         \"countryCode\": \"CN\",\r\n         \"postalCode\": \"201540\",\r\n         \"region\": \"JINSHAN DISTRICT SHANGHAI\",\r\n         \"streetHouse\": \"SONGYINYUCAI ROAD\",\r\n         \"house\": \"BUILDING 1, NO.22, LANE 121\",\r\n         \"room\": \"ROOM 1914\"\r\n     }\r\n }\r\n```",
+        "parameters": [
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "description": "Параметры организации (ЮЛ/ИП/ФЛ)",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommonOrg"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommonOrg"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommonOrg"
+              }
+            },
+            "application/xml": {
+              "schema": {
+                "$ref": "#/components/schemas/CommonOrg"
+              }
+            },
+            "text/xml": {
+              "schema": {
+                "$ref": "#/components/schemas/CommonOrg"
+              }
+            },
+            "application/*+xml": {
+              "schema": {
+                "$ref": "#/components/schemas/CommonOrg"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommonOrg"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommonOrg"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommonOrg"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommonOrg"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommonOrg"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/common/v1/getOrCreateCommonOrgByInn": {
+      "post": {
+        "tags": [
+          "CommonOrgs"
+        ],
+        "summary": "Получение контрагента по ИНН",
+        "description": "Если таких контрагентов нет, произойдет поиск и добавление контрагента через Контур.Фокус.",
+        "parameters": [
+          {
+            "name": "inn",
+            "in": "query",
+            "description": "ИНН организации",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommonOrg"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommonOrg"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommonOrg"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommonOrg"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommonOrg"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/common/v1/docflows": {
+      "get": {
+        "tags": [
+          "DocflowApi"
+        ],
+        "summary": "Список документооборотов",
+        "parameters": [
+          {
+            "name": "take",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 1000
+            }
+          },
+          {
+            "name": "changedFrom",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "changedTo",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DocflowDto"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DocflowDto"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DocflowDto"
+                  }
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DocflowDto"
+                  }
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DocflowDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "DocflowApi"
+        ],
+        "summary": "Создание документооборота",
+        "parameters": [
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocflowRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocflowRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocflowRequest"
+              }
+            },
+            "application/xml": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocflowRequest"
+              }
+            },
+            "text/xml": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocflowRequest"
+              }
+            },
+            "application/*+xml": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocflowRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Документооборот создан",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocflowDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocflowDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocflowDto"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocflowDto"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocflowDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": "Доступ запрещен",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/{docflowId}/declarationMarks": {
+      "get": {
+        "tags": [
+          "DocflowApi"
+        ],
+        "summary": "Отметки по ДТ",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "В ДО отсутствуют отметки по ДТ"
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/{docflowId}/messages": {
+      "get": {
+        "tags": [
+          "DocflowApi"
+        ],
+        "summary": "Журнал сообщений",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EnvelopeDto"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EnvelopeDto"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EnvelopeDto"
+                  }
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EnvelopeDto"
+                  }
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EnvelopeDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/{docflowId}/setOpenedTrue": {
+      "post": {
+        "tags": [
+          "DocflowApi"
+        ],
+        "summary": "Установить данные о том, главный документ документооборота был открыт",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/copy": {
+      "post": {
+        "tags": [
+          "DocflowApi"
+        ],
+        "summary": "Создание документооборота",
+        "parameters": [
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyDocflowRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyDocflowRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyDocflowRequest"
+              }
+            },
+            "application/xml": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyDocflowRequest"
+              }
+            },
+            "text/xml": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyDocflowRequest"
+              }
+            },
+            "application/*+xml": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyDocflowRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Документооборот создан",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocflowDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocflowDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocflowDto"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocflowDto"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocflowDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": "Доступ запрещен",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/search": {
+      "post": {
+        "tags": [
+          "DocflowApi"
+        ],
+        "summary": "Поиск документооборота",
+        "parameters": [
+          {
+            "name": "take",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocflowSearchViewModel"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocflowSearchViewModel"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocflowSearchViewModel"
+              }
+            },
+            "application/xml": {
+              "schema": {
+                "$ref": "#/components/schemas/DocflowSearchViewModel"
+              }
+            },
+            "text/xml": {
+              "schema": {
+                "$ref": "#/components/schemas/DocflowSearchViewModel"
+              }
+            },
+            "application/*+xml": {
+              "schema": {
+                "$ref": "#/components/schemas/DocflowSearchViewModel"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/{docflowId}/documents": {
+      "get": {
+        "tags": [
+          "DocumentRow"
+        ],
+        "summary": "Список документов",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "DocumentRow"
+        ],
+        "summary": "Создание документов",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DocumentProps"
+                }
+              }
+            },
+            "text/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DocumentProps"
+                }
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DocumentProps"
+                }
+              }
+            },
+            "application/xml": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DocumentProps"
+                }
+              }
+            },
+            "text/xml": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DocumentProps"
+                }
+              }
+            },
+            "application/*+xml": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DocumentProps"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/{docflowId}/documents/{documentId}/good/{goodNumbers}": {
+      "post": {
+        "tags": [
+          "DocumentRow"
+        ],
+        "summary": "Присоединить документ к товарaм.",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "documentId",
+            "in": "path",
+            "description": "Идентификатор документа (не формы)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "goodNumbers",
+            "in": "path",
+            "description": "Номера товаров через запятую, например 1,2,3. Нумерация с единицы. Документ будет отвязан от всех товаров и привязан к указаным. Если передать 0, то документ отвяжется от всех товаров.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/{docflowId}/documents/createDtsWithCalculator": {
+      "post": {
+        "tags": [
+          "DocumentRow"
+        ],
+        "summary": "Создание ДТС по калькулятору",
+        "description": " Данный метод создает указанную ДТС, включает связь между ДТ и ДТС и распределяет расходы по товарам.\r\n В результате заполнятся ДТС и таможенная стоимость в ДТ.\r\n Следует отметить, что в ДТ в каждом товаре должен быть заполнен метод определения таможенной стоимости.\r\n \r\n `DistributionItemDto` соответствует одной строке из «Калькулятора расходов»:\r\n \r\n ![](https://api-d.kontur.ru/images/distributionItems.png)\r\n \r\n Название | Описание \r\n ---|---- \r\n `grafa` | Вид расхода – номер графы в ДТС \r\n `distributeBy` | Распределение: 1 - по весу брутто; 2 - по цене; 3 - вручную\r\n `includeIn` | Включить в...: 1 - цену; 2 - таможенную стоимость; 3 - статистическую стоимость\r\n `currencyCode` | Валюта(трехбуквенный код)\r\n `total` | Сумма в валюте\r\n `borderPlace` | Место прибытия\r\n \r\n Распределение расходов идет по всем товарам. Если вам нужна более тонкая настройка, то воспользуйтесь интерфейсом сервиса Контур.Декларант.\r\n \r\n ```json\r\n[\r\n  {\r\n   \"grafa\": \"17\",\r\n   \"distributeBy\": 1,\r\n   \"includeIn\": 2,\r\n   \"borderPlace\": \"пограничный пункт\",\r\n   \"currencyCode\": \"USD\",\r\n   \"total\": 500\r\n  },\r\n  {\r\n   \"grafa\": \"13А\",\r\n   \"distributeBy\": 2,\r\n   \"includeIn\": 2,\r\n   \"borderPlace\": \"\",\r\n   \"currencyCode\": \"USD\",\r\n   \"total\": 500\r\n  },\r\n  {\r\n   \"grafa\": \"11Б\",\r\n   \"distributeBy\": 2,\r\n   \"includeIn\": 2,\r\n   \"borderPlace\": \"\",\r\n   \"currencyCode\": \"USD\",\r\n   \"total\": 100\r\n  }\r\n]\r\n```\r\n\r\n Возможные значения параметра `grafa`:\r\n \r\n Название | Описание \r\n -----| ----  \r\n **11** | Расходы на материалы и производство\r\n **11Б** | Косвенные платежи\r\n **12** | Агентское вознаграждение, прибыль, коммерческие. и управленческие расходы\r\n **12А** | Расходы на тару и упаковку / Количество(-) / Расходы на материалы и производство\r\n **12Б** | Расходы на проектирование, разработку, инженерную, конструкторскую работу, дизайн, художественное оформление, чертежи и эскизы, выполненные на таможенной территории / Коммерческий уровень(-) / Прибыль, коммерческие, управленч.расходы\r\n **12В** | Стоимость сырья, материалов, деталей, полуфабрикатов и тому подобных предметов, из которых состоят товары / Разница в расходах по перевозке(-)\r\n **12Г** | Стоимость инструментов, штампов, форм и других подобных предметов / Разница в погрузке/выгрузке(-)\r\n **12Д** | Стоимость израсходованных материалов / Разница в стоимости страхования(-)\r\n **12Е** | Стоимость проектирования, разработки, инженерной, конструкторской работы, художественного оформления, дизайна, эскизов и чертежей, выполненных вне таможенной территории\r\n **12Ж** | Величина иных расходов, связанных с производством ввозимых товаров\r\n **13** | Прибыль, коммерческие расходы / Расходы на перевозку, страхование и иные связанные с ними на территории ЕАЭС\r\n **13А** | Агентское вознаграждение / Количество(+)\r\n **13Б** | Тара и упаковка, включая работы по упаковке / Коммерческий уровень(+)  \r\n **14** | Расходы по перевозке / Таможенные пошлины, налоги, сборы в связи с ввозом и продажей в ЕАЭС\r\n **14А** | Сырье и материалы / Количество(+)\r\n **14Б** | Инструменты, штампы, формы / Коммерческий уровень(+)\r\n **14В** | Материалы, израсходованные при производстве / Разница в расходах по перевозке(+)\r\n **14Г** | Проектирование и разработка вне Таможенного союза/ Разница в погрузке/выгрузке(+)\r\n **14Д** | Разница в стоимости страхования(+)  \r\n **15** | Лицензионные и иные платежи / Расходы по погрузке, выгрузке / Стоимость, добавленная при переработке(обработке)\r\n **16** | Доходы от продажи и пр., причитающиеся продавцу /  Расходы на страхование\r\n **17** | Транспортные расходы\r\n **18** | Погрузка, разгрузка, перегрузка\r\n **19** | Страхование\r\n **21** | Строительство, сборка, монтаж, обслуживание на территории Союза(ВЫЧЕТ)\r\n **22** | Транспорт по территории Союза(ВЫЧЕТ)\r\n **23** | Пошлины, налоги и сборы на территории Союза(ВЫЧЕТ)\r\n **StatIncrease** | Транспорт по заграничной территории от пункта назначения до границы РФ/порта прибытия\r\n **StatDecrease** | Транспорт по территории РФ от границы РФ/порта прибытия до пункта назначения",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "description": "Идентификатор ДО",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "dtsType",
+            "in": "query",
+            "description": "Номер ДТС (1, 2, 3, 4)",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DtsType"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "description": "Распределение расходов (калькулятор)",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DistributionItemDto"
+                }
+              }
+            },
+            "text/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DistributionItemDto"
+                }
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DistributionItemDto"
+                }
+              }
+            },
+            "application/xml": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DistributionItemDto"
+                }
+              }
+            },
+            "text/xml": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DistributionItemDto"
+                }
+              }
+            },
+            "application/*+xml": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DistributionItemDto"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentRowDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentRowDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentRowDto"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentRowDto"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentRowDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/{docflowId}/documents/{documentId}/copyFromDt": {
+      "post": {
+        "tags": [
+          "DocumentRow"
+        ],
+        "summary": "Скопировать данные из декларации",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "documentId",
+            "in": "path",
+            "description": "Идентификатор документа (не формы)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Данные скопированы"
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": "Доступ запрещен",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/{docflowId}/form/{formId}/importJson": {
+      "post": {
+        "tags": [
+          "Forms"
+        ],
+        "summary": "Загрузить изменения из json в документ",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "formId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/{docflowId}/form/{formId}/json": {
+      "get": {
+        "tags": [
+          "Forms"
+        ],
+        "summary": "Получить json документа",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "formId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/{docflowId}/form/{formId}/setCommonOrg": {
+      "post": {
+        "tags": [
+          "Forms"
+        ],
+        "summary": "Установить контрагента для графы",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "formId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "commonOrgId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "graphNumber",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/{docflowId}/form/{formId}/import": {
+      "post": {
+        "tags": [
+          "Forms"
+        ],
+        "summary": "Импорт данных в форму документа",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "formId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "clearBeforeUpload",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "mapOptions",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/ImportHeaderMapOptions"
+            }
+          },
+          {
+            "name": "preserveAttachedGoods",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { }
+            },
+            "text/json": {
+              "schema": { }
+            },
+            "application/*+json": {
+              "schema": { }
+            },
+            "application/xml": {
+              "schema": { }
+            },
+            "text/xml": {
+              "schema": { }
+            },
+            "application/*+xml": {
+              "schema": { }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/{docflowId}/form/{formId}/upload": {
+      "post": {
+        "tags": [
+          "Forms"
+        ],
+        "summary": "Загрузка контента документа. Принимает xml для всех документов. word/xml для freedoc. pdf/jpg для freebinarydoc",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "formId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fileInfo": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              },
+              "encoding": {
+                "fileInfo": {
+                  "style": "form"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/{docflowId}/form/{formId}/xml": {
+      "get": {
+        "tags": [
+          "Forms"
+        ],
+        "summary": "Загрузка контента документа. Принимает xml для всех документов. word/xml для freedoc. pdf/jpg для freebinarydoc",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "formId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/common/v1/jsonTemplates": {
+      "get": {
+        "tags": [
+          "JsonTemplates"
+        ],
+        "summary": "Получить список доступных шаблонов",
+        "parameters": [
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JsonTemplateInfoDto"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JsonTemplateInfoDto"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JsonTemplateInfoDto"
+                  }
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JsonTemplateInfoDto"
+                  }
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JsonTemplateInfoDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/common/v1/jsonTemplates/{documentModeId}": {
+      "get": {
+        "tags": [
+          "JsonTemplates"
+        ],
+        "summary": "Получить шаблон документа по documentModeId",
+        "parameters": [
+          {
+            "name": "documentModeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/common/v1/options/organizations": {
+      "get": {
+        "tags": [
+          "Options"
+        ],
+        "summary": "Список доступных организаций",
+        "parameters": [
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OrganizationViewModel"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OrganizationViewModel"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OrganizationViewModel"
+                  }
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OrganizationViewModel"
+                  }
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OrganizationViewModel"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/common/v1/options/employees": {
+      "get": {
+        "tags": [
+          "Options"
+        ],
+        "summary": "Список доступных сотрудников для организации",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EmployeeViewModel"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EmployeeViewModel"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EmployeeViewModel"
+                  }
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EmployeeViewModel"
+                  }
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EmployeeViewModel"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Не заполнен индентификатор организации"
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": "Доступ запрещен",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/common/v1/options/declarationTypes": {
+      "get": {
+        "tags": [
+          "Options"
+        ],
+        "summary": "Список направлений перемещения",
+        "parameters": [
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeclarationTypeViewModel"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeclarationTypeViewModel"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeclarationTypeViewModel"
+                  }
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeclarationTypeViewModel"
+                  }
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeclarationTypeViewModel"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/common/v1/options/declarationProcedureTypes": {
+      "get": {
+        "tags": [
+          "Options"
+        ],
+        "summary": "Список таможенных процедур",
+        "parameters": [
+          {
+            "name": "declarationType",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DeclarationType"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeclarationProcedureViewModel"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeclarationProcedureViewModel"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeclarationProcedureViewModel"
+                  }
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeclarationProcedureViewModel"
+                  }
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeclarationProcedureViewModel"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Не заполнен индентификатор направления перемещения",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/common/v1/options/declarationSingularities": {
+      "get": {
+        "tags": [
+          "Options"
+        ],
+        "summary": "Список особенностей декларации",
+        "parameters": [
+          {
+            "name": "declarationType",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/DeclarationType"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeclarationSingularityViewModel"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeclarationSingularityViewModel"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeclarationSingularityViewModel"
+                  }
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeclarationSingularityViewModel"
+                  }
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeclarationSingularityViewModel"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/common/v1/options/customs": {
+      "get": {
+        "tags": [
+          "Options"
+        ],
+        "summary": "Список таможенных органов",
+        "parameters": [
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CustomsViewModel"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CustomsViewModel"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CustomsViewModel"
+                  }
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CustomsViewModel"
+                  }
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CustomsViewModel"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/common/v1/options/commonOrgs": {
+      "get": {
+        "tags": [
+          "Options"
+        ],
+        "summary": "Справочник контрагентов",
+        "parameters": [
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CommonOrgViewModel"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CommonOrgViewModel"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CommonOrgViewModel"
+                  }
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CommonOrgViewModel"
+                  }
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CommonOrgViewModel"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/{docflowId}/form/{formId}/printHtml": {
+      "get": {
+        "tags": [
+          "Print"
+        ],
+        "summary": "Печать формы в HTML",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "formId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/common/v1/docflows/{docflowId}/form/{formId}/printPDF": {
+      "get": {
+        "tags": [
+          "Print"
+        ],
+        "summary": "Печать формы в PDF",
+        "parameters": [
+          {
+            "name": "docflowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "formId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/common/v1/vehiclePayments/calculate": {
+      "post": {
+        "tags": [
+          "VehiclePayments"
+        ],
+        "summary": "Расчет таможенного платежа при ввозе автомобиля",
+        "parameters": [
+          {
+            "name": "X-Kontur-ApiKey",
+            "in": "header",
+            "description": "Ключ доступа к АПИ (ApiKey)",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VehiclePaymentsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VehiclePaymentsRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/VehiclePaymentsRequest"
+              }
+            },
+            "application/xml": {
+              "schema": {
+                "$ref": "#/components/schemas/VehiclePaymentsRequest"
+              }
+            },
+            "text/xml": {
+              "schema": {
+                "$ref": "#/components/schemas/VehiclePaymentsRequest"
+              }
+            },
+            "application/*+xml": {
+              "schema": {
+                "$ref": "#/components/schemas/VehiclePaymentsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/VehiclePaymentsResponse"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VehiclePaymentsResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VehiclePaymentsResponse"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/VehiclePaymentsResponse"
+                }
+              },
+              "text/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/VehiclePaymentsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AddressViewModel": {
+        "type": "object",
+        "properties": {
+          "building": {
+            "type": "string",
+            "nullable": true
+          },
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "district": {
+            "type": "string",
+            "nullable": true
+          },
+          "flat": {
+            "type": "string",
+            "nullable": true
+          },
+          "house": {
+            "type": "string",
+            "nullable": true
+          },
+          "index": {
+            "type": "string",
+            "nullable": true
+          },
+          "region": {
+            "type": "string",
+            "nullable": true
+          },
+          "street": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BankRequisites": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "mfo": {
+            "type": "string",
+            "nullable": true
+          },
+          "okpo": {
+            "type": "string",
+            "nullable": true
+          },
+          "bik": {
+            "type": "string",
+            "nullable": true
+          },
+          "swift": {
+            "type": "string",
+            "nullable": true
+          },
+          "corrAcc": {
+            "type": "string",
+            "nullable": true
+          },
+          "currencyBankAcc": {
+            "type": "string",
+            "nullable": true
+          },
+          "currentBankAcc": {
+            "type": "string",
+            "nullable": true
+          },
+          "transitAcc": {
+            "type": "string",
+            "nullable": true
+          },
+          "specialTransitAcc": {
+            "type": "string",
+            "nullable": true
+          },
+          "address": {
+            "$ref": "#/components/schemas/CommonOrgAddressType"
+          }
+        },
+        "additionalProperties": false
+      },
+      "BankRequisitesViewModel": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "mfo": {
+            "type": "string",
+            "nullable": true
+          },
+          "okpo": {
+            "type": "string",
+            "nullable": true
+          },
+          "bik": {
+            "type": "string",
+            "nullable": true
+          },
+          "swift": {
+            "type": "string",
+            "nullable": true
+          },
+          "corrAcc": {
+            "type": "string",
+            "nullable": true
+          },
+          "currencyBankAcc": {
+            "type": "string",
+            "nullable": true
+          },
+          "currentBankAcc": {
+            "type": "string",
+            "nullable": true
+          },
+          "transitAcc": {
+            "type": "string",
+            "nullable": true
+          },
+          "specialTransitAcc": {
+            "type": "string",
+            "nullable": true
+          },
+          "address": {
+            "$ref": "#/components/schemas/CommonOrgAddressTypeViewModel"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CommonOrg": {
+        "type": "object",
+        "properties": {
+          "orgName": {
+            "type": "string",
+            "nullable": true
+          },
+          "shortName": {
+            "type": "string",
+            "nullable": true
+          },
+          "inn": {
+            "type": "string",
+            "nullable": true
+          },
+          "kpp": {
+            "type": "string",
+            "nullable": true
+          },
+          "ogrn": {
+            "type": "string",
+            "nullable": true
+          },
+          "okpo": {
+            "type": "string",
+            "nullable": true
+          },
+          "okato": {
+            "type": "string",
+            "nullable": true
+          },
+          "oktmo": {
+            "type": "string",
+            "nullable": true
+          },
+          "legalAddress": {
+            "$ref": "#/components/schemas/CommonOrgAddressType"
+          },
+          "actualAddress": {
+            "$ref": "#/components/schemas/CommonOrgAddressType"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "$ref": "#/components/schemas/OrgType"
+          },
+          "dtType": {
+            "$ref": "#/components/schemas/DtType"
+          },
+          "contacts": {
+            "$ref": "#/components/schemas/CommonOrgContacts"
+          },
+          "branchDescription": {
+            "$ref": "#/components/schemas/OrgBase"
+          },
+          "identityCard": {
+            "$ref": "#/components/schemas/IdentityCard"
+          },
+          "bankRequisites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BankRequisites"
+            },
+            "nullable": true
+          },
+          "person": {
+            "$ref": "#/components/schemas/CommonOrgPerson"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "isForeign": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CommonOrgAddressType": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "settlement": {
+            "type": "string",
+            "nullable": true
+          },
+          "countryName": {
+            "type": "string",
+            "nullable": true
+          },
+          "countryCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "postalCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "region": {
+            "type": "string",
+            "nullable": true
+          },
+          "streetHouse": {
+            "type": "string",
+            "nullable": true
+          },
+          "house": {
+            "type": "string",
+            "nullable": true
+          },
+          "room": {
+            "type": "string",
+            "nullable": true
+          },
+          "territoryCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "addressText": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CommonOrgAddressTypeViewModel": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "settlement": {
+            "type": "string",
+            "nullable": true
+          },
+          "countryName": {
+            "type": "string",
+            "nullable": true
+          },
+          "countryCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "postalCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "region": {
+            "type": "string",
+            "nullable": true
+          },
+          "streetHouse": {
+            "type": "string",
+            "nullable": true
+          },
+          "house": {
+            "type": "string",
+            "nullable": true
+          },
+          "room": {
+            "type": "string",
+            "nullable": true
+          },
+          "territoryCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "addressText": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CommonOrgContacts": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "fax": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CommonOrgContactsViewModel": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "fax": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CommonOrgPerson": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "surname": {
+            "type": "string",
+            "nullable": true
+          },
+          "patronymic": {
+            "type": "string",
+            "nullable": true
+          },
+          "position": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CommonOrgPersonViewModel": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "surname": {
+            "type": "string",
+            "nullable": true
+          },
+          "patronymic": {
+            "type": "string",
+            "nullable": true
+          },
+          "position": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CommonOrgViewModel": {
+        "type": "object",
+        "properties": {
+          "orgName": {
+            "type": "string",
+            "nullable": true
+          },
+          "shortName": {
+            "type": "string",
+            "nullable": true
+          },
+          "inn": {
+            "type": "string",
+            "nullable": true
+          },
+          "kpp": {
+            "type": "string",
+            "nullable": true
+          },
+          "ogrn": {
+            "type": "string",
+            "nullable": true
+          },
+          "okpo": {
+            "type": "string",
+            "nullable": true
+          },
+          "okato": {
+            "type": "string",
+            "nullable": true
+          },
+          "oktmo": {
+            "type": "string",
+            "nullable": true
+          },
+          "legalAddress": {
+            "$ref": "#/components/schemas/CommonOrgAddressTypeViewModel"
+          },
+          "actualAddress": {
+            "$ref": "#/components/schemas/CommonOrgAddressTypeViewModel"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "$ref": "#/components/schemas/OrgTypeViewModel"
+          },
+          "dtType": {
+            "$ref": "#/components/schemas/DtTypeViewModel"
+          },
+          "contacts": {
+            "$ref": "#/components/schemas/CommonOrgContactsViewModel"
+          },
+          "branchDescription": {
+            "$ref": "#/components/schemas/OrgBaseViewModel"
+          },
+          "identityCard": {
+            "$ref": "#/components/schemas/IdentityCardViewModel"
+          },
+          "bankRequisites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BankRequisitesViewModel"
+            },
+            "nullable": true
+          },
+          "person": {
+            "$ref": "#/components/schemas/CommonOrgPersonViewModel"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "isForeign": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CopyDocflowRequest": {
+        "required": [
+          "copyFromId"
+        ],
+        "type": "object",
+        "properties": {
+          "copyFromId": {
+            "type": "string",
+            "description": "Идентификационный номер лица, заполнившего декларацию",
+            "format": "uuid"
+          },
+          "customs": {
+            "type": "integer",
+            "description": "Код таможенного органа",
+            "format": "int32"
+          },
+          "organizationId": {
+            "type": "string",
+            "description": "Идентификационный номер организации",
+            "format": "uuid"
+          },
+          "employeeId": {
+            "type": "string",
+            "description": "Идентификационный номер лица, заполнившего декларацию",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Имя документооборота",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateDocflowRequest": {
+        "required": [
+          "customs",
+          "employeeId",
+          "organizationId",
+          "procedure",
+          "type"
+        ],
+        "type": "object",
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/DeclarationType"
+          },
+          "procedure": {
+            "$ref": "#/components/schemas/DeclarationProcedure"
+          },
+          "singularity": {
+            "type": "integer",
+            "description": "Особенности",
+            "format": "int32",
+            "nullable": true
+          },
+          "customs": {
+            "type": "integer",
+            "description": "Код таможенного органа",
+            "format": "int32"
+          },
+          "organizationId": {
+            "type": "string",
+            "description": "Идентификационный номер организации",
+            "format": "uuid"
+          },
+          "employeeId": {
+            "type": "string",
+            "description": "Идентификационный номер лица, заполнившего декларацию",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Имя документооборота",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomsViewModel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "shortName": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DeclarationProcedure": {
+        "enum": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "DeclarationProcedureViewModel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DeclarationSingularity": {
+        "enum": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "DeclarationSingularityViewModel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "shortName": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DeclarationStatus": {
+        "enum": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63,
+          64,
+          65,
+          66,
+          67,
+          68,
+          69,
+          70,
+          71,
+          72,
+          73,
+          74,
+          75,
+          76,
+          77,
+          78,
+          79,
+          80,
+          81,
+          82,
+          83,
+          84,
+          85,
+          86,
+          87,
+          88,
+          89,
+          90,
+          91,
+          92,
+          93,
+          94,
+          95,
+          96,
+          97,
+          98,
+          99,
+          100,
+          101,
+          102,
+          103,
+          104,
+          105,
+          106,
+          107,
+          108,
+          109,
+          110,
+          111,
+          112,
+          113,
+          114,
+          115,
+          116,
+          117,
+          118,
+          119,
+          120,
+          121,
+          122,
+          123,
+          124,
+          125,
+          126,
+          127,
+          128,
+          129,
+          130,
+          131,
+          132,
+          133,
+          134,
+          135,
+          136,
+          137,
+          138,
+          139,
+          140,
+          141,
+          142,
+          143,
+          144,
+          145,
+          146,
+          147,
+          148,
+          149,
+          150,
+          151,
+          152,
+          153,
+          154,
+          155,
+          156,
+          157,
+          158,
+          159,
+          160,
+          161,
+          162,
+          163,
+          164,
+          165,
+          166,
+          167,
+          168,
+          169,
+          170,
+          171,
+          172,
+          173,
+          174,
+          175,
+          176,
+          177,
+          178,
+          179,
+          180,
+          181,
+          182,
+          183,
+          184,
+          185,
+          186,
+          187,
+          188,
+          189,
+          190,
+          191,
+          192,
+          193,
+          194,
+          195,
+          196,
+          197,
+          198,
+          199,
+          200,
+          201,
+          202,
+          203,
+          204
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "DeclarationType": {
+        "enum": [
+          0,
+          1,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "DeclarationTypeViewModel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DistributionDistributeBy": {
+        "enum": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "DistributionItemDto": {
+        "type": "object",
+        "properties": {
+          "grafa": {
+            "type": "string",
+            "description": "Номер графы в ДТС",
+            "nullable": true
+          },
+          "distributeBy": {
+            "$ref": "#/components/schemas/DistributionDistributeBy"
+          },
+          "includeIn": {
+            "$ref": "#/components/schemas/DistributionItemIncludeIn"
+          },
+          "currencyCode": {
+            "type": "string",
+            "description": "Код валюты",
+            "nullable": true
+          },
+          "total": {
+            "type": "number",
+            "description": "Сумма в валюте",
+            "format": "double"
+          },
+          "borderPlace": {
+            "type": "string",
+            "description": "Место прибытия",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false,
+        "description": "Распределение расхода по товарам"
+      },
+      "DistributionItemIncludeIn": {
+        "enum": [
+          1,
+          2,
+          3
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "DocflowDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "declarationType": {
+            "$ref": "#/components/schemas/DeclarationType"
+          },
+          "procedure": {
+            "$ref": "#/components/schemas/DeclarationProcedure"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DeclarationStatus"
+          },
+          "changed": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "orgName": {
+            "type": "string",
+            "nullable": true
+          },
+          "inn": {
+            "type": "string",
+            "nullable": true
+          },
+          "kpp": {
+            "type": "string",
+            "nullable": true
+          },
+          "processId": {
+            "type": "string",
+            "nullable": true
+          },
+          "gtdNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "statusText": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DocflowSearchViewModel": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "nullable": true
+          },
+          "searchInput": {
+            "type": "string",
+            "nullable": true
+          },
+          "gtdRegistrationDateFrom": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "gtdRegistrationDateTo": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdFrom": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdTo": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "consignee": {
+            "type": "string",
+            "nullable": true
+          },
+          "consignor": {
+            "type": "string",
+            "nullable": true
+          },
+          "documentDateFrom": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "documentDateTo": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "presentedDocumentType": {
+            "$ref": "#/components/schemas/PresentedDocumentType"
+          },
+          "documentNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "presentedDocumentModeCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "presentedDocumentDate": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "presentedDocumentName": {
+            "type": "string",
+            "nullable": true
+          },
+          "procedure": {
+            "$ref": "#/components/schemas/DeclarationProcedure"
+          },
+          "type": {
+            "$ref": "#/components/schemas/DeclarationType"
+          },
+          "userNs": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "orgIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          },
+          "includeDeleted": {
+            "type": "boolean"
+          },
+          "includeDemo": {
+            "type": "boolean"
+          },
+          "docflowTags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          },
+          "docflowIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          },
+          "take": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "skip": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "integratedDfs": {
+            "type": "boolean"
+          },
+          "singularity": {
+            "$ref": "#/components/schemas/DeclarationSingularity"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DocumentProps": {
+        "type": "object",
+        "properties": {
+          "documentType": {
+            "$ref": "#/components/schemas/DocumentTypeViewModel"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "orgId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "number": {
+            "type": "string",
+            "nullable": true
+          },
+          "date": {
+            "type": "string",
+            "nullable": true
+          },
+          "formattedDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "formattedUserDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "docId": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdTime": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "beginDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "endDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "countryCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "specialSimplifiedCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "customsPaymentModeCodeType": {
+            "type": "string",
+            "nullable": true
+          },
+          "customsCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "customsControlZoneId": {
+            "type": "string",
+            "nullable": true
+          },
+          "appNumber": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "goodsNumericLic": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "provideLater": {
+            "type": "boolean"
+          },
+          "provideLaterDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "prettyProvideLaterDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "providingIndex": {
+            "type": "string",
+            "nullable": true
+          },
+          "providingIndexDescription": {
+            "type": "string",
+            "nullable": true
+          },
+          "declarationNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "preliminaryDeclarationNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "archIdForIndex2": {
+            "type": "string",
+            "nullable": true
+          },
+          "archDocIdForIndex2": {
+            "type": "string",
+            "nullable": true
+          },
+          "archStatus": {
+            "type": "string",
+            "nullable": true
+          },
+          "archActionDate": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "formId": {
+            "type": "string",
+            "nullable": true
+          },
+          "requestPositionId": {
+            "type": "string",
+            "nullable": true
+          },
+          "inventoryRowId": {
+            "type": "string",
+            "nullable": true
+          },
+          "isAdditionalInfo": {
+            "type": "boolean"
+          },
+          "prettyEndDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "additionalInfoDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "additionalInfoDateName": {
+            "type": "string",
+            "nullable": true
+          },
+          "additionalInfoDateType": {
+            "type": "string",
+            "nullable": true
+          },
+          "additionalInfoCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "additionalInfoCodeName": {
+            "type": "string",
+            "nullable": true
+          },
+          "additionalInfoCodeType": {
+            "type": "string",
+            "nullable": true
+          },
+          "processingGoodsCost": {
+            "type": "string",
+            "nullable": true
+          },
+          "processingGoodsCostCurrency": {
+            "type": "string",
+            "nullable": true
+          },
+          "documentRequestDocumentId": {
+            "type": "string",
+            "nullable": true
+          },
+          "documentRequestPosition": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isTemplate": {
+            "type": "boolean"
+          },
+          "belongsToAllGoods": {
+            "type": "boolean"
+          },
+          "copyDataFromDt": {
+            "type": "boolean"
+          },
+          "isCommon": {
+            "type": "boolean"
+          },
+          "isCore": {
+            "type": "boolean"
+          },
+          "isAdditionalInventory": {
+            "type": "boolean"
+          },
+          "showFormUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "isFilled": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "requestDataId": {
+            "type": "string",
+            "nullable": true
+          },
+          "comment": {
+            "type": "string",
+            "nullable": true
+          },
+          "identificationDocsBehavior": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "scanId": {
+            "type": "string",
+            "nullable": true
+          },
+          "isScannedDocumentBeyondRequest": {
+            "type": "boolean"
+          },
+          "copyIfExists": {
+            "type": "boolean",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DocumentRowDto": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "formId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "docNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "grafa44Code": {
+            "type": "string",
+            "nullable": true
+          },
+          "documentModeId": {
+            "type": "string",
+            "nullable": true
+          },
+          "isCore": {
+            "type": "boolean"
+          },
+          "gfv": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DocumentTypeViewModel": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "nullable": true,
+            "readOnly": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "documentModeId": {
+            "type": "string",
+            "nullable": true
+          },
+          "grafa44Code": {
+            "type": "string",
+            "nullable": true
+          },
+          "isAdditionalInfo": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DtType": {
+        "enum": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "DtTypeViewModel": {
+        "enum": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "DtsType": {
+        "enum": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "EmployeeViewModel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "surname": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "patronymic": {
+            "type": "string",
+            "nullable": true
+          },
+          "post": {
+            "type": "string",
+            "nullable": true
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "series": {
+            "type": "string",
+            "nullable": true
+          },
+          "number": {
+            "type": "string",
+            "nullable": true
+          },
+          "passportOrganization": {
+            "type": "string",
+            "nullable": true
+          },
+          "passportDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "authority": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "identity": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "authorityDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "authorityNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "authorityDateTo": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "EngineType": {
+        "enum": [
+          0,
+          1,
+          2
+        ],
+        "type": "integer",
+        "description": "0 - Бензиновый\r\n1 - Дизельный\r\n2 - Электрический",
+        "format": "int32"
+      },
+      "EnvelopeDto": {
+        "type": "object",
+        "properties": {
+          "envelopeId": {
+            "type": "string",
+            "nullable": true
+          },
+          "processingDateTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "preparationDateTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "messageType": {
+            "type": "string",
+            "nullable": true
+          },
+          "messageDescription": {
+            "type": "string",
+            "nullable": true
+          },
+          "envelope": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "HybridType": {
+        "enum": [
+          0,
+          1,
+          2
+        ],
+        "type": "integer",
+        "description": "0 - Не гибрид\r\n1 - Электрогибрид\r\n2 - Электрогибрид с PHEV",
+        "format": "int32"
+      },
+      "IdentityCard": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "number": {
+            "type": "string",
+            "nullable": true
+          },
+          "date": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "series": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "organizationName": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "IdentityCardViewModel": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "number": {
+            "type": "string",
+            "nullable": true
+          },
+          "date": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "series": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "organizationName": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ImportHeaderMapOptions": {
+        "enum": [
+          0,
+          1
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "JsonTemplateInfoDto": {
+        "type": "object",
+        "properties": {
+          "gf": {
+            "type": "string",
+            "nullable": true
+          },
+          "documentModeId": {
+            "type": "string",
+            "nullable": true
+          },
+          "typeName": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrgBase": {
+        "type": "object",
+        "properties": {
+          "orgName": {
+            "type": "string",
+            "nullable": true
+          },
+          "shortName": {
+            "type": "string",
+            "nullable": true
+          },
+          "inn": {
+            "type": "string",
+            "nullable": true
+          },
+          "kpp": {
+            "type": "string",
+            "nullable": true
+          },
+          "ogrn": {
+            "type": "string",
+            "nullable": true
+          },
+          "okpo": {
+            "type": "string",
+            "nullable": true
+          },
+          "okato": {
+            "type": "string",
+            "nullable": true
+          },
+          "oktmo": {
+            "type": "string",
+            "nullable": true
+          },
+          "legalAddress": {
+            "$ref": "#/components/schemas/CommonOrgAddressType"
+          },
+          "actualAddress": {
+            "$ref": "#/components/schemas/CommonOrgAddressType"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrgBaseViewModel": {
+        "type": "object",
+        "properties": {
+          "orgName": {
+            "type": "string",
+            "nullable": true
+          },
+          "shortName": {
+            "type": "string",
+            "nullable": true
+          },
+          "inn": {
+            "type": "string",
+            "nullable": true
+          },
+          "kpp": {
+            "type": "string",
+            "nullable": true
+          },
+          "ogrn": {
+            "type": "string",
+            "nullable": true
+          },
+          "okpo": {
+            "type": "string",
+            "nullable": true
+          },
+          "okato": {
+            "type": "string",
+            "nullable": true
+          },
+          "oktmo": {
+            "type": "string",
+            "nullable": true
+          },
+          "legalAddress": {
+            "$ref": "#/components/schemas/CommonOrgAddressTypeViewModel"
+          },
+          "actualAddress": {
+            "$ref": "#/components/schemas/CommonOrgAddressTypeViewModel"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrgType": {
+        "enum": [
+          0,
+          1,
+          2
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "OrgTypeViewModel": {
+        "enum": [
+          0,
+          1,
+          2
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "OrganizationViewModel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "participantId": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "inn": {
+            "type": "string",
+            "nullable": true
+          },
+          "kpp": {
+            "type": "string",
+            "nullable": true
+          },
+          "ogrn": {
+            "type": "string",
+            "nullable": true
+          },
+          "okato": {
+            "type": "string",
+            "nullable": true
+          },
+          "okpo": {
+            "type": "string",
+            "nullable": true
+          },
+          "oktmo": {
+            "type": "string",
+            "nullable": true
+          },
+          "address": {
+            "$ref": "#/components/schemas/AddressViewModel"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OwnerType": {
+        "enum": [
+          0,
+          1
+        ],
+        "type": "integer",
+        "description": "0 - Юридическое лицо\r\n1 - Физическое лицо",
+        "format": "int32"
+      },
+      "PowerUnitMeasurement": {
+        "enum": [
+          0,
+          1
+        ],
+        "type": "integer",
+        "description": "0 - л.с.\r\n1 - кВт",
+        "format": "int32"
+      },
+      "PresentedDocumentType": {
+        "enum": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "VehicleAgeType": {
+        "enum": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "type": "integer",
+        "description": "0 - Новые, менее 3 лет\r\n1 - От 3 лет, но не более 5\r\n2 - От 5 лет, но не более 7\r\n3 - Более 7 лет",
+        "format": "int32"
+      },
+      "VehiclePaymentRow": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Вид сбора",
+            "nullable": true
+          },
+          "taxBase": {
+            "type": "string",
+            "description": "Основа начисления",
+            "nullable": true
+          },
+          "rate": {
+            "type": "string",
+            "description": "Ставка",
+            "nullable": true
+          },
+          "paymentInRubles": {
+            "type": "number",
+            "description": "Сумма в рублях",
+            "format": "double"
+          },
+          "payment": {
+            "type": "number",
+            "description": "Сумма",
+            "format": "double"
+          },
+          "currencyCode": {
+            "type": "integer",
+            "description": "Цифровой код валюты",
+            "format": "int32"
+          },
+          "currencyCodeAlphabetical": {
+            "type": "string",
+            "description": "Буквенный код валюты",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "VehiclePaymentsRequest": {
+        "required": [
+          "age",
+          "currencyCode",
+          "engineType",
+          "engineVolume",
+          "hybridType",
+          "ownerType",
+          "power",
+          "powerUnitMeasurement",
+          "price"
+        ],
+        "type": "object",
+        "properties": {
+          "ownerType": {
+            "$ref": "#/components/schemas/OwnerType"
+          },
+          "age": {
+            "$ref": "#/components/schemas/VehicleAgeType"
+          },
+          "price": {
+            "type": "number",
+            "description": "Цена",
+            "format": "double"
+          },
+          "currencyCode": {
+            "type": "integer",
+            "description": "Код валюты",
+            "format": "int32"
+          },
+          "engineType": {
+            "$ref": "#/components/schemas/EngineType"
+          },
+          "hybridType": {
+            "$ref": "#/components/schemas/HybridType"
+          },
+          "isIcePowerPrimary": {
+            "type": "boolean",
+            "description": "Мощность ДВС больше ЭД",
+            "nullable": true
+          },
+          "power": {
+            "type": "integer",
+            "description": "Мощность",
+            "format": "int32"
+          },
+          "powerUnitMeasurement": {
+            "$ref": "#/components/schemas/PowerUnitMeasurement"
+          },
+          "electricalPower": {
+            "type": "integer",
+            "description": "Мощность электродвигателя",
+            "format": "int32",
+            "nullable": true
+          },
+          "electricalPowerUnitMeasurement": {
+            "$ref": "#/components/schemas/PowerUnitMeasurement"
+          },
+          "isOffRoad": {
+            "type": "boolean",
+            "description": "Повышенная проходимость"
+          },
+          "hasSequentialTypePowerUnit": {
+            "type": "boolean",
+            "description": "Наличие силовой установки последовательного типа"
+          },
+          "engineVolume": {
+            "type": "integer",
+            "description": "Объем двигателя (в см3)",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Входные параметры для расчета таможенного платежа при ввозе автомобиля"
+      },
+      "VehiclePaymentsResponse": {
+        "type": "object",
+        "properties": {
+          "tnved": {
+            "type": "string",
+            "description": "ТН ВЭД",
+            "nullable": true
+          },
+          "payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VehiclePaymentRow"
+            },
+            "description": "Таможенные сборы",
+            "nullable": true
+          },
+          "totalPaymentInRubles": {
+            "type": "number",
+            "description": "Итоговый платеж в рублях",
+            "format": "double"
+          },
+          "totalPayment": {
+            "type": "number",
+            "description": "Итоговый платеж",
+            "format": "double"
+          },
+          "currencyCode": {
+            "type": "integer",
+            "description": "Цифровой код валюты",
+            "format": "int32"
+          },
+          "currencyCodeAlphabetical": {
+            "type": "string",
+            "description": "Буквенный код валюты",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false,
+        "description": "Расчет таможенного платежа при ввозе автомобиля"
+      }
+    },
+    "securitySchemes": {
+      "auth.sid": {
+        "type": "apiKey",
+        "description": "Введите sid, полученый при авторизации",
+        "name": "Authorization",
+        "in": "header"
+      }
+    }
+  },
+  "security": [
+    {
+      "auth.sid": [ ]
+    }
+  ],
+  "tags": [
+    {
+      "name": "Print",
+      "description": "Печать документа"
+    },
+    {
+      "name": "CommonOrgs",
+      "description": "Контрагенты"
+    },
+    {
+      "name": "DocflowApi",
+      "description": "Документообороты"
+    },
+    {
+      "name": "DocumentRow",
+      "description": "Документы"
+    },
+    {
+      "name": "Forms",
+      "description": "Формы"
+    },
+    {
+      "name": "JsonTemplates",
+      "description": "Шаблоны"
+    },
+    {
+      "name": "Options",
+      "description": "Справочники"
+    },
+    {
+      "name": "VehiclePayments",
+      "description": "Платежи при ввозе автомобиля"
+    }
+  ]
+}

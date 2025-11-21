@@ -112,13 +112,6 @@ export function WSEProvider({
         return undefined;
       }
 
-      // Additional validation: check if we have user data
-      const authData = localStorage.getItem('auth_user');
-      if (!authData) {
-        logger.debug('[WSEProvider] No user data found');
-        return undefined;
-      }
-
       // Only log if token actually changed
       if (previousTokenRef.current !== token) {
         logger.info(`[WSEProvider] Token changed from ${previousTokenRef.current ? 'exists' : 'none'} to ${token ? 'exists' : 'none'}`);
