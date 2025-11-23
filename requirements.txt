@@ -1,0 +1,172 @@
+# =============================================================================
+# WellWon Platform - Python Dependencies
+# =============================================================================
+# Event Sourcing, CQRS, DDD Platform for Logistics, Customs, and Fintech
+# Python 3.14 compatible
+# Last Updated: 2025-11-23
+# =============================================================================
+
+# =============================================================================
+# Core Web Framework
+# =============================================================================
+fastapi>=0.115.0
+granian>=1.6.0                    # High-performance ASGI server
+uvicorn[standard]>=0.30.0         # Alternative ASGI server
+pydantic>=2.9.0                   # Data validation and settings
+pydantic-settings>=2.5.0          # Settings management
+
+# =============================================================================
+# Database - PostgreSQL
+# =============================================================================
+asyncpg>=0.29.0                   # Async PostgreSQL driver
+psycopg2-binary>=2.9.9            # PostgreSQL adapter (binary)
+
+# =============================================================================
+# Database - Redis
+# =============================================================================
+redis>=5.2.0                      # Redis client (Python 3.14 compatible)
+hiredis>=3.0.0                    # C parser for Redis protocol
+
+# =============================================================================
+# Event Bus - Kafka/RedPanda
+# =============================================================================
+aiokafka>=0.12.0                  # Async Kafka client
+kafka-python>=2.0.2               # Kafka Python client
+
+# =============================================================================
+# Event Store - KurrentDB (EventStoreDB)
+# =============================================================================
+# Note: KurrentDB client may need manual installation
+# pip install esdbclient
+
+# =============================================================================
+# Authentication & Security
+# =============================================================================
+python-jose[cryptography]>=3.3.0  # JWT tokens
+passlib[bcrypt]>=1.7.4            # Password hashing
+python-multipart>=0.0.9           # Form data parsing
+cryptography>=43.0.0              # Cryptographic recipes
+
+# =============================================================================
+# HTTP Client
+# =============================================================================
+httpx>=0.27.0                     # Async HTTP client
+aiohttp>=3.10.0                   # Alternative async HTTP client
+
+# =============================================================================
+# Configuration & Environment
+# =============================================================================
+python-dotenv>=1.0.1              # .env file support
+pyyaml>=6.0.2                     # YAML configuration
+
+# =============================================================================
+# Logging & Monitoring
+# =============================================================================
+python-json-logger>=2.0.7         # JSON logging
+prometheus-client>=0.21.0         # Prometheus metrics
+
+# =============================================================================
+# Date & Time
+# =============================================================================
+python-dateutil>=2.9.0            # Date/time utilities
+
+# =============================================================================
+# Testing
+# =============================================================================
+pytest>=8.3.0
+pytest-asyncio>=0.24.0            # Async test support
+pytest-cov>=6.0.0                 # Coverage
+pytest-mock>=3.14.0               # Mocking
+httpx>=0.27.0                     # HTTP testing (async)
+
+# =============================================================================
+# Development Tools
+# =============================================================================
+black>=24.10.0                    # Code formatter
+ruff>=0.7.0                       # Fast linter
+mypy>=1.13.0                      # Type checking
+isort>=5.13.0                     # Import sorting
+
+# =============================================================================
+# Documentation
+# =============================================================================
+mkdocs>=1.6.0                     # Documentation generator
+mkdocs-material>=9.5.0            # Material theme
+
+# =============================================================================
+# Utilities
+# =============================================================================
+click>=8.1.7                      # CLI framework
+rich>=13.9.0                      # Rich terminal output
+tenacity>=9.0.0                   # Retry library
+python-slugify>=8.0.4             # Slug generation
+
+# =============================================================================
+# WebSocket Support
+# =============================================================================
+websockets>=13.1                  # WebSocket support
+
+# =============================================================================
+# Email (Optional)
+# =============================================================================
+aiosmtplib>=3.0.2                 # Async SMTP client
+email-validator>=2.2.0            # Email validation
+
+# =============================================================================
+# Image Processing (Optional - for document processing)
+# =============================================================================
+pillow>=11.0.0                    # Image processing
+pypdf>=5.1.0                      # PDF processing
+
+# =============================================================================
+# OCR & AI (Optional - for document recognition)
+# =============================================================================
+# pytesseract>=0.3.13             # OCR
+# opencv-python>=4.10.0           # Computer vision
+# openai>=1.54.0                  # OpenAI API client
+
+# =============================================================================
+# Excel/CSV Processing (Optional)
+# =============================================================================
+pandas>=2.2.0                     # Data analysis
+openpyxl>=3.1.5                   # Excel files
+xlsxwriter>=3.2.0                 # Excel writing
+
+# =============================================================================
+# XML Processing (for Customs STM format)
+# =============================================================================
+lxml>=5.3.0                       # XML/HTML processing
+xmltodict>=0.14.2                 # XML to dict conversion
+
+# =============================================================================
+# Telegram Integration (Optional)
+# =============================================================================
+# python-telegram-bot>=21.7       # Telegram bot API
+
+# =============================================================================
+# Payment Processing (Optional)
+# =============================================================================
+# stripe>=11.2.0                  # Stripe payments
+# paypalrestsdk>=1.13.3           # PayPal payments
+
+# =============================================================================
+# Task Queue (Optional - alternative to workers)
+# =============================================================================
+# celery>=5.4.0                   # Distributed task queue
+# celery[redis]>=5.4.0            # Celery with Redis
+
+# =============================================================================
+# Additional Infrastructure
+# =============================================================================
+# sentry-sdk[fastapi]>=2.18.0     # Error tracking
+# ddtrace>=2.15.0                 # Datadog APM
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - Python 3.14 compatible
+# - All core dependencies are required
+# - Optional dependencies are commented out
+# - Uncomment optional dependencies as needed
+# - Version ranges allow minor updates while ensuring compatibility
+# =============================================================================

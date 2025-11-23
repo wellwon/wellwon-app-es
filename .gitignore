@@ -8,6 +8,3 @@
 
 # Dependencies
 node_modules/
-
-# Database
-/database/
