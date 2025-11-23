@@ -6,23 +6,12 @@
 from __future__ import annotations
 
 from typing import Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import Field
 import uuid
 from datetime import datetime, timezone
 
+from app.common.base.base_model import BaseEvent
 from app.infra.event_bus.event_decorators import domain_event
-
-# =============================================================================
-# SECTION: Base Event Contract (shared for all events)
-# =============================================================================
-
-class BaseEvent(BaseModel):
-    event_id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    event_type: str  # Each subclass sets its Literal value
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    version: int = 1
-
-    model_config = {"from_attributes": True}
 
 # =============================================================================
 # SECTION: User Lifecycle and Authentication Events

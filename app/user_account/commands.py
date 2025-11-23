@@ -5,15 +5,17 @@
 # =============================================================================
 
 from __future__ import annotations
-from pydantic import BaseModel, Field, EmailStr, field_validator
+from pydantic import Field, EmailStr, field_validator
 import uuid
 from typing import Optional
+
+from app.infra.cqrs.command_bus import Command
 
 
 # -----------------------------------------------------------------------------
 # Core User Commands
 # -----------------------------------------------------------------------------
-class CreateUserAccountCommand(BaseModel):
+class CreateUserAccountCommand(Command):
     """Command to create a new user account."""
     user_id: uuid.UUID = Field(default_factory=uuid.uuid4, description="Generated user ID")
     username: str = Field(..., min_length=3, max_length=50, description="Unique username")
@@ -26,8 +28,7 @@ class CreateUserAccountCommand(BaseModel):
     first_name: Optional[str] = Field(None, max_length=100)
     last_name: Optional[str] = Field(None, max_length=100)
 
-    # ADDED: Saga support
-    saga_id: Optional[uuid.UUID] = Field(None, description="ID of orchestrating saga if part of larger workflow")
+    # saga_id inherited from Command base class
 
     @field_validator('username')
     @classmethod
@@ -39,36 +40,33 @@ class CreateUserAccountCommand(BaseModel):
         return v.lower()
 
 
-class AuthenticateUserCommand(BaseModel):
+class AuthenticateUserCommand(Command):
     """Command to authenticate a user."""
     username: str
     password: str
 
-    # ADDED: Saga support (though authentication rarely needs it)
-    saga_id: Optional[uuid.UUID] = Field(None, description="ID of orchestrating saga if part of larger workflow")
+    # saga_id inherited from Command base class
 
 
-class ChangeUserPasswordCommand(BaseModel):
+class ChangeUserPasswordCommand(Command):
     """Command to change a user's password."""
     user_id: uuid.UUID
     current_password: str
     new_password: str = Field(..., min_length=8)
 
-    # ADDED: Saga support
-    saga_id: Optional[uuid.UUID] = Field(None, description="ID of orchestrating saga if part of larger workflow")
+    # saga_id inherited from Command base class
 
 
-class ResetUserPasswordWithSecretCommand(BaseModel):
+class ResetUserPasswordWithSecretCommand(Command):
     """Command to reset a user's password using their secret word."""
     username: str
     secret: str
     new_password: str = Field(..., min_length=8)
 
-    # ADDED: Saga support
-    saga_id: Optional[uuid.UUID] = Field(None, description="ID of orchestrating saga if part of larger workflow")
+    # saga_id inherited from Command base class
 
 
-class DeleteUserAccountCommand(BaseModel):
+class DeleteUserAccountCommand(Command):
     """
     Command to delete a user account.
     Triggers cascade deletion via saga orchestration.
@@ -84,23 +82,21 @@ class DeleteUserAccountCommand(BaseModel):
         description="Reason for deletion (self_delete, admin_delete, etc)"
     )
 
-    # ADDED: Saga support
-    saga_id: Optional[uuid.UUID] = Field(None, description="ID of orchestrating saga if part of larger workflow")
+    # saga_id inherited from Command base class
 
 
-class VerifyUserEmailCommand(BaseModel):
+class VerifyUserEmailCommand(Command):
     """Command to verify user's email address."""
     user_id: uuid.UUID
     verification_token: str
 
-    # ADDED: Saga support
-    saga_id: Optional[uuid.UUID] = Field(None, description="ID of orchestrating saga if part of larger workflow")
+    # saga_id inherited from Command base class
 
 
 # -----------------------------------------------------------------------------
 # WellWon Platform Commands
 # -----------------------------------------------------------------------------
-class UpdateUserProfileCommand(BaseModel):
+class UpdateUserProfileCommand(Command):
     """Command to update user profile information (WellWon)."""
     user_id: uuid.UUID
     first_name: Optional[str] = Field(None, max_length=100)
@@ -111,8 +107,7 @@ class UpdateUserProfileCommand(BaseModel):
     user_type: Optional[str] = None
     is_developer: Optional[bool] = None
 
-    # ADDED: Saga support
-    saga_id: Optional[uuid.UUID] = Field(None, description="ID of orchestrating saga if part of larger workflow")
+    # saga_id inherited from Command base class
 
 # =============================================================================
 # EOF

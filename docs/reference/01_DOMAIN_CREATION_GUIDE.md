@@ -95,20 +95,26 @@ app/{domain_name}/
 
 ### File Descriptions
 
-| File | Purpose | Pattern | Example Domain |
-|------|---------|---------|----------------|
-| `aggregate.py` | Aggregate root with state management and business logic | Event sourcing aggregate | `broker_account` |
-| `events.py` | Domain events (Pydantic BaseEvent, NOT @dataclass) | Event definitions | `broker_account` |
-| `commands.py` | Write operations (Pydantic Command models) | Command definitions | `broker_account` |
-| `value_objects.py` | Immutable domain objects (@dataclass frozen=True) | Value objects | `automation` |
-| `enums.py` | Domain-specific enumerations | Python Enum | `automation` |
-| `exceptions.py` | Custom business rule exceptions | Exception classes | `automation` |
-| `projectors.py` | Event handlers that update read models | Projection logic | `broker_account` |
-| `read_models.py` | Read-side database schemas (Pydantic) | Read model definitions | `broker_account` |
-| `queries.py` | Read operations (Pydantic Query models) | Query definitions | `broker_account` |
-| `sync_events.py` | **CRITICAL**: Events requiring synchronous projection | Sync event config | `broker_account` |
-| `command_handlers/` | Modular command handler implementations | Handler classes | `broker_account` |
-| `query_handlers/` | Query handler implementations | Handler classes | `broker_account` |
+| File | Purpose | Pattern | Required | Example |
+|------|---------|---------|----------|---------|
+| `aggregate.py` | Aggregate root with state and business logic | Event sourcing aggregate | ✅ YES | `broker_account` |
+| `events.py` | Domain events (Pydantic BaseEvent with @domain_event) | Event definitions | ✅ YES | `broker_account` |
+| `commands.py` | Write operations (inherit from Command) | Pydantic v2 | ✅ YES | `broker_account` |
+| `queries.py` | Read operations (inherit from Query) | Pydantic v2 | ✅ YES | `broker_account` |
+| `exceptions.py` | Domain-specific business errors | Exception classes | ✅ YES | `automation` |
+| `enums.py` | Domain-specific enumerations | Python str Enum | ✅ YES | `automation` |
+| `projectors.py` | Event handlers updating read models | @sync_projection | ✅ YES | `broker_account` |
+| `read_models.py` | Read-side database schemas | Pydantic v2 | ✅ YES | `broker_account` |
+| `value_objects.py` | Immutable domain objects | @dataclass frozen | Optional | `automation` |
+| `command_handlers/` | Command handler classes | BaseCommandHandler | ✅ YES | `broker_account` |
+| `query_handlers/` | Query handler classes | BaseQueryHandler | ✅ YES | `broker_account` |
+
+**⚠️ 2025-11-22 BREAKING CHANGES**:
+- `commands.py` - NOW inherits from `Command` (Pydantic v2), NOT @dataclass
+- `queries.py` - NOW inherits from `Query` (Pydantic v2), NOT @dataclass
+- `exceptions.py` - NOW REQUIRED for all domains
+- `enums.py` - NOW REQUIRED for all domains
+- `sync_events.py` - DEPRECATED (use @domain_event decorator instead)
 
 ---
 
