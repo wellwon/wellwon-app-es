@@ -23,11 +23,6 @@ class WorkerType(Enum):
     """All worker types in the system"""
     # Core workers
     EVENT_PROCESSOR = "event-processor"
-    DATA_SYNC = "data-sync"  # NEW: Replaces DATA_INTEGRITY + adds sync functionality
-
-    # Legacy (to be removed)
-    DATA_INTEGRITY = "data-integrity"  # DEPRECATED: Use DATA_SYNC
-    CONNECTION_RECOVERY = "connection-recovery"  # DEPRECATED: Moving to server-side
 
     # Additional workers
     SAGA_PROCESSOR = "saga-processor"
@@ -184,49 +179,6 @@ class WorkerConsumerGroups:
         supports_queries=False,  # REMOVED: Pure event consumer, no queries needed
     )
 
-    # Data Sync Worker - Synchronizes broker data and monitors integrity (v0.8)
-    DATA_SYNC = WorkerConsumerConfig(
-        worker_type=WorkerType.DATA_SYNC,
-        consumer_group="data-sync-workers",
-        description="Synchronizes broker data, monitors integrity, and triggers recovery",
-        topics=[
-            # Worker operational topics (NEW prefix: worker.*)
-            "worker.data-sync.sync-requests",      # Background sync requests (tier 2/3)
-            "alerts.data-integrity",                # Integrity issues (keep alerts.*)
-        ],
-        max_poll_records=1000,  # High throughput (matching EventProcessor)
-        max_poll_interval_ms=300000,  # 5 minutes
-        instances_min=1,  # Single instance for dev (scale in prod)
-        instances_max=20,  # Scale to 20 like EventProcessor
-        fetch_max_wait_ms=100,  # Low latency (matching EventProcessor)
-        max_partition_fetch_bytes=5242880,  # 5MB for batch processing
-        enabled=os.getenv("ENABLE_DATA_SYNC_WORKER", "true").lower() == "true",
-        supports_commands=True,
-        supports_queries=True,
-    )
-
-    # Data Integrity Worker - Monitors data consistency (DEPRECATED - use DATA_SYNC)
-    DATA_INTEGRITY = WorkerConsumerConfig(
-        worker_type=WorkerType.DATA_INTEGRITY,
-        consumer_group="data-integrity-workers",
-        description="DEPRECATED: Use DATA_SYNC worker instead",
-        topics=[
-            # Integrity-specific topics (from redpanda_setup.sh)
-            "system.data-integrity-events",
-            "system.data-integrity-metrics",
-            "alerts.data-integrity",
-
-            # Worker control
-            "system.worker-control.data-integrity",
-        ],
-        max_poll_records=100,  # Moderate, careful processing
-        instances_min=1,
-        instances_max=5,
-        session_timeout_ms=45000,  # Longer timeout for complex checks
-        max_poll_interval_ms=600000,  # 10 minutes for long operations
-        supports_commands=True,
-        supports_queries=True,
-    )
 
     # Connection Recovery Worker - REMOVED (moved to server-side)
     # Server StreamingLifecycleManager handles connection recovery directly
@@ -383,9 +335,6 @@ class WorkerConsumerGroups:
         """Get all worker configurations"""
         return {
             WorkerType.EVENT_PROCESSOR: cls.EVENT_PROCESSOR,
-            WorkerType.DATA_SYNC: cls.DATA_SYNC,
-            WorkerType.DATA_INTEGRITY: cls.DATA_INTEGRITY,
-            # WorkerType.CONNECTION_RECOVERY: cls.CONNECTION_RECOVERY,  # DEPRECATED
             WorkerType.SAGA_PROCESSOR: cls.SAGA_PROCESSOR,
             WorkerType.NOTIFICATION: cls.NOTIFICATION,
             WorkerType.MARKET_DATA: cls.MARKET_DATA,

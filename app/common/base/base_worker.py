@@ -2,7 +2,7 @@
 """
 Base Worker - Complete Shared Infrastructure for All Worker Types
 
-Provides EVERYTHING common between event_processor_worker and data_sync_worker:
+Provides EVERYTHING common between all worker types:
 - PersistentWorkerState (Redis-backed)
 - Full infrastructure initialization (DB, Redis, EventBus, CQRS)
 - Beautiful logging (add_startup_info, log_worker_banner, etc.)
@@ -172,7 +172,7 @@ class BaseWorker(ABC):
     """
     Abstract base class for all worker types with COMPLETE infrastructure.
 
-    Provides everything common between EventProcessorWorker and DataSyncWorker.
+    Provides everything common between all worker types.
     Subclasses only implement worker-specific logic.
     """
 
@@ -477,8 +477,8 @@ class BaseWorker(ABC):
         Override to set up worker-specific components:
         - Domain registry (EventProcessor)
         - Event processor (EventProcessor)
-        - Data sync processor (DataSync)
         - Consumer manager
+        - Saga processor
         - etc.
         """
         pass

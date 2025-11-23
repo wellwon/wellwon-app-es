@@ -20,7 +20,6 @@ Usage:
 
     # Or use factory methods
     config = WorkerConfig.event_processor()
-    config = WorkerConfig.data_sync()
 
     # Or get specific profile
     config = WorkerConfig.development()
@@ -546,27 +545,6 @@ class WorkerConfig(BaseSettings):
         return config
 
     @classmethod
-    def data_sync(cls, profile: WorkerProfile = WorkerProfile.PRODUCTION) -> 'WorkerConfig':
-        """DataSync-specific configuration"""
-        # Get base config from profile
-        if profile == WorkerProfile.DEVELOPMENT:
-            config = cls.development(worker_type=WorkerType.DATA_SYNC.value)
-        elif profile == WorkerProfile.TESTING:
-            config = cls.testing(worker_type=WorkerType.DATA_SYNC.value)
-        else:
-            config = cls.production(worker_type=WorkerType.DATA_SYNC.value)
-
-        # Apply DataSync-specific overrides
-        config.consumer_batch_size = 100  # Moderate throughput
-        config.max_poll_records = 100
-        config.enable_integrity_checks = True
-        config.integrity_check_interval = 600  # 10 minutes
-        config.enable_gap_detection = True
-        config.enable_sync_projections = False  # DataSync doesn't project
-
-        return config
-
-    @classmethod
     def saga_processor(cls, profile: WorkerProfile = WorkerProfile.PRODUCTION) -> 'WorkerConfig':
         """SagaProcessor-specific configuration"""
         if profile == WorkerProfile.DEVELOPMENT:
@@ -601,16 +579,6 @@ WORKER_TYPE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         'enable_sync_projection_monitoring': True,
         'enable_gap_detection': True,
         'enable_integrity_checks': False,
-    },
-    WorkerType.DATA_SYNC.value: {
-        'consumer_batch_size': 100,
-        'max_poll_records': 100,
-        'max_concurrent_operations': 5,
-        'enable_projection_monitoring': False,
-        'enable_sync_projection_monitoring': False,
-        'enable_gap_detection': True,
-        'enable_integrity_checks': True,
-        'integrity_check_interval': 600,
     },
     WorkerType.SAGA_PROCESSOR.value: {
         'consumer_batch_size': 50,
@@ -657,8 +625,6 @@ def get_worker_config(
     # Create new config based on worker type
     if worker_type == WorkerType.EVENT_PROCESSOR:
         config = WorkerConfig.event_processor(profile)
-    elif worker_type == WorkerType.DATA_SYNC:
-        config = WorkerConfig.data_sync(profile)
     elif worker_type == WorkerType.SAGA_PROCESSOR:
         config = WorkerConfig.saga_processor(profile)
     else:

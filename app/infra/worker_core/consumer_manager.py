@@ -520,9 +520,6 @@ class ConsumerManager:
                         consumer_id=consumer_id,
                         from_event_store=False
                     )
-                elif hasattr(self, '_process_event') and callable(self._process_event):
-                    # DataSyncWorker pattern (custom handler hook)
-                    await self._process_event(event_data)
                 else:
                     log.warning(f"No event processor configured, skipping event {event_id}")
 
