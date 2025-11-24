@@ -22,3 +22,4 @@ dist/
 # Claude context files (personal)
 CLAUDE.md
 CLAUDE_TASKS.md
+.claude/

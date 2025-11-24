@@ -3,13 +3,14 @@
 -- Event Sourcing + CQRS Infrastructure + Business Domain
 -- =============================================================================
 -- Version: 1.0.0
--- Date: 2025-11-18
+-- Date: 2025-11-24
 --
 -- Features:
 -- - Event Sourcing infrastructure (Outbox, DLQ, Projections)
 -- - CQRS pattern support (Commands, Events, Read Models)
 -- - WellWon business domains (Companies, Chats, Telegram, etc.)
 -- - Comprehensive audit and system logging
+-- - CDC trigger for is_developer field changes
 -- =============================================================================
 
 -- ======================
@@ -80,6 +81,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+ALTER FUNCTION trigger_set_updated_at() OWNER TO wellwon;
+
 -- =============================================================================
 -- PART 1: EVENT SOURCING INFRASTRUCTURE
 -- =============================================================================
@@ -148,6 +151,8 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+ALTER FUNCTION trigger_password_change() OWNER TO wellwon;
 
 DROP TRIGGER IF EXISTS set_user_accounts_password_change ON user_accounts;
 CREATE TRIGGER set_user_accounts_password_change
@@ -237,11 +242,98 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+ALTER FUNCTION notify_outbox_event() OWNER TO wellwon;
+
 DROP TRIGGER IF EXISTS outbox_insert_notify ON event_outbox;
 CREATE TRIGGER outbox_insert_notify
     AFTER INSERT ON event_outbox
     FOR EACH ROW
     EXECUTE FUNCTION notify_outbox_event();
+
+-- ======================
+-- CDC TRIGGER FOR is_developer CHANGES
+-- ======================
+DROP FUNCTION IF EXISTS cdc_user_developer_status_change() CASCADE;
+
+CREATE FUNCTION cdc_user_developer_status_change()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_event_id UUID;
+    v_event_data JSONB;
+    v_metadata JSONB;
+BEGIN
+    -- Only fire if is_developer actually changed
+    IF OLD.is_developer IS DISTINCT FROM NEW.is_developer THEN
+        -- Generate event ID
+        v_event_id := gen_random_uuid();
+
+        -- Build event data
+        v_event_data := jsonb_build_object(
+            'event_id', v_event_id::text,
+            'event_type', 'UserDeveloperStatusChanged',
+            'aggregate_id', NEW.id::text,
+            'aggregate_type', 'UserAccount',
+            'user_id', NEW.id::text,
+            'is_developer', NEW.is_developer,
+            'previous_value', OLD.is_developer,
+            'email', NEW.email,
+            'timestamp', NOW()::text
+        );
+
+        -- Build metadata
+        v_metadata := jsonb_build_object(
+            'source', 'cdc_trigger',
+            'trigger_name', TG_NAME,
+            'table_name', TG_TABLE_NAME,
+            'operation', TG_OP,
+            'session_user', session_user,
+            'changed_at', NOW()::text
+        );
+
+        -- Insert into event_outbox
+        INSERT INTO event_outbox (
+            event_id,
+            aggregate_id,
+            aggregate_type,
+            event_type,
+            event_data,
+            topic,
+            partition_key,
+            status,
+            publish_attempts,
+            metadata,
+            created_at
+        ) VALUES (
+            v_event_id,
+            NEW.id,
+            'UserAccount',
+            'UserDeveloperStatusChanged',
+            v_event_data,
+            'transport.user_account',
+            NEW.id::text,
+            'pending',
+            0,
+            v_metadata,
+            NOW()
+        );
+
+        -- Log for debugging
+        RAISE NOTICE 'CDC: UserDeveloperStatusChanged event created for user % (% -> %)',
+            NEW.id, OLD.is_developer, NEW.is_developer;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+ALTER FUNCTION cdc_user_developer_status_change() OWNER TO wellwon;
+
+DROP TRIGGER IF EXISTS cdc_user_developer_status ON user_accounts;
+CREATE TRIGGER cdc_user_developer_status
+    AFTER UPDATE OF is_developer ON user_accounts
+    FOR EACH ROW
+    WHEN (OLD.is_developer IS DISTINCT FROM NEW.is_developer)
+    EXECUTE FUNCTION cdc_user_developer_status_change();
 
 -- Stored procedure for fetching pending outbox events
 CREATE OR REPLACE FUNCTION get_pending_outbox_events(
@@ -290,6 +382,8 @@ BEGIN
     FOR UPDATE SKIP LOCKED;
 END;
 $$;
+
+ALTER FUNCTION get_pending_outbox_events(INTEGER, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER) OWNER TO wellwon;
 
 -- ======================
 -- PROCESSED EVENTS (Event Processing Tracking)
@@ -999,6 +1093,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+ALTER FUNCTION get_outbox_health() OWNER TO wellwon;
+
 -- Function to get projection health
 CREATE OR REPLACE FUNCTION get_projection_health()
 RETURNS TABLE (
@@ -1026,6 +1122,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+ALTER FUNCTION get_projection_health() OWNER TO wellwon;
+
 -- Function to get worker performance stats
 CREATE OR REPLACE FUNCTION get_worker_performance(p_hours_back INTEGER DEFAULT 24)
 RETURNS TABLE (
@@ -1049,6 +1147,8 @@ BEGIN
     GROUP BY pe.worker_instance;
 END;
 $$ LANGUAGE plpgsql;
+
+ALTER FUNCTION get_worker_performance(INTEGER) OWNER TO wellwon;
 
 -- Helper functions for user companies
 CREATE OR REPLACE FUNCTION get_user_companies(
@@ -1076,6 +1176,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+ALTER FUNCTION get_user_companies(UUID, user_company_relationship) OWNER TO wellwon;
+
 CREATE OR REPLACE FUNCTION get_company_users(
     p_company_id BIGINT,
     p_filter_type user_company_relationship DEFAULT NULL
@@ -1102,6 +1204,8 @@ BEGIN
       AND (p_filter_type IS NULL OR uc.relationship_type = p_filter_type);
 END;
 $$ LANGUAGE plpgsql;
+
+ALTER FUNCTION get_company_users(BIGINT, user_company_relationship) OWNER TO wellwon;
 
 -- =============================================================================
 -- INITIAL DATA

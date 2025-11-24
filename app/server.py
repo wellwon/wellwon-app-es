@@ -83,7 +83,11 @@ if __name__ == "__main__":
     ]
 
     if reload:
-        cmd.extend(["--reload", "--reload-tick", "100"])
+        cmd.extend([
+            "--reload",
+            "--reload-tick", "100",
+            "--workers-kill-timeout", "2s"  # Force-kill workers after 2s during reload
+        ])
 
     # Run granian
     subprocess.run(cmd)

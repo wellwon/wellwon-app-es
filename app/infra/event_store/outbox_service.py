@@ -364,13 +364,22 @@ class TransportOutboxService:
 
         entries = []
         for row in rows:
+            # asyncpg returns JSONB as dict already - no need to json.loads()
+            event_data = row['event_data']
+            if isinstance(event_data, str):
+                event_data = json.loads(event_data)
+
+            metadata = row['metadata']
+            if metadata and isinstance(metadata, str):
+                metadata = json.loads(metadata)
+
             entries.append(OutboxEntry(
                 id=row['id'],
                 event_id=row['event_id'],
                 aggregate_id=row['aggregate_id'],
                 aggregate_type=row['aggregate_type'],
                 event_type=row['event_type'],
-                event_data=json.loads(row['event_data']),
+                event_data=event_data,
                 topic=row['topic'],
                 partition_key=row['partition_key'],
                 status=OutboxStatus(row['status']),
@@ -381,7 +390,7 @@ class TransportOutboxService:
                 correlation_id=row['correlation_id'],
                 causation_id=row['causation_id'],
                 saga_id=row['saga_id'],
-                metadata=json.loads(row['metadata']) if row['metadata'] else None,
+                metadata=metadata,
                 aggregate_version=row['aggregate_version'],  # CRITICAL FIX: Include aggregate_version for ordering
                 created_at=row['created_at']
             ))
@@ -723,7 +732,11 @@ class TransportOutboxService:
                 )
 
                 for row in dlq_events:
-                    event_data = json.loads(row['event_data'])
+                    # asyncpg returns JSONB as dict already
+                    event_data = row['event_data']
+                    if isinstance(event_data, str):
+                        event_data = json.loads(event_data)
+
                     await self._dlq_service.record_failure(
                         source="outbox_service",
                         event=event_data,
