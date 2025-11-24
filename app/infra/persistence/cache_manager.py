@@ -172,6 +172,10 @@ class CacheManager:
     def _get_ttl(self, cache_type: str) -> int:
         return get_ttl(cache_type)
 
+    def get_cache_ttl(self, cache_type: str) -> int:
+        """Public method to get TTL for a cache type"""
+        return self._get_ttl(cache_type)
+
     def _make_key(self, *parts: str) -> str:
         key = ':'.join([self.key_prefix] + list(parts))
         if len(key) > self.max_key_length:
