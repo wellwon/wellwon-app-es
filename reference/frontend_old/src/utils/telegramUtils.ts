@@ -3,7 +3,7 @@ import { UTMParams } from '@/hooks/useUTMParams';
 import { logger } from './logger';
 
 // Конфигурация Telegram бота
-const TELEGRAM_BOT_USERNAME = 'wellwon-app'; // Исправлено на правильное имя бота
+const TELEGRAM_BOT_USERNAME = 'WellWon-app'; // Исправлено на правильное имя бота
 
 export interface TelegramLinkParams {
   utmParams: UTMParams;
