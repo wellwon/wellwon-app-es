@@ -32,6 +32,7 @@ hiredis>=3.0.0                    # C parser for Redis protocol
 # =============================================================================
 aiokafka>=0.12.0                  # Async Kafka client
 kafka-python>=2.0.2               # Kafka Python client
+cramjam>=2.11.0                   # Compression library (lz4, snappy, zstd) for Kafka/RedPanda
 
 # =============================================================================
 # Event Store - KurrentDB (EventStoreDB)
@@ -105,6 +106,7 @@ python-slugify>=8.0.4             # Slug generation
 # WebSocket Support
 # =============================================================================
 websockets>=13.1                  # WebSocket support
+msgpack>=1.1.0                    # MessagePack serialization for WebSocket compression
 
 # =============================================================================
 # Email (Optional)

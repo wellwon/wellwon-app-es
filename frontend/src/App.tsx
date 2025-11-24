@@ -17,6 +17,7 @@ import { EnhancedProfileEditModal } from '@/components/shared/EnhancedProfileEdi
 import { useProfileModal } from '@/contexts/ProfileModalContext';
 import ErrorBoundary from '@/components/shared/ErrorBoundary';
 import ProtectedRoute from './components/auth/ProtectedRoute';
+import DeveloperRoute from './components/auth/DeveloperRoute';
 import { registerNavigateFunction, unregisterNavigateFunction } from '@/utils/navigationHelper';
 
 import { CookieConsent } from '@/components/shared/CookieConsent';
@@ -41,6 +42,8 @@ const PrivacyPage = createLazyComponent(() => import('./pages/PrivacyPage'));
 const CookiePolicyPage = createLazyComponent(() => import('./pages/CookiePolicyPage'));
 
 const PlatformPage = createLazyComponent(() => import('./pages/PlatformPage'));
+const PlatformProPage = createLazyComponent(() => import('./pages/PlatformProPage'));
+const DeclarantPage = createLazyComponent(() => import('./pages/declarant/DeclarantPage'));
 
 const AppContentWithProfile = () => {
   const { isProfileModalOpen, closeProfileModal } = useProfileModal();
@@ -93,6 +96,26 @@ const AppContent = () => {
             element={
               <ProtectedRoute>
                 <PlatformPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Platform Pro - Developer-only platform */}
+          <Route
+            path="/platform-pro/:section?"
+            element={
+              <DeveloperRoute>
+                <PlatformProPage />
+              </DeveloperRoute>
+            }
+          />
+
+          {/* Declarant module - standalone isolated application */}
+          <Route
+            path="/declarant"
+            element={
+              <ProtectedRoute>
+                <DeclarantPage />
               </ProtectedRoute>
             }
           />

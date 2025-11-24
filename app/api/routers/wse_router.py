@@ -13,7 +13,6 @@ from typing import Optional, Dict, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, Header, Cookie, Request
-from starlette import status
 from starlette.websockets import WebSocketState
 
 from app.wse.websocket.wse_connection import WSEConnection
@@ -200,51 +199,34 @@ async def websocket_endpoint(
         )
 
         try:
-            # Use JWT manager with better error handling
+            # Use JWT manager for all token operations
             token_manager = JwtTokenManager()
 
-            # First check if token is valid format
-            try:
-                # Decode without verification first to check structure
-                import jwt as pyjwt
-                unverified_payload = pyjwt.decode(
-                    token_to_validate,
-                    options={"verify_signature": False}
-                )
+            # Decode and verify the token
+            payload = token_manager.decode_token_payload(token_to_validate)
 
-                log.debug(f"Token structure valid, claims: {list(unverified_payload.keys())}")
-
-                # Now verify the token properly
-                payload = token_manager.decode_token_payload(token_to_validate)
-
-                if payload:
-                    user_id_str = payload.get("sub") or payload.get("user_id")
-                    if user_id_str:
+            if payload:
+                user_id_str = payload.get("sub") or payload.get("user_id")
+                if user_id_str:
+                    try:
                         user_id = UUID(user_id_str)
                         log.info(f"Token validated successfully for user: {user_id}")
                         auth_details = {
                             "user_id": str(user_id),
                             "token_source": token_source,
                             "exp": payload.get("exp"),
-                            "iat": payload.get("iat")
+                            "iat": payload.get("iat"),
+                            "type": payload.get("type", "access")
                         }
-                    else:
-                        auth_error = "Token missing user identification"
-                        auth_details = {"missing_fields": ["sub", "user_id"]}
+                    except ValueError:
+                        auth_error = "Token subject is not a valid UUID"
+                        auth_details = {"error_type": "invalid_uuid", "subject": user_id_str}
                 else:
-                    auth_error = "Token validation failed"
-                    auth_details = {"validation_error": "decode_returned_none"}
-
-            except pyjwt.ExpiredSignatureError:
-                auth_error = "Token has expired"
-                auth_details = {"error_type": "expired"}
-            except pyjwt.InvalidTokenError as e:
-                auth_error = f"Invalid token: {str(e)}"
-                auth_details = {"error_type": "invalid_token", "detail": str(e)}
-            except Exception as e:
-                log.error(f"Token decode error: {e}", exc_info=True)
-                auth_error = f"Token validation failed: {str(e)}"
-                auth_details = {"error_type": "decode_error", "detail": str(e)}
+                    auth_error = "Token missing user identification"
+                    auth_details = {"missing_fields": ["sub", "user_id"], "claims": list(payload.keys())}
+            else:
+                auth_error = "Token validation failed - invalid or expired"
+                auth_details = {"validation_error": "decode_returned_none"}
 
         except Exception as e:
             auth_error = f"Authentication error: {str(e)}"

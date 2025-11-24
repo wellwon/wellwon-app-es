@@ -61,10 +61,12 @@ const AuthPage: React.FC = () => {
   useEffect(() => {
     console.log('[AuthPage] useEffect: user=', user, 'loading=', loading, 'registrationStep=', registrationStep);
     if (user && !loading && registrationStep !== 'success' && registrationStep !== 'completing') {
-      console.log('[AuthPage] useEffect: conditions met, navigating to /platform');
-      navigate('/platform');
+      // Проверяем redirect параметр
+      const redirectTo = searchParams.get('redirect') || '/platform';
+      console.log('[AuthPage] useEffect: conditions met, navigating to', redirectTo);
+      navigate(redirectTo);
     }
-  }, [user, loading, navigate, registrationStep]);
+  }, [user, loading, navigate, registrationStep, searchParams]);
 
   // Анимация печатания в чате
   useEffect(() => {
