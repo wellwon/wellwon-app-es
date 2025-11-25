@@ -44,6 +44,7 @@ export interface UserProfileResponse {
   phone?: string | null;
   user_type?: string;
   user_number?: number | null;
+  is_developer?: boolean;
 }
 
 export interface RegisterRequest {

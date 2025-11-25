@@ -5,7 +5,7 @@
 import React, { Suspense } from 'react';
 import { usePlatformPro } from '@/contexts/PlatformProContext';
 import { getProSectionComponent } from '@/config/PlatformProSectionConfig';
-import { LazyErrorBoundary } from '@/components/shared/LazyErrorBoundary';
+import LazyErrorBoundary from '@/components/shared/LazyErrorBoundary';
 
 const SafeContentRenderer: React.FC = () => {
   const { activeSection, isDark } = usePlatformPro();

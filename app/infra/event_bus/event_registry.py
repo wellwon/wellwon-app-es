@@ -137,6 +137,18 @@ EVENT_TYPE_TO_PYDANTIC_MODEL: Dict[str, Type[BaseModel]] = {
     # Legacy / Compatibility Events
     # ==========================================================================
     "generic_system_event": SystemEvent,
+
+    # ==========================================================================
+    # CES Events (Compensating Event System - External Change Detection)
+    # Pattern: Greg Young's Compensating Events via PostgreSQL triggers
+    # These events are generated when data is modified EXTERNALLY (bypassing app)
+    # ==========================================================================
+    "UserRoleChangedExternally": SystemEvent,
+    "UserStatusChangedExternally": SystemEvent,
+    "UserTypeChangedExternally": SystemEvent,
+    "UserEmailVerifiedExternally": SystemEvent,
+    "UserDeveloperStatusChangedExternally": SystemEvent,
+    "UserAdminFieldsChangedExternally": SystemEvent,
 }
 
 

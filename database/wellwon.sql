@@ -251,46 +251,142 @@ CREATE TRIGGER outbox_insert_notify
     EXECUTE FUNCTION notify_outbox_event();
 
 -- ======================
--- CDC TRIGGER FOR is_developer CHANGES
+-- CES OUTBOX (Compensating Event System - for external change detection)
 -- ======================
-DROP FUNCTION IF EXISTS cdc_user_developer_status_change() CASCADE;
+-- NOTE: This table is DEPRECATED - we use event_outbox directly for CES events
+-- Keeping for backwards compatibility
+CREATE TABLE IF NOT EXISTS cdc_outbox (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    aggregate_type TEXT NOT NULL,
+    aggregate_id UUID NOT NULL,
+    change_type TEXT NOT NULL,
+    changed_fields JSONB NOT NULL,
+    current_state JSONB NOT NULL,
+    metadata JSONB,
+    processed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 
-CREATE FUNCTION cdc_user_developer_status_change()
+    CONSTRAINT cdc_outbox_unprocessed CHECK (processed_at IS NULL OR processed_at >= created_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cdc_outbox_unprocessed ON cdc_outbox(created_at) WHERE processed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_cdc_outbox_aggregate ON cdc_outbox(aggregate_id, aggregate_type);
+
+-- ======================
+-- CES TRIGGER FOR ADMIN FIELD CHANGES (Compensating Event System)
+-- ======================
+-- Pattern: Compensating Event System (Greg Young)
+-- PostgreSQL triggers detect EXTERNAL changes (bypassing application)
+-- and generate compensating events for audit trail and real-time sync.
+--
+-- Monitored fields:
+-- - is_developer (developer access)
+-- - role (user/admin/manager)
+-- - user_type (client/logistician/payment_agent/etc)
+-- - is_active (ban/unban user)
+-- - email_verified (manual email verification)
+--
+-- CRITICAL: Uses pg_trigger_depth() = 0 to only fire for EXTERNAL changes!
+DROP FUNCTION IF EXISTS ces_user_admin_fields_change() CASCADE;
+DROP FUNCTION IF EXISTS cdc_user_admin_fields_change() CASCADE;
+
+CREATE FUNCTION ces_user_admin_fields_change()
 RETURNS TRIGGER AS $$
 DECLARE
     v_event_id UUID;
     v_event_data JSONB;
     v_metadata JSONB;
+    v_event_type TEXT;
+    v_changed_fields JSONB;
+    v_priority INTEGER;
 BEGIN
-    -- Only fire if is_developer actually changed
+    -- Track which fields changed
+    v_changed_fields := jsonb_build_object();
+
+    -- Check each admin field
     IF OLD.is_developer IS DISTINCT FROM NEW.is_developer THEN
-        -- Generate event ID
+        v_changed_fields := v_changed_fields || jsonb_build_object('is_developer', jsonb_build_object('old', OLD.is_developer, 'new', NEW.is_developer));
+    END IF;
+
+    IF OLD.role IS DISTINCT FROM NEW.role THEN
+        v_changed_fields := v_changed_fields || jsonb_build_object('role', jsonb_build_object('old', OLD.role, 'new', NEW.role));
+    END IF;
+
+    IF OLD.user_type IS DISTINCT FROM NEW.user_type THEN
+        v_changed_fields := v_changed_fields || jsonb_build_object('user_type', jsonb_build_object('old', OLD.user_type::text, 'new', NEW.user_type::text));
+    END IF;
+
+    IF OLD.is_active IS DISTINCT FROM NEW.is_active THEN
+        v_changed_fields := v_changed_fields || jsonb_build_object('is_active', jsonb_build_object('old', OLD.is_active, 'new', NEW.is_active));
+    END IF;
+
+    IF OLD.email_verified IS DISTINCT FROM NEW.email_verified THEN
+        v_changed_fields := v_changed_fields || jsonb_build_object('email_verified', jsonb_build_object('old', OLD.email_verified, 'new', NEW.email_verified));
+    END IF;
+
+    -- Only fire if at least one field changed
+    IF jsonb_object_keys(v_changed_fields) IS NOT NULL THEN
         v_event_id := gen_random_uuid();
 
-        -- Build event data
+        -- Determine event type based on primary change (CES naming: *Externally)
+        -- Priority: 1-5 = security-critical (role, status), 6-10 = important
+        IF v_changed_fields ? 'role' THEN
+            v_event_type := 'UserRoleChangedExternally';
+            v_priority := 1;  -- Security-critical
+        ELSIF v_changed_fields ? 'is_active' THEN
+            v_event_type := 'UserStatusChangedExternally';
+            v_priority := 1;  -- Security-critical
+        ELSIF v_changed_fields ? 'user_type' THEN
+            v_event_type := 'UserTypeChangedExternally';
+            v_priority := 5;
+        ELSIF v_changed_fields ? 'email_verified' THEN
+            v_event_type := 'UserEmailVerifiedExternally';
+            v_priority := 5;
+        ELSIF v_changed_fields ? 'is_developer' THEN
+            v_event_type := 'UserDeveloperStatusChangedExternally';
+            v_priority := 5;
+        ELSE
+            v_event_type := 'UserAdminFieldsChangedExternally';
+            v_priority := 10;
+        END IF;
+
+        -- Build event data (CES pattern)
         v_event_data := jsonb_build_object(
             'event_id', v_event_id::text,
-            'event_type', 'UserDeveloperStatusChanged',
+            'event_type', v_event_type,
             'aggregate_id', NEW.id::text,
             'aggregate_type', 'UserAccount',
             'user_id', NEW.id::text,
-            'is_developer', NEW.is_developer,
-            'previous_value', OLD.is_developer,
             'email', NEW.email,
-            'timestamp', NOW()::text
+            'username', NEW.username,
+            'changed_fields', v_changed_fields,
+            'current_state', jsonb_build_object(
+                'role', NEW.role,
+                'user_type', NEW.user_type::text,
+                'is_active', NEW.is_active,
+                'is_developer', NEW.is_developer,
+                'email_verified', NEW.email_verified
+            ),
+            'changed_at', to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"'),
+            'detected_by', 'EXTERNAL_SQL',
+            'compensating_event', true
         );
 
-        -- Build metadata
+        -- Build metadata (CES pattern with EventStore flags)
         v_metadata := jsonb_build_object(
-            'source', 'cdc_trigger',
+            'source', 'ces_trigger',
             'trigger_name', TG_NAME,
             'table_name', TG_TABLE_NAME,
             'operation', TG_OP,
             'session_user', session_user,
-            'changed_at', NOW()::text
+            'application_name', current_setting('application_name', true),
+            'changed_at', to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"'),
+            'write_to_eventstore', true,
+            'compensating_event', true,
+            'severity', CASE WHEN v_priority <= 2 THEN 'CRITICAL' WHEN v_priority <= 5 THEN 'HIGH' ELSE 'MEDIUM' END
         );
 
-        -- Insert into event_outbox
+        -- Insert into event_outbox (Transactional Outbox Pattern)
         INSERT INTO event_outbox (
             event_id,
             aggregate_id,
@@ -301,39 +397,46 @@ BEGIN
             partition_key,
             status,
             publish_attempts,
+            priority,
             metadata,
             created_at
         ) VALUES (
             v_event_id,
             NEW.id,
             'UserAccount',
-            'UserDeveloperStatusChanged',
+            v_event_type,
             v_event_data,
-            'transport.user_account',
+            'transport.user-account-events',
             NEW.id::text,
             'pending',
             0,
+            v_priority,
             v_metadata,
             NOW()
         );
 
+        -- Instant notification via LISTEN/NOTIFY
+        PERFORM pg_notify('outbox_events', v_event_id::text);
+
         -- Log for debugging
-        RAISE NOTICE 'CDC: UserDeveloperStatusChanged event created for user % (% -> %)',
-            NEW.id, OLD.is_developer, NEW.is_developer;
+        RAISE NOTICE 'CES: % event created for user % (fields: %, priority: %)',
+            v_event_type, NEW.id, jsonb_object_keys(v_changed_fields), v_priority;
     END IF;
 
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-ALTER FUNCTION cdc_user_developer_status_change() OWNER TO wellwon;
+ALTER FUNCTION ces_user_admin_fields_change() OWNER TO wellwon;
 
-DROP TRIGGER IF EXISTS cdc_user_developer_status ON user_accounts;
-CREATE TRIGGER cdc_user_developer_status
-    AFTER UPDATE OF is_developer ON user_accounts
+-- CES Trigger: Only fires for EXTERNAL changes (pg_trigger_depth() = 0)
+DROP TRIGGER IF EXISTS cdc_user_admin_fields ON user_accounts;
+DROP TRIGGER IF EXISTS ces_user_admin_fields ON user_accounts;
+CREATE TRIGGER ces_user_admin_fields
+    AFTER UPDATE OF is_developer, role, user_type, is_active, email_verified ON user_accounts
     FOR EACH ROW
-    WHEN (OLD.is_developer IS DISTINCT FROM NEW.is_developer)
-    EXECUTE FUNCTION cdc_user_developer_status_change();
+    WHEN (pg_trigger_depth() = 0)
+    EXECUTE FUNCTION ces_user_admin_fields_change();
 
 -- Stored procedure for fetching pending outbox events
 CREATE OR REPLACE FUNCTION get_pending_outbox_events(

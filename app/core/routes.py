@@ -10,6 +10,9 @@ from app.core.fastapi_types import FastAPI
 # Import routers from existing structure
 from app.api.routers.user_account_router import router as auth_router
 from app.api.routers.wse_router import router as wse_router
+from app.api.routers.company_router import router as company_router
+from app.api.routers.chat_router import router as chat_router
+from app.api.routers.telegram_router import router as telegram_router
 
 # Import health endpoints
 from app.core.health import register_health_endpoints
@@ -35,6 +38,9 @@ def register_core_routers(app: FastAPI) -> None:
 
     app.include_router(auth_router, prefix="/user", tags=["User Accounts"])
     app.include_router(wse_router, tags=["WebSocket Events"])
+    app.include_router(company_router, tags=["Companies"])
+    app.include_router(chat_router, tags=["Chat"])
+    app.include_router(telegram_router, tags=["Telegram"])
 
     logger.info("Core routers registered")
 

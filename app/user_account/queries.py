@@ -332,6 +332,7 @@ class UserProfile(BaseModel):
     phone: Optional[str] = None
     user_type: str = DEFAULT_USER_TYPE.value
     user_number: Optional[int] = None
+    is_developer: bool = False
 
 
 class UserSession(BaseModel):

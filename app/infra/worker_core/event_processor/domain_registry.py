@@ -101,12 +101,22 @@ def create_user_account_domain() -> DomainRegistration:
         topics=[USER_ACCOUNT_EVENTS_TOPIC],
         projector_factory=user_projector_factory,
         event_models={
+            # Standard domain events
             "UserAccountCreated": UserAccountCreated,
             "UserAccountDeleted": UserAccountDeleted,
             "UserEmailVerified": UserEmailVerified,
             "UserProfileUpdated": UserProfileUpdated,
             "UserAuthenticationSucceeded": UserAuthenticationSucceeded,
             "UserPasswordChanged": UserPasswordChanged,
+            # CES Events (Compensating Event System - External Change Detection)
+            # Pattern: Greg Young's Compensating Events via PostgreSQL triggers
+            # These don't have dedicated models - use None for pass-through processing
+            "UserRoleChangedExternally": None,
+            "UserStatusChangedExternally": None,
+            "UserTypeChangedExternally": None,
+            "UserEmailVerifiedExternally": None,
+            "UserDeveloperStatusChangedExternally": None,
+            "UserAdminFieldsChangedExternally": None,
         },
         projection_config={
             "aggregate_type": "UserAccount",

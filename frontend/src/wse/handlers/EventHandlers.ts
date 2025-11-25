@@ -46,6 +46,104 @@ export class EventHandlers {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // CES Events (Compensating Event System - External Admin Changes)
+  // Pattern: Greg Young's Compensating Events via PostgreSQL triggers
+  // These notify frontend when admin changes user data directly in SQL
+  // ─────────────────────────────────────────────────────────────────────────
+
+  static handleUserAdminChange(message: WSMessage): void {
+    try {
+      const data = message.p?.data || message.p;
+      logger.info('CES: User admin change detected:', data);
+
+      // Extract key fields from the CES event
+      const changedFields = data.changed_fields || {};
+      const userId = data.user_id;
+      const isDeveloper = data.is_developer;
+      const role = data.role;
+      const userType = data.user_type;
+      const isActive = data.is_active;
+      const emailVerified = data.email_verified;
+      const isCompensatingEvent = data.compensating_event || false;
+      const detectedBy = data.detected_by;
+
+      logger.info('CES Event Details:', {
+        userId,
+        isDeveloper,
+        role,
+        userType,
+        isActive,
+        emailVerified,
+        changedFields: Object.keys(changedFields),
+        isCompensatingEvent,
+        detectedBy
+      });
+
+      // Invalidate React Query cache for user profile (forces re-fetch)
+      queryClient.invalidateQueries({ queryKey: ['user', 'profile'] });
+      queryClient.invalidateQueries({ queryKey: ['user', userId] });
+
+      // Dispatch event for AuthContext to update local state
+      window.dispatchEvent(new CustomEvent('userAdminChange', {
+        detail: {
+          userId,
+          isDeveloper,
+          role,
+          userType,
+          isActive,
+          emailVerified,
+          changedFields,
+          isCompensatingEvent,
+          detectedBy,
+          timestamp: data.timestamp || new Date().toISOString()
+        }
+      }));
+
+      // If developer status changed, dispatch specific event
+      if ('is_developer' in changedFields) {
+        window.dispatchEvent(new CustomEvent('developerStatusChanged', {
+          detail: {
+            userId,
+            isDeveloper,
+            oldValue: changedFields.is_developer?.old,
+            newValue: changedFields.is_developer?.new
+          }
+        }));
+        logger.info(`CES: Developer status changed for user ${userId}: ${changedFields.is_developer?.old} -> ${changedFields.is_developer?.new}`);
+      }
+
+      // If role changed, dispatch specific event (security-critical)
+      if ('role' in changedFields) {
+        window.dispatchEvent(new CustomEvent('userRoleChanged', {
+          detail: {
+            userId,
+            role,
+            oldValue: changedFields.role?.old,
+            newValue: changedFields.role?.new
+          }
+        }));
+        logger.warn(`CES: User role changed for user ${userId}: ${changedFields.role?.old} -> ${changedFields.role?.new}`);
+      }
+
+      // If account status changed (ban/unban)
+      if ('is_active' in changedFields) {
+        window.dispatchEvent(new CustomEvent('userStatusChanged', {
+          detail: {
+            userId,
+            isActive,
+            oldValue: changedFields.is_active?.old,
+            newValue: changedFields.is_active?.new
+          }
+        }));
+        logger.warn(`CES: User status changed for user ${userId}: ${changedFields.is_active?.old} -> ${changedFields.is_active?.new}`);
+      }
+
+    } catch (error) {
+      logger.error('Error handling CES user admin change:', error);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Generic Entity Update Handler
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -253,6 +351,9 @@ export class EventHandlers {
       // User account events
       messageProcessor.registerHandler('user_account_update', this.handleUserAccountUpdate);
       messageProcessor.registerHandler('user_profile_updated', this.handleUserProfileUpdated);
+
+      // CES Events (Compensating Event System - External Admin Changes)
+      messageProcessor.registerHandler('user_admin_change', this.handleUserAdminChange);
 
       // Generic entity events
       messageProcessor.registerHandler('entity_update', this.handleEntityUpdate);

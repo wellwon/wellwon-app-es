@@ -436,6 +436,7 @@ async def get_me(
         phone=profile_data.phone,
         user_type=profile_data.user_type,
         user_number=profile_data.user_number,
+        is_developer=profile_data.is_developer,
     )
 
 

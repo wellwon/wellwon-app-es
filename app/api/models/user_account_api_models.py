@@ -228,6 +228,7 @@ class UserProfileResponse(BaseModel):
         description="User type (business role) - any string value allowed"
     )
     user_number: Optional[int] = None
+    is_developer: bool = Field(default=False, description="Developer access flag")
 
 
 class UpdateProfileRequest(BaseModel):

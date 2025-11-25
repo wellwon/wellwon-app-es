@@ -64,7 +64,8 @@ export const PlatformProProvider: React.FC<PlatformProProviderProps> = ({ childr
   });
   const [isDark, setIsDark] = useState<boolean>(() => {
     const stored = localStorage.getItem('platformPro_theme');
-    return stored === 'dark';
+    // Default to dark theme if not set
+    return stored === null ? true : stored === 'dark';
   });
 
   // Available sections (все секции для developers)

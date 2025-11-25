@@ -1,0 +1,252 @@
+# =============================================================================
+# File: app/chat/events.py
+# Description: Chat domain events
+# =============================================================================
+
+from __future__ import annotations
+
+from typing import Literal, Optional, Dict, Any
+from pydantic import Field
+import uuid
+from datetime import datetime, timezone
+
+from app.common.base.base_model import BaseEvent
+from app.infra.event_bus.event_decorators import domain_event
+
+
+# =============================================================================
+# Chat Lifecycle Events
+# =============================================================================
+
+@domain_event(category="domain")
+class ChatCreated(BaseEvent):
+    """Event emitted when a new chat is created"""
+    event_type: Literal["ChatCreated"] = "ChatCreated"
+    chat_id: uuid.UUID
+    name: Optional[str] = None
+    chat_type: str  # direct, group, company
+    created_by: uuid.UUID
+    company_id: Optional[uuid.UUID] = None
+    telegram_chat_id: Optional[int] = None  # For Telegram integration
+    telegram_topic_id: Optional[int] = None  # For Telegram forum topics
+
+
+@domain_event(category="domain")
+class ChatUpdated(BaseEvent):
+    """Event emitted when chat details are updated"""
+    event_type: Literal["ChatUpdated"] = "ChatUpdated"
+    chat_id: uuid.UUID
+    name: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    updated_by: uuid.UUID
+
+
+@domain_event(category="domain")
+class ChatArchived(BaseEvent):
+    """Event emitted when a chat is archived (soft delete)"""
+    event_type: Literal["ChatArchived"] = "ChatArchived"
+    chat_id: uuid.UUID
+    archived_by: uuid.UUID
+
+
+@domain_event(category="domain")
+class ChatRestored(BaseEvent):
+    """Event emitted when an archived chat is restored"""
+    event_type: Literal["ChatRestored"] = "ChatRestored"
+    chat_id: uuid.UUID
+    restored_by: uuid.UUID
+
+
+# =============================================================================
+# Participant Events
+# =============================================================================
+
+@domain_event(category="domain")
+class ParticipantAdded(BaseEvent):
+    """Event emitted when a participant is added to chat"""
+    event_type: Literal["ParticipantAdded"] = "ParticipantAdded"
+    chat_id: uuid.UUID
+    user_id: uuid.UUID
+    role: str = "member"  # member, admin, observer
+    added_by: Optional[uuid.UUID] = None
+    joined_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@domain_event(category="domain")
+class ParticipantRemoved(BaseEvent):
+    """Event emitted when a participant is removed from chat"""
+    event_type: Literal["ParticipantRemoved"] = "ParticipantRemoved"
+    chat_id: uuid.UUID
+    user_id: uuid.UUID
+    removed_by: Optional[uuid.UUID] = None
+    reason: Optional[str] = None
+
+
+@domain_event(category="domain")
+class ParticipantRoleChanged(BaseEvent):
+    """Event emitted when a participant's role is changed"""
+    event_type: Literal["ParticipantRoleChanged"] = "ParticipantRoleChanged"
+    chat_id: uuid.UUID
+    user_id: uuid.UUID
+    old_role: str
+    new_role: str
+    changed_by: uuid.UUID
+
+
+@domain_event(category="domain")
+class ParticipantLeft(BaseEvent):
+    """Event emitted when a participant leaves the chat voluntarily"""
+    event_type: Literal["ParticipantLeft"] = "ParticipantLeft"
+    chat_id: uuid.UUID
+    user_id: uuid.UUID
+
+
+# =============================================================================
+# Message Events
+# =============================================================================
+
+@domain_event(category="domain")
+class MessageSent(BaseEvent):
+    """Event emitted when a message is sent"""
+    event_type: Literal["MessageSent"] = "MessageSent"
+    message_id: uuid.UUID
+    chat_id: uuid.UUID
+    sender_id: uuid.UUID
+    content: str
+    message_type: str = "text"  # text, file, voice, image, system
+    reply_to_id: Optional[uuid.UUID] = None
+    file_url: Optional[str] = None
+    file_name: Optional[str] = None
+    file_size: Optional[int] = None
+    file_type: Optional[str] = None
+    voice_duration: Optional[int] = None  # seconds
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    # Telegram integration
+    telegram_message_id: Optional[int] = None
+    source: str = "web"  # web, telegram, api
+
+
+@domain_event(category="domain")
+class MessageEdited(BaseEvent):
+    """Event emitted when a message is edited"""
+    event_type: Literal["MessageEdited"] = "MessageEdited"
+    message_id: uuid.UUID
+    chat_id: uuid.UUID
+    edited_by: uuid.UUID
+    old_content: str
+    new_content: str
+    edited_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@domain_event(category="domain")
+class MessageDeleted(BaseEvent):
+    """Event emitted when a message is deleted (soft delete)"""
+    event_type: Literal["MessageDeleted"] = "MessageDeleted"
+    message_id: uuid.UUID
+    chat_id: uuid.UUID
+    deleted_by: uuid.UUID
+
+
+@domain_event(category="domain")
+class MessageReadStatusUpdated(BaseEvent):
+    """Event emitted when a message is marked as read"""
+    event_type: Literal["MessageReadStatusUpdated"] = "MessageReadStatusUpdated"
+    message_id: uuid.UUID
+    chat_id: uuid.UUID
+    user_id: uuid.UUID
+    read_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@domain_event(category="domain")
+class MessagesMarkedAsRead(BaseEvent):
+    """Event emitted when multiple messages are marked as read (batch)"""
+    event_type: Literal["MessagesMarkedAsRead"] = "MessagesMarkedAsRead"
+    chat_id: uuid.UUID
+    user_id: uuid.UUID
+    last_read_message_id: uuid.UUID
+    read_count: int
+    read_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# =============================================================================
+# Typing Events (ephemeral, not stored in event store)
+# =============================================================================
+
+@domain_event(category="ephemeral")
+class TypingStarted(BaseEvent):
+    """Event emitted when user starts typing"""
+    event_type: Literal["TypingStarted"] = "TypingStarted"
+    chat_id: uuid.UUID
+    user_id: uuid.UUID
+
+
+@domain_event(category="ephemeral")
+class TypingStopped(BaseEvent):
+    """Event emitted when user stops typing"""
+    event_type: Literal["TypingStopped"] = "TypingStopped"
+    chat_id: uuid.UUID
+    user_id: uuid.UUID
+
+
+# =============================================================================
+# Telegram Integration Events
+# =============================================================================
+
+@domain_event(category="domain")
+class TelegramChatLinked(BaseEvent):
+    """Event emitted when a Telegram chat is linked to WellWon chat"""
+    event_type: Literal["TelegramChatLinked"] = "TelegramChatLinked"
+    chat_id: uuid.UUID
+    telegram_chat_id: int
+    telegram_topic_id: Optional[int] = None
+    linked_by: uuid.UUID
+
+
+@domain_event(category="domain")
+class TelegramChatUnlinked(BaseEvent):
+    """Event emitted when a Telegram chat is unlinked"""
+    event_type: Literal["TelegramChatUnlinked"] = "TelegramChatUnlinked"
+    chat_id: uuid.UUID
+    telegram_chat_id: int
+    unlinked_by: uuid.UUID
+
+
+@domain_event(category="domain")
+class TelegramMessageReceived(BaseEvent):
+    """Event emitted when a message is received from Telegram"""
+    event_type: Literal["TelegramMessageReceived"] = "TelegramMessageReceived"
+    message_id: uuid.UUID
+    chat_id: uuid.UUID
+    telegram_message_id: int
+    telegram_user_id: int
+    sender_id: Optional[uuid.UUID] = None  # Mapped WellWon user if exists
+    content: str
+    message_type: str = "text"
+    file_url: Optional[str] = None
+    file_name: Optional[str] = None
+
+
+# =============================================================================
+# Event Type Registry (for deserialization)
+# =============================================================================
+
+CHAT_EVENT_TYPES = {
+    "ChatCreated": ChatCreated,
+    "ChatUpdated": ChatUpdated,
+    "ChatArchived": ChatArchived,
+    "ChatRestored": ChatRestored,
+    "ParticipantAdded": ParticipantAdded,
+    "ParticipantRemoved": ParticipantRemoved,
+    "ParticipantRoleChanged": ParticipantRoleChanged,
+    "ParticipantLeft": ParticipantLeft,
+    "MessageSent": MessageSent,
+    "MessageEdited": MessageEdited,
+    "MessageDeleted": MessageDeleted,
+    "MessageReadStatusUpdated": MessageReadStatusUpdated,
+    "MessagesMarkedAsRead": MessagesMarkedAsRead,
+    "TypingStarted": TypingStarted,
+    "TypingStopped": TypingStopped,
+    "TelegramChatLinked": TelegramChatLinked,
+    "TelegramChatUnlinked": TelegramChatUnlinked,
+    "TelegramMessageReceived": TelegramMessageReceived,
+}

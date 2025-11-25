@@ -41,6 +41,18 @@ INTERNAL_TO_WS_EVENT_TYPE_MAP = {
     'UserAccountReactivated': 'user_account_update',
 
     # =========================================================================
+    # CES EVENTS (Compensating Event System - External Change Detection)
+    # Pattern: Greg Young's Compensating Events via PostgreSQL triggers
+    # These notify frontend when admin changes user data directly in SQL
+    # =========================================================================
+    'UserRoleChangedExternally': 'user_admin_change',
+    'UserStatusChangedExternally': 'user_admin_change',
+    'UserTypeChangedExternally': 'user_admin_change',
+    'UserEmailVerifiedExternally': 'user_admin_change',
+    'UserDeveloperStatusChangedExternally': 'user_admin_change',
+    'UserAdminFieldsChangedExternally': 'user_admin_change',
+
+    # =========================================================================
     # SYSTEM EVENTS
     # =========================================================================
     'SystemAnnouncement': 'system_announcement',

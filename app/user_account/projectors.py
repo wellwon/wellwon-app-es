@@ -396,11 +396,166 @@ class UserAccountProjector:
         except Exception as e:
             log.warning(f"Failed to clear profile cache: {e}")
 
+    # -------------------------------------------------------------------------
+    # CES (Compensating Event System) Handlers
+    # Pattern: Greg Young's Compensating Events for external change detection
+    # CRITICAL: These handle changes made EXTERNALLY (bypassing application)
+    # -------------------------------------------------------------------------
+
+    @sync_projection("UserRoleChangedExternally", priority=1, timeout=2.0)
+    @monitor_projection
+    async def on_user_role_changed_externally(self, envelope: EventEnvelope) -> None:
+        """
+        Handle UserRoleChangedExternally compensating event.
+
+        SECURITY-CRITICAL: Role changed via direct SQL!
+        Action: Invalidate ALL user sessions to force re-login with new permissions.
+        """
+        event_data = envelope.event_data
+        user_id_str = event_data.get('user_id')
+        old_role = event_data.get('changed_fields', {}).get('role', {}).get('old', 'unknown')
+        new_role = event_data.get('current_state', {}).get('role', 'unknown')
+
+        log.critical(
+            f"[CES] User role changed via SQL! "
+            f"user_id={user_id_str}, {old_role} -> {new_role}, invalidating all sessions"
+        )
+
+        if user_id_str:
+            user_id = uuid.UUID(user_id_str) if isinstance(user_id_str, str) else user_id_str
+            await self._clear_user_caches(user_id)
+
+            # Revoke all refresh tokens to force re-login
+            try:
+                from app.security.jwt_auth import JWTAuthManager
+                jwt_manager = JWTAuthManager()
+                await jwt_manager.revoke_all_refresh_tokens(str(user_id))
+                log.info(f"[CES] Revoked all tokens for user {user_id}")
+            except Exception as e:
+                log.error(f"[CES] Failed to revoke tokens for user {user_id}: {e}")
+
+    @sync_projection("UserStatusChangedExternally", priority=1, timeout=2.0)
+    @monitor_projection
+    async def on_user_status_changed_externally(self, envelope: EventEnvelope) -> None:
+        """
+        Handle UserStatusChangedExternally compensating event.
+
+        SECURITY-CRITICAL: User activated/deactivated via direct SQL!
+        Action: Force logout if deactivated, clear caches.
+        """
+        event_data = envelope.event_data
+        user_id_str = event_data.get('user_id')
+        new_status = event_data.get('current_state', {}).get('is_active', True)
+
+        log.critical(
+            f"[CES] User status changed via SQL! "
+            f"user_id={user_id_str}, is_active={new_status}"
+        )
+
+        if user_id_str:
+            user_id = uuid.UUID(user_id_str) if isinstance(user_id_str, str) else user_id_str
+
+            if not new_status:  # User deactivated
+                try:
+                    from app.security.jwt_auth import JWTAuthManager
+                    jwt_manager = JWTAuthManager()
+                    await jwt_manager.revoke_all_refresh_tokens(str(user_id))
+                    log.info(f"[CES] User {user_id} deactivated - all sessions revoked")
+                except Exception as e:
+                    log.error(f"[CES] Failed to revoke tokens for deactivated user {user_id}: {e}")
+
+            await self._clear_user_caches(user_id)
+
+    @sync_projection("UserDeveloperStatusChangedExternally", priority=5, timeout=2.0)
+    @monitor_projection
+    async def on_user_developer_status_changed_externally(self, envelope: EventEnvelope) -> None:
+        """
+        Handle UserDeveloperStatusChangedExternally compensating event.
+
+        Action: Clear caches to ensure frontend gets updated is_developer flag.
+        """
+        event_data = envelope.event_data
+        user_id_str = event_data.get('user_id')
+        is_developer = event_data.get('current_state', {}).get('is_developer', False)
+
+        log.warning(
+            f"[CES] User developer status changed via SQL! "
+            f"user_id={user_id_str}, is_developer={is_developer}"
+        )
+
+        if user_id_str:
+            user_id = uuid.UUID(user_id_str) if isinstance(user_id_str, str) else user_id_str
+            await self._clear_user_caches(user_id)
+            log.info(f"[CES] Cache cleared for user {user_id}, is_developer={is_developer}")
+
+    @sync_projection("UserTypeChangedExternally", priority=5, timeout=2.0)
+    @monitor_projection
+    async def on_user_type_changed_externally(self, envelope: EventEnvelope) -> None:
+        """
+        Handle UserTypeChangedExternally compensating event.
+
+        Action: Clear caches to ensure frontend gets updated user_type.
+        """
+        event_data = envelope.event_data
+        user_id_str = event_data.get('user_id')
+        user_type = event_data.get('current_state', {}).get('user_type', 'unknown')
+
+        log.warning(
+            f"[CES] User type changed via SQL! "
+            f"user_id={user_id_str}, user_type={user_type}"
+        )
+
+        if user_id_str:
+            user_id = uuid.UUID(user_id_str) if isinstance(user_id_str, str) else user_id_str
+            await self._clear_user_caches(user_id)
+
+    @sync_projection("UserEmailVerifiedExternally", priority=5, timeout=2.0)
+    @monitor_projection
+    async def on_user_email_verified_externally(self, envelope: EventEnvelope) -> None:
+        """
+        Handle UserEmailVerifiedExternally compensating event.
+
+        Action: Clear caches to ensure frontend gets updated email_verified flag.
+        """
+        event_data = envelope.event_data
+        user_id_str = event_data.get('user_id')
+        email_verified = event_data.get('current_state', {}).get('email_verified', False)
+
+        log.warning(
+            f"[CES] User email_verified changed via SQL! "
+            f"user_id={user_id_str}, email_verified={email_verified}"
+        )
+
+        if user_id_str:
+            user_id = uuid.UUID(user_id_str) if isinstance(user_id_str, str) else user_id_str
+            await self._clear_user_caches(user_id)
+
+    @sync_projection("UserAdminFieldsChangedExternally", priority=10, timeout=2.0)
+    @monitor_projection
+    async def on_user_admin_fields_changed_externally(self, envelope: EventEnvelope) -> None:
+        """
+        Handle UserAdminFieldsChangedExternally compensating event.
+
+        Fallback handler for any admin field changes not caught by specific handlers.
+        """
+        event_data = envelope.event_data
+        user_id_str = event_data.get('user_id')
+        changed_fields = event_data.get('changed_fields', {})
+
+        log.warning(
+            f"[CES] User admin fields changed via SQL! "
+            f"user_id={user_id_str}, changed_fields={list(changed_fields.keys())}"
+        )
+
+        if user_id_str:
+            user_id = uuid.UUID(user_id_str) if isinstance(user_id_str, str) else user_id_str
+            await self._clear_user_caches(user_id)
+
     def get_stats(self) -> dict:
         """Get projector statistics"""
         return {
             "projector": "UserAccountProjector",
-            "handlers": 14,  # Number of sync projection handlers
+            "handlers": 20,  # Updated count including CES handlers
             "sync_events": [
                 "UserAccountCreated", "UserCreated",
                 "UserAccountDeleted", "UserDeleted",
@@ -408,7 +563,11 @@ class UserAccountProjector:
                 "UserEmailVerified", "UserBrokerAccountMappingSet",
                 "UserAccountMappingSet", "UserConnectedBrokerAdded",
                 "UserConnectedBrokerRemoved", "UserAuthenticationSucceeded",
-                "UserAuthenticationFailed", "UserProfileUpdated"
+                "UserAuthenticationFailed", "UserProfileUpdated",
+                # CES events
+                "UserRoleChangedExternally", "UserStatusChangedExternally",
+                "UserDeveloperStatusChangedExternally", "UserTypeChangedExternally",
+                "UserEmailVerifiedExternally", "UserAdminFieldsChangedExternally"
             ]
         }
 

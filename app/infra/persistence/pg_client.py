@@ -947,6 +947,142 @@ async def transaction_for_db(database: str = Database.MAIN, timeout: Optional[fl
 
 
 # =============================================================================
+# CES (Compensating Event System) App Context Bypass
+# =============================================================================
+# These functions set the wellwon.app_context session variable to bypass CES
+# triggers. CES triggers should ONLY fire for external/manual database changes
+# (e.g., DBA running queries directly), NOT for application-driven changes.
+#
+# When the app modifies data through normal operations (user clicks button,
+# API call, etc.), we set app_context = 'true' so CES triggers know to skip
+# compensation event generation.
+#
+# Usage:
+#   async with with_app_context() as conn:
+#       await conn.execute("UPDATE users SET ...")
+#
+#   # Or for single queries:
+#   await execute_with_app_context("DELETE FROM users WHERE id = $1", user_id)
+# =============================================================================
+
+@asynccontextmanager
+async def with_app_context(database: str = Database.MAIN) -> AsyncIterator[asyncpg.Connection]:
+    """
+    Context manager that sets wellwon.app_context to bypass CES triggers.
+
+    All queries executed within this context will have the app_context session
+    variable set, which CES triggers check to determine if they should fire.
+
+    CES triggers should ONLY fire for external changes (DBA queries), not for
+    application-driven changes (user clicking buttons, API calls, etc.).
+
+    Usage:
+        async with with_app_context() as conn:
+            await conn.execute("UPDATE users SET status = 'active' WHERE id = $1", user_id)
+            await conn.execute("DELETE FROM old_sessions WHERE user_id = $1", user_id)
+            # CES triggers will NOT fire for these changes
+
+    Args:
+        database: Which database to use (default: main)
+
+    Yields:
+        asyncpg.Connection with app_context set for the transaction
+    """
+    async with transaction_for_db(database) as conn:
+        # Set the app_context session variable
+        # SET LOCAL only affects the current transaction
+        await conn.execute("SET LOCAL wellwon.app_context = 'true'")
+        log.debug(f"CES bypass: app_context set for {database} transaction")
+        yield conn
+        # Transaction commits automatically, app_context resets on commit
+
+
+async def execute_with_app_context(
+    query: str,
+    *args: Any,
+    database: str = Database.MAIN,
+    timeout: Optional[float] = None
+) -> str:
+    """
+    Execute a single query with app_context set to bypass CES triggers.
+
+    This is a convenience wrapper for executing a single DML/DDL statement
+    while bypassing CES compensation event generation.
+
+    CES triggers should ONLY fire for external changes (DBA queries), not for
+    application-driven changes (user clicking buttons, API calls, etc.).
+
+    Usage:
+        # Single statement - CES triggers will NOT fire
+        await execute_with_app_context(
+            "UPDATE users SET last_login = NOW() WHERE id = $1",
+            user_id
+        )
+
+        # For multiple statements, prefer with_app_context() context manager
+
+    Args:
+        query: SQL query to execute
+        *args: Query parameters
+        database: Which database to use (default: main)
+        timeout: Optional query timeout
+
+    Returns:
+        Query execution status string (e.g., "UPDATE 1")
+    """
+    async with with_app_context(database) as conn:
+        return await conn.execute(query, *args, timeout=timeout)
+
+
+async def fetch_with_app_context(
+    query: str,
+    *args: Any,
+    database: str = Database.MAIN,
+    timeout: Optional[float] = None
+) -> List[asyncpg.Record]:
+    """
+    Execute a SELECT query with app_context set.
+
+    While SELECT queries typically don't trigger CES (no data modification),
+    this function is provided for consistency and for cases where you need
+    to SELECT within the same transaction as DML operations.
+
+    Args:
+        query: SQL SELECT query
+        *args: Query parameters
+        database: Which database to use (default: main)
+        timeout: Optional query timeout
+
+    Returns:
+        List of records
+    """
+    async with with_app_context(database) as conn:
+        return await conn.fetch(query, *args, timeout=timeout)
+
+
+async def fetchrow_with_app_context(
+    query: str,
+    *args: Any,
+    database: str = Database.MAIN,
+    timeout: Optional[float] = None
+) -> Optional[asyncpg.Record]:
+    """
+    Execute a SELECT query returning single row with app_context set.
+
+    Args:
+        query: SQL SELECT query
+        *args: Query parameters
+        database: Which database to use (default: main)
+        timeout: Optional query timeout
+
+    Returns:
+        Single record or None
+    """
+    async with with_app_context(database) as conn:
+        return await conn.fetchrow(query, *args, timeout=timeout)
+
+
+# =============================================================================
 # Enhanced Schema Bootstrap (Dev/CI)
 # =============================================================================
 
@@ -1169,6 +1305,11 @@ class _DBProxy:
     execute = staticmethod(execute)
     transaction = staticmethod(transaction)
     health_check = staticmethod(health_check)
+    # CES bypass functions
+    with_app_context = staticmethod(with_app_context)
+    execute_with_app_context = staticmethod(execute_with_app_context)
+    fetch_with_app_context = staticmethod(fetch_with_app_context)
+    fetchrow_with_app_context = staticmethod(fetchrow_with_app_context)
 
 
 class _VBProxy:
@@ -1179,6 +1320,11 @@ class _VBProxy:
     execute = staticmethod(lambda *args, **kwargs: execute_for_db(*args, **kwargs, database=Database.VB))
     transaction = staticmethod(lambda **kwargs: transaction_for_db(**kwargs, database=Database.VB))
     health_check = staticmethod(lambda: health_check_for_db(Database.VB))
+    # CES bypass functions for VB database
+    with_app_context = staticmethod(lambda: with_app_context(database=Database.VB))
+    execute_with_app_context = staticmethod(lambda *args, **kwargs: execute_with_app_context(*args, **kwargs, database=Database.VB))
+    fetch_with_app_context = staticmethod(lambda *args, **kwargs: fetch_with_app_context(*args, **kwargs, database=Database.VB))
+    fetchrow_with_app_context = staticmethod(lambda *args, **kwargs: fetchrow_with_app_context(*args, **kwargs, database=Database.VB))
 
 
 # Database proxies

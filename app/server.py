@@ -85,8 +85,8 @@ if __name__ == "__main__":
     if reload:
         cmd.extend([
             "--reload",
+            "--reload-paths", "app/",  # Watch ONLY app/ directory - ignores everything else
             "--reload-tick", "100",
-            "--workers-kill-timeout", "2s"  # Force-kill workers after 2s during reload
         ])
 
     # Run granian

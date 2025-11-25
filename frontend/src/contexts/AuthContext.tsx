@@ -94,7 +94,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           phone: profileData.phone || null,
           active: profileData.is_active,
           is_active: profileData.is_active,
-          is_developer: false,
+          is_developer: profileData.is_developer ?? false,
           email_verified: profileData.email_verified,
           mfa_enabled: profileData.mfa_enabled,
           created_at: profileData.created_at,
@@ -171,7 +171,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             phone: profileData.phone || null,
             active: profileData.is_active,
             is_active: profileData.is_active,
-            is_developer: false,
+            is_developer: profileData.is_developer ?? false,
             email_verified: profileData.email_verified,
             mfa_enabled: profileData.mfa_enabled,
             created_at: profileData.created_at,
@@ -224,10 +224,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     };
 
+    // CES: Listen for admin changes (is_developer, role, is_active, etc.)
+    const handleAdminChange = async (event: CustomEvent) => {
+      try {
+        const detail = event.detail;
+        logger.info('CES: Admin change event received via WSE', { detail, component: 'AuthContext' });
+
+        // Check if this event is for the current user
+        if (detail?.userId && profile?.user_id && detail.userId === profile.user_id) {
+          logger.info('CES: Updating local profile state', { component: 'AuthContext' });
+
+          // Update local profile state immediately for responsive UI
+          setProfile(prev => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              is_developer: detail.isDeveloper ?? prev.is_developer,
+              role: detail.role ?? prev.role,
+              is_active: detail.isActive ?? prev.is_active,
+              active: detail.isActive ?? prev.active,
+              email_verified: detail.emailVerified ?? prev.email_verified,
+              user_type: detail.userType ?? prev.user_type,
+            };
+          });
+
+          // Also refetch from backend to ensure consistency
+          await fetchProfile(profile.user_id);
+        }
+      } catch (error) {
+        logger.error('Failed to handle CES admin change event', error, { component: 'AuthContext' });
+      }
+    };
+
     window.addEventListener('userProfileUpdated', handleProfileUpdate as EventListener);
+    window.addEventListener('userAdminChange', handleAdminChange as EventListener);
 
     return () => {
       window.removeEventListener('userProfileUpdated', handleProfileUpdate as EventListener);
+      window.removeEventListener('userAdminChange', handleAdminChange as EventListener);
     };
   }, [profile?.user_id, fetchProfile]);
 

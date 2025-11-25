@@ -239,26 +239,40 @@ class WSEDomainPublisher:
     # =========================================================================
 
     def _transform_user_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """Transform user event to WSE format"""
+        """
+        Transform user event to WSE format.
+
+        Handles both:
+        - Regular domain events (fields at root level)
+        - CES events (fields in current_state from PostgreSQL trigger)
+        """
+        # CES events have current_state with admin fields
+        current_state = event.get("current_state", {})
+
+        # For CES events, prefer current_state values; for regular events, use root level
         return {
             "user_id": event.get("aggregate_id") or event.get("user_id"),
             "email": event.get("email"),
             "first_name": event.get("first_name"),
             "last_name": event.get("last_name"),
             "company_name": event.get("company_name"),
-            "role": event.get("role"),
+            "role": current_state.get("role") or event.get("role"),
             "phone": event.get("phone"),
             "avatar_url": event.get("avatar_url"),
             "bio": event.get("bio"),
-            "user_type": event.get("user_type"),
-            "is_developer": event.get("is_developer"),
+            "user_type": current_state.get("user_type") or event.get("user_type"),
+            "is_developer": current_state.get("is_developer") if "is_developer" in current_state else event.get("is_developer"),
             "timezone": event.get("timezone"),
             "language": event.get("language"),
-            "is_active": event.get("is_active", True),
-            "email_verified": event.get("email_verified", False),
+            "is_active": current_state.get("is_active") if "is_active" in current_state else event.get("is_active", True),
+            "email_verified": current_state.get("email_verified") if "email_verified" in current_state else event.get("email_verified", False),
             "created_at": event.get("created_at"),
             "updated_at": event.get("updated_at"),
             "metadata": event.get("metadata", {}),
+            # CES-specific fields for frontend
+            "changed_fields": event.get("changed_fields"),
+            "detected_by": event.get("detected_by"),
+            "compensating_event": event.get("compensating_event", False),
         }
 
     # =========================================================================

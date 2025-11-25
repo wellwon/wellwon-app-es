@@ -73,6 +73,7 @@ class GetUserProfileQueryHandler(BaseQueryHandler[GetUserProfileQuery, UserProfi
             phone=getattr(profile, 'phone', None),
             user_type=getattr(profile, 'user_type', DEFAULT_USER_TYPE.value),
             user_number=getattr(profile, 'user_number', None),
+            is_developer=getattr(profile, 'is_developer', False),
         )
 
 

@@ -764,9 +764,9 @@ class SagaService:
         if not event_timestamp_str:
             return False
 
-        try:
-            event_timestamp = datetime.fromisoformat(event_timestamp_str.replace('Z', '+00:00'))
-        except (ValueError, TypeError, AttributeError):
+        from app.utils.datetime_utils import parse_timestamp_robust
+        event_timestamp = parse_timestamp_robust(event_timestamp_str)
+        if event_timestamp is None:
             return False
 
         # Track this event in the sequence with version
@@ -872,7 +872,7 @@ class SagaService:
 
                 # NEW: Version-based resolution
                 try:
-                    event_dt = datetime.fromisoformat(event_timestamp.replace('Z', '+00:00'))
+                    event_dt = parse_timestamp_robust(event_timestamp)
 
                     if broker_connection_id in self._connection_event_sequence:
                         for tracked_event in self._connection_event_sequence[broker_connection_id]:

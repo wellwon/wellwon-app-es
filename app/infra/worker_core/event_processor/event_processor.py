@@ -250,7 +250,8 @@ class EventProcessor:
         event_timestamp = event_dict.get("timestamp") or event_dict.get("stored_at")
         if event_timestamp:
             if isinstance(event_timestamp, str):
-                event_timestamp = datetime.fromisoformat(event_timestamp.replace('Z', '+00:00'))
+                from app.utils.datetime_utils import parse_timestamp_robust
+                event_timestamp = parse_timestamp_robust(event_timestamp)
         else:
             event_timestamp = datetime.now(timezone.utc)
 

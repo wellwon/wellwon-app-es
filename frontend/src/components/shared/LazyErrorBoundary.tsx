@@ -112,4 +112,5 @@ export const createLazyComponent = <P = Record<string, unknown>>(
   );
 };
 
+export { LazyErrorBoundary };
 export default LazyErrorBoundary;

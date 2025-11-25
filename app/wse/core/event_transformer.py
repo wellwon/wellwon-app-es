@@ -130,13 +130,9 @@ class EventTransformer:
         event_latency_ms = None
         if event_timestamp_str:
             try:
-                # Parse event timestamp
-                if isinstance(event_timestamp_str, str):
-                    event_timestamp = datetime.fromisoformat(event_timestamp_str.replace('Z', '+00:00'))
-                elif isinstance(event_timestamp_str, datetime):
-                    event_timestamp = event_timestamp_str
-                else:
-                    event_timestamp = None
+                # Parse event timestamp (robust handling for PostgreSQL hour 24 edge case)
+                from app.utils.datetime_utils import parse_timestamp_robust
+                event_timestamp = parse_timestamp_robust(event_timestamp_str)
 
                 # Calculate latency from event creation to now
                 if event_timestamp:

@@ -104,6 +104,14 @@ class TransportOutboxService:
         "UserAccountDeleted": "transport.user-account-events",
         "UserEmailVerified": "transport.user-account-events",
         "UserProfileUpdated": "transport.user-account-events",
+        # CES events (Compensating Event System - from PostgreSQL triggers)
+        # Pattern: Greg Young's Compensating Events for external change detection
+        "UserRoleChangedExternally": "transport.user-account-events",
+        "UserStatusChangedExternally": "transport.user-account-events",
+        "UserTypeChangedExternally": "transport.user-account-events",
+        "UserEmailVerifiedExternally": "transport.user-account-events",
+        "UserDeveloperStatusChangedExternally": "transport.user-account-events",
+        "UserAdminFieldsChangedExternally": "transport.user-account-events",
     }
 
     def __init__(
@@ -116,7 +124,8 @@ class TransportOutboxService:
             custom_topic_mappings: Optional[Dict[str, str]] = None,
             dlq_service: Optional['DLQService'] = None,
             use_exponential_backoff: bool = True,  # NEW: Enable centralized retry (default ON)
-            use_poison_pill_detection: bool = True  # NEW: Enable poison pill detection (default ON)
+            use_poison_pill_detection: bool = True,  # NEW: Enable poison pill detection (default ON)
+            event_store: Optional[Any] = None  # CES: EventStore for compensating events (KurrentDB)
     ):
         self.event_bus = event_bus
         self.max_retry_attempts = max_retry_attempts
@@ -126,6 +135,7 @@ class TransportOutboxService:
         self._dlq_service = dlq_service
         self.use_exponential_backoff = use_exponential_backoff
         self.use_poison_pill_detection = use_poison_pill_detection
+        self._event_store = event_store  # CES: For 10-year audit trail of compensating events
 
         # Configure centralized retry (if enabled)
         if self.use_exponential_backoff:
@@ -401,6 +411,10 @@ class TransportOutboxService:
         """
         Publish a single event to the transport layer.
 
+        CES Pattern (Greg Young's Compensating Events):
+        - If metadata.write_to_eventstore=true, write to EventStore FIRST (audit trail)
+        - Then publish to EventBus (transport)
+
         Uses centralized retry with exponential backoff (if enabled).
         Detects poison pills to skip unnecessary retries (if enabled).
 
@@ -408,6 +422,21 @@ class TransportOutboxService:
             True if successfully published, False otherwise
         """
         try:
+            # CES: Check if this is a compensating event that should be written to EventStore
+            is_compensating = entry.metadata and entry.metadata.get('compensating_event', False)
+            should_write_eventstore = entry.metadata and (
+                entry.metadata.get('write_to_eventstore', False) or is_compensating
+            )
+
+            # Step 1: Write to EventStore FIRST (for compensating events)
+            if should_write_eventstore and self._event_store:
+                await self._write_to_eventstore(entry)
+                log.info(
+                    f"[CES] Compensating event {entry.event_type} written to EventStore "
+                    f"(aggregate_id={entry.aggregate_id})"
+                )
+
+            # Step 2: Publish to EventBus (transport)
             # Use centralized retry if enabled
             if self.use_exponential_backoff and self.retry_config:
                 await retry_async(
@@ -426,6 +455,7 @@ class TransportOutboxService:
             log.info(
                 f"Published event {entry.event_id} ({entry.event_type}) "
                 f"to transport topic {entry.topic}"
+                f"{' [CES: EventStore+EventBus]' if should_write_eventstore else ''}"
             )
 
             return True
@@ -611,6 +641,47 @@ class TransportOutboxService:
             await self.mark_publish_attempt(entry.id, error_message)
 
             return False
+
+    async def _write_to_eventstore(self, entry: OutboxEntry) -> None:
+        """
+        Write compensating event to EventStore (KurrentDB).
+
+        CES Pattern (Greg Young):
+        - External changes bypass aggregates
+        - Compensating events record the FACT
+        - Preserves 10-year audit trail for projection rebuild
+
+        Source: Greg Young - "Write a new fact that supersedes the old fact"
+        """
+        if not self._event_store:
+            log.warning(f"[CES] EventStore not configured, skipping write for {entry.event_type}")
+            return
+
+        # Build EventStore envelope
+        envelope = EventEnvelope(
+            event_id=entry.event_id,
+            aggregate_id=entry.aggregate_id,
+            aggregate_type=entry.aggregate_type,
+            event_type=entry.event_type,
+            event_data=entry.event_data,
+            aggregate_version=entry.aggregate_version or 0,
+            timestamp=entry.created_at,
+            metadata={
+                'source': 'ces_trigger',
+                'compensating_event': True,
+                'changed_by': entry.metadata.get('source', 'EXTERNAL_SQL') if entry.metadata else 'EXTERNAL_SQL',
+                'severity': entry.metadata.get('severity', 'MEDIUM') if entry.metadata else 'MEDIUM',
+                **(entry.metadata or {})
+            }
+        )
+
+        # Write to EventStore (no version check for compensating events)
+        await self._event_store.append_events(
+            aggregate_id=str(entry.aggregate_id),
+            aggregate_type=entry.aggregate_type,
+            events=[envelope],
+            expected_version=None  # No version check for compensating events
+        )
 
     async def _do_publish(self, entry: OutboxEntry) -> None:
         """
@@ -1077,11 +1148,18 @@ class OutboxPublisher:
 def create_transport_outbox(
         event_bus: EventBus,
         custom_mappings: Optional[Dict[str, str]] = None,
-        dlq_service: Optional['DLQService'] = None
+        dlq_service: Optional['DLQService'] = None,
+        event_store: Optional[Any] = None  # CES: EventStore for compensating events
 ) -> TransportOutboxService:
-    """Create a transport outbox service with event bus and optional DLQ"""
+    """
+    Create a transport outbox service with event bus and optional DLQ.
+
+    CES Pattern: If event_store is provided, compensating events will be written
+    to EventStore (KurrentDB) for 10-year audit trail before publishing to EventBus.
+    """
     return TransportOutboxService(
         event_bus=event_bus,
         custom_topic_mappings=custom_mappings,
-        dlq_service=dlq_service
+        dlq_service=dlq_service,
+        event_store=event_store
     )
