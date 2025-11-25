@@ -8,7 +8,7 @@
 
 ## Table of Contents
 
-1. [Color Pelette](#1-color-palette)
+1. [Color Palette](#1-color-palette)
 2. [Typography System](#2-typography-system)
 3. [Spacing System](#3-spacing-system)
 4. [Border Radius](#4-border-radius)
@@ -19,6 +19,11 @@
 9. [Status Color Mapping](#9-status-color-mapping)
 10. [Component Patterns](#10-component-patterns)
 11. [Accessibility Guidelines](#11-accessibility-guidelines)
+12. [Tailwind CSS Mapping](#12-tailwind-css-mapping)
+13. [UI State Persistence](#13-ui-state-persistence)
+14. [Select Component Styling](#14-select-component-styling)
+15. [Pagination Component](#15-pagination-component)
+16. [Table Action Buttons](#16-table-action-buttons)
 
 ---
 
@@ -483,6 +488,232 @@ This section maps design tokens to their exact Tailwind CSS classes for clarity.
 | No Animation | `transition-none` | 0ms (instant) |
 | Fast Transition | `transition-colors duration-200` | 200ms |
 | Hover Effects | `transition-all duration-150` | 150ms |
+
+---
+
+## 13. UI State Persistence
+
+### 13.1 Storage Strategy
+
+Используем `localStorage` для сохранения пользовательских настроек UI между сессиями браузера.
+
+**Важно:** НЕ использовать `sessionStorage` - он сбрасывается при закрытии вкладки.
+
+### 13.2 Стандартные ключи
+
+| Ключ | Тип | Default | Описание |
+|------|-----|---------|----------|
+| `{module}_theme` | `'dark' \| 'light'` | `'light'` | Выбранная тема модуля |
+| `{module}_sidebarCollapsed` | `boolean` | `false` | Состояние sidebar (свёрнут/развёрнут) |
+| `{module}_rowsPerPage` | `number` | `10` | Количество строк в таблицах |
+
+**Примеры ключей:**
+- `declarant_theme`
+- `platformPro_sidebarCollapsed`
+- `declarant_rowsPerPage`
+
+### 13.3 Паттерн инициализации
+
+```tsx
+const [isDark, setIsDark] = useState(() => {
+  const saved = localStorage.getItem('module_theme');
+  return saved === 'dark';
+});
+
+const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+  const saved = localStorage.getItem('module_sidebarCollapsed');
+  return saved ? JSON.parse(saved) : false;
+});
+
+const [rowsPerPage, setRowsPerPage] = useState(() => {
+  const saved = localStorage.getItem('module_rowsPerPage');
+  return saved ? Number(saved) : 10;
+});
+```
+
+### 13.4 Паттерн сохранения
+
+```tsx
+const toggleTheme = () => {
+  const newValue = !isDark;
+  setIsDark(newValue);
+  localStorage.setItem('module_theme', newValue ? 'dark' : 'light');
+};
+
+const toggleSidebar = () => {
+  const newValue = !sidebarCollapsed;
+  setSidebarCollapsed(newValue);
+  localStorage.setItem('module_sidebarCollapsed', JSON.stringify(newValue));
+};
+
+const handleRowsPerPageChange = (value: string) => {
+  setRowsPerPage(Number(value));
+  localStorage.setItem('module_rowsPerPage', value);
+};
+```
+
+---
+
+## 14. Select Component Styling
+
+### 14.1 Проблема
+
+Стандартный shadcn/ui Select использует красный `ring` при фокусе из CSS переменной `--ring`. Для нейтрального вида нужно переопределить стили.
+
+### 14.2 Нейтральные стили (без цветового акцента)
+
+```tsx
+<SelectTrigger className={`focus:outline-none focus:ring-0 focus:ring-offset-0 focus:ring-transparent ${
+  isDark
+    ? 'bg-[#232328] border-white/10 text-white focus:border-white/10 data-[state=open]:border-white/10'
+    : 'bg-white border-gray-200 text-gray-900 focus:border-gray-200 data-[state=open]:border-gray-200'
+}`}>
+  <SelectValue />
+</SelectTrigger>
+
+<SelectContent className={isDark
+  ? 'bg-[#232328] border-white/10'
+  : 'bg-white border-gray-200'
+}>
+  <SelectItem className={isDark
+    ? 'focus:bg-white/10 focus:text-white text-white'
+    : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'
+  }>
+    Option
+  </SelectItem>
+</SelectContent>
+```
+
+### 14.3 Ключевые классы
+
+| Класс | Назначение |
+|-------|-----------|
+| `focus:outline-none` | Убрать outline браузера |
+| `focus:ring-0` | Убрать ring |
+| `focus:ring-offset-0` | Убрать offset ring |
+| `focus:ring-transparent` | Прозрачный ring (fallback) |
+| `data-[state=open]:border-*` | Бордер при открытом состоянии |
+
+---
+
+## 15. Pagination Component
+
+### 15.1 Структура
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ [10 ▼] строк на странице   Показано 1-10 из 25    [<][1][2][>] │
+└────────────────────────────────────────────────────────────┘
+```
+
+### 15.2 Стили кнопок навигации
+
+**Disabled (неактивная):**
+```tsx
+isDark
+  ? 'text-gray-600 bg-white/5 cursor-not-allowed'
+  : 'text-gray-400 bg-gray-100 cursor-not-allowed'
+```
+
+**Active (кликабельная):**
+```tsx
+isDark
+  ? 'text-gray-300 bg-white/5 hover:bg-white/10 cursor-pointer'
+  : 'text-gray-600 bg-gray-100 hover:bg-gray-200 cursor-pointer'
+```
+
+**Current page (текущая страница):**
+```tsx
+'bg-accent-red text-white'
+```
+
+### 15.3 Размеры
+
+| Элемент | Размер | Классы |
+|---------|--------|--------|
+| Кнопки навигации | 32×32px | `w-8 h-8 rounded-lg` |
+| Select количества | 70×32px | `w-[70px] h-8` |
+
+### 15.4 Логика пагинации
+
+```tsx
+const [rowsPerPage, setRowsPerPage] = useState(10);
+const [currentPage, setCurrentPage] = useState(1);
+
+const totalItems = data.length;
+const totalPages = Math.ceil(totalItems / rowsPerPage);
+const startIndex = (currentPage - 1) * rowsPerPage;
+const endIndex = Math.min(startIndex + rowsPerPage, totalItems);
+const paginatedData = data.slice(startIndex, endIndex);
+
+// При смене количества строк - сброс на первую страницу
+const handleRowsPerPageChange = (value: string) => {
+  setRowsPerPage(Number(value));
+  setCurrentPage(1);
+  localStorage.setItem('module_rowsPerPage', value);
+};
+```
+
+---
+
+## 16. Table Action Buttons
+
+### 16.1 Glass Button (копирование, редактирование, просмотр)
+
+Используется для нейтральных действий без деструктивного эффекта.
+
+```tsx
+<button className={`h-8 px-3 rounded-lg flex items-center justify-center border ${
+  isDark
+    ? 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10 hover:text-white hover:border-white/20'
+    : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200 hover:text-gray-900'
+}`}>
+  <Copy className="h-4 w-4" />
+</button>
+```
+
+### 16.2 Danger Button (удаление)
+
+Используется для деструктивных действий. Всегда красный независимо от темы.
+
+```tsx
+<button className="h-8 px-3 rounded-lg flex items-center justify-center
+  bg-accent-red/10 text-accent-red border border-accent-red/20
+  hover:bg-accent-red/20 hover:border-accent-red/25">
+  <Trash2 className="h-4 w-4" />
+</button>
+```
+
+### 16.3 Размеры кнопок действий
+
+| Размер | Классы | Использование |
+|--------|--------|---------------|
+| Стандартный | `h-8 px-3 rounded-lg` | Кнопки в таблицах |
+| Компактный | `h-7 px-2 rounded-md` | Плотные списки |
+| Иконка | `w-8 h-8 rounded-lg` | Только иконка |
+
+### 16.4 Важно: Без анимации при переключении темы
+
+Убрать `transition-colors` с кнопок для мгновенного переключения темы:
+
+```tsx
+// ❌ Неправильно
+className="... transition-colors"
+
+// ✅ Правильно
+className="..." // без transition
+```
+
+---
+
+## Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| **3.1** | 2025-11-25 | Added §13-§16: UI State Persistence, Select, Pagination, Action Buttons |
+| **3.0** | 2025-11-25 | Complete rewrite with HEX colors from `/test-app` audit |
+| **2.0** | 2025-10-15 | Added hybrid theme architecture, glassmorphism specs |
+| **1.0** | 2025-08-01 | Initial design system documentation |
 
 ---
 

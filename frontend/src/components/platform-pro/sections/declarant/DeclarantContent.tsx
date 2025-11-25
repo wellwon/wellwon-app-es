@@ -458,16 +458,16 @@ const HeaderBarMock = ({
 
 const DeclarantContent: React.FC = () => {
   const [isDark, setIsDark] = useState(() => {
-    const saved = sessionStorage.getItem('declarant-theme-dark');
-    return saved ? JSON.parse(saved) : false;
+    const saved = localStorage.getItem('declarant_theme');
+    return saved === 'dark';
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    const saved = sessionStorage.getItem('declarant-sidebar-collapsed');
+    const saved = localStorage.getItem('declarant_sidebarCollapsed');
     return saved ? JSON.parse(saved) : false;
   });
   const [activeSection, setActiveSection] = useState('dashboard');
   const [rowsPerPage, setRowsPerPage] = useState(() => {
-    const saved = sessionStorage.getItem('declarant-rows-per-page');
+    const saved = localStorage.getItem('declarant_rowsPerPage');
     return saved ? Number(saved) : 10;
   });
   const [currentPage, setCurrentPage] = useState(1);
@@ -475,13 +475,13 @@ const DeclarantContent: React.FC = () => {
   const toggleTheme = () => {
     const newValue = !isDark;
     setIsDark(newValue);
-    sessionStorage.setItem('declarant-theme-dark', JSON.stringify(newValue));
+    localStorage.setItem('declarant_theme', newValue ? 'dark' : 'light');
   };
 
   const toggleSidebar = () => {
     const newValue = !sidebarCollapsed;
     setSidebarCollapsed(newValue);
-    sessionStorage.setItem('declarant-sidebar-collapsed', JSON.stringify(newValue));
+    localStorage.setItem('declarant_sidebarCollapsed', JSON.stringify(newValue));
   };
 
   // Пагинация
@@ -495,7 +495,7 @@ const DeclarantContent: React.FC = () => {
     const newValue = Number(value);
     setRowsPerPage(newValue);
     setCurrentPage(1);
-    sessionStorage.setItem('declarant-rows-per-page', value);
+    localStorage.setItem('declarant_rowsPerPage', value);
   };
 
   const goToPage = (page: number) => {
