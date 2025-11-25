@@ -24,7 +24,7 @@ psycopg2-binary>=2.9.9            # PostgreSQL adapter (binary)
 # =============================================================================
 # Database - Redis
 # =============================================================================
-redis>=5.2.0                      # Redis client (Python 3.14 compatible)
+redis>=7.1.0                      # Redis client (Python 3.14 compatible)
 hiredis>=3.0.0                    # C parser for Redis protocol
 
 # =============================================================================

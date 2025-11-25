@@ -30,10 +30,30 @@ from app.api.models.telegram_api_models import (
     SendMessageResponse,
     AvailableEmojisResponse,
 )
+from app.chat.commands import ProcessTelegramMessageCommand
+from app.chat.queries import GetChatByTelegramIdQuery
 
 log = logging.getLogger("wellwon.telegram.webhook")
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
+
+
+# =============================================================================
+# Dependencies
+# =============================================================================
+
+async def get_command_bus(request: Request):
+    """Get command bus from application state"""
+    if not hasattr(request.app.state, 'command_bus'):
+        raise RuntimeError("Command bus not configured")
+    return request.app.state.command_bus
+
+
+async def get_query_bus(request: Request):
+    """Get query bus from application state"""
+    if not hasattr(request.app.state, 'query_bus'):
+        raise RuntimeError("Query bus not configured")
+    return request.app.state.query_bus
 
 
 async def get_adapter() -> TelegramAdapter:
@@ -69,6 +89,8 @@ def verify_webhook_secret(
 async def telegram_webhook(
     request: Request,
     adapter: TelegramAdapter = Depends(get_adapter),
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ) -> WebhookResponse:
     """
     Main webhook endpoint for Telegram Bot updates.
@@ -80,8 +102,9 @@ async def telegram_webhook(
     1. Receive update from Telegram
     2. Parse and validate update
     3. Process message through adapter
-    4. (Future) Dispatch command to Chat Domain
-    5. Return success response
+    4. Find WellWon chat by Telegram ID via Query Bus
+    5. Dispatch ProcessTelegramMessageCommand via Command Bus
+    6. Return success response
 
     Security:
     - Validates X-Telegram-Bot-Api-Secret-Token header if configured
@@ -107,16 +130,32 @@ async def telegram_webhook(
                 f"user {telegram_message.from_username}"
             )
 
-            # TODO: Dispatch to Chat Domain via Command Bus
-            # command = ReceiveExternalMessageCommand(
-            #     chat_id=find_chat_by_telegram_id(telegram_message.chat_id, telegram_message.topic_id),
-            #     external_sender_id=str(telegram_message.from_user_id),
-            #     external_sender_name=telegram_message.from_username,
-            #     content=telegram_message.text or "",
-            #     file_url=telegram_message.file_url,
-            #     external_message_id=str(telegram_message.message_id)
-            # )
-            # await command_bus.dispatch(command)
+            # Find WellWon chat by Telegram ID via Query Bus
+            query = GetChatByTelegramIdQuery(
+                telegram_chat_id=telegram_message.chat_id,
+                telegram_topic_id=telegram_message.topic_id,
+            )
+            chat_detail = await query_bus.query(query)
+
+            if chat_detail:
+                # Dispatch to Chat Domain via Command Bus
+                command = ProcessTelegramMessageCommand(
+                    chat_id=chat_detail.id,
+                    telegram_message_id=telegram_message.message_id,
+                    telegram_user_id=telegram_message.from_user_id,
+                    sender_id=None,  # TODO: Map telegram user to WellWon user if exists
+                    content=telegram_message.text or "",
+                    message_type="text" if not telegram_message.file_url else "file",
+                    file_url=telegram_message.file_url,
+                    file_name=telegram_message.file_name,
+                )
+                await command_bus.send(command)
+                log.info(f"Dispatched ProcessTelegramMessageCommand for chat {chat_detail.id}")
+            else:
+                log.warning(
+                    f"No WellWon chat found for Telegram chat_id={telegram_message.chat_id}, "
+                    f"topic_id={telegram_message.topic_id}"
+                )
 
         return WebhookResponse(ok=True)
 

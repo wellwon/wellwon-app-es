@@ -53,6 +53,42 @@ INTERNAL_TO_WS_EVENT_TYPE_MAP = {
     'UserAdminFieldsChangedExternally': 'user_admin_change',
 
     # =========================================================================
+    # COMPANY DOMAIN EVENTS
+    # =========================================================================
+    'CompanyCreated': 'company_created',
+    'CompanyUpdated': 'company_updated',
+    'CompanyArchived': 'company_archived',
+    'CompanyRestored': 'company_restored',
+    'CompanyDeleted': 'company_deleted',
+    'UserAddedToCompany': 'company_member_joined',
+    'UserRemovedFromCompany': 'company_member_left',
+    'UserCompanyRoleChanged': 'company_member_role_changed',
+    'TelegramSupergroupCreated': 'company_telegram_created',
+    'TelegramSupergroupLinked': 'company_telegram_linked',
+    'TelegramSupergroupUnlinked': 'company_telegram_unlinked',
+    'TelegramSupergroupUpdated': 'company_telegram_updated',
+    'CompanyBalanceUpdated': 'company_balance_updated',
+
+    # =========================================================================
+    # CHAT DOMAIN EVENTS
+    # =========================================================================
+    'ChatCreated': 'chat_created',
+    'ChatUpdated': 'chat_updated',
+    'ChatArchived': 'chat_archived',
+    'ChatDeleted': 'chat_deleted',
+    'MessageSent': 'message_created',
+    'MessageEdited': 'message_updated',
+    'MessageDeleted': 'message_deleted',
+    'ParticipantAdded': 'participant_joined',
+    'ParticipantRemoved': 'participant_left',
+    'ParticipantRoleChanged': 'participant_role_changed',
+    'UserStartedTyping': 'user_typing',
+    'UserStoppedTyping': 'user_stopped_typing',
+    'MessagesRead': 'messages_read',
+    'ChatTelegramLinked': 'chat_telegram_linked',
+    'ChatTelegramUnlinked': 'chat_telegram_unlinked',
+
+    # =========================================================================
     # SYSTEM EVENTS
     # =========================================================================
     'SystemAnnouncement': 'system_announcement',

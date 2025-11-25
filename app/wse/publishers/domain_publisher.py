@@ -30,6 +30,8 @@ RESPONSIBILITIES:
 
 DOMAINS SUPPORTED:
 - User (user_update events)
+- Company (company_update events)
+- Chat (chat_update, message events)
 """
 
 from __future__ import annotations
@@ -60,6 +62,8 @@ class WSEDomainPublisher:
         event_bus: EventBus,
         pubsub_bus: PubSubBus,
         enable_user_events: bool = True,
+        enable_company_events: bool = True,
+        enable_chat_events: bool = True,
     ):
         """
         Initialize WSE Domain Publisher
@@ -68,12 +72,16 @@ class WSEDomainPublisher:
             event_bus: Backend event bus (Redpanda)
             pubsub_bus: Frontend event bus (Redis Pub/Sub for multi-instance WebSocket coordination)
             enable_user_events: Enable user event forwarding
+            enable_company_events: Enable company event forwarding
+            enable_chat_events: Enable chat event forwarding
         """
         self._event_bus = event_bus
         self._pubsub_bus = pubsub_bus
 
         # Feature flags
         self._enable_user_events = enable_user_events
+        self._enable_company_events = enable_company_events
+        self._enable_chat_events = enable_chat_events
 
         # Subscription management
         self._subscriptions: Dict[str, str] = {}  # topic -> subscription_id
@@ -90,7 +98,9 @@ class WSEDomainPublisher:
 
         log.info(
             "WSE Domain Publisher initialized - "
-            f"Users: {enable_user_events}"
+            f"Users: {enable_user_events}, "
+            f"Companies: {enable_company_events}, "
+            f"Chats: {enable_chat_events}"
         )
 
     async def start(self) -> None:
@@ -120,6 +130,12 @@ class WSEDomainPublisher:
         try:
             if self._enable_user_events:
                 await self._subscribe_to_user_events()
+
+            if self._enable_company_events:
+                await self._subscribe_to_company_events()
+
+            if self._enable_chat_events:
+                await self._subscribe_to_chat_events()
 
             log.info(
                 f"WSE Domain Publisher subscriptions complete - "
@@ -190,6 +206,46 @@ class WSEDomainPublisher:
         except Exception as e:
             log.error(f"Failed to subscribe to {topic}: {e}")
 
+    async def _subscribe_to_company_events(self) -> None:
+        """Subscribe to company domain events"""
+        if not self._running:
+            log.debug("Skipping company event subscription - service not running")
+            return
+
+        topic = "transport.company-events"
+
+        try:
+            await self._event_bus.subscribe(
+                channel=topic,
+                handler=self._handle_company_event,
+                group="wse-domain-publisher",
+                consumer=f"wse-publisher-{os.getpid()}",
+            )
+            self._subscriptions[topic] = f"{topic}::wse-domain-publisher"
+            log.info(f"Subscribed to {topic} for WSE forwarding")
+        except Exception as e:
+            log.error(f"Failed to subscribe to {topic}: {e}")
+
+    async def _subscribe_to_chat_events(self) -> None:
+        """Subscribe to chat domain events"""
+        if not self._running:
+            log.debug("Skipping chat event subscription - service not running")
+            return
+
+        topic = "transport.chat-events"
+
+        try:
+            await self._event_bus.subscribe(
+                channel=topic,
+                handler=self._handle_chat_event,
+                group="wse-domain-publisher",
+                consumer=f"wse-publisher-{os.getpid()}",
+            )
+            self._subscriptions[topic] = f"{topic}::wse-domain-publisher"
+            log.info(f"Subscribed to {topic} for WSE forwarding")
+        except Exception as e:
+            log.error(f"Failed to subscribe to {topic}: {e}")
+
     # =========================================================================
     # EVENT HANDLERS
     # =========================================================================
@@ -234,6 +290,97 @@ class WSEDomainPublisher:
             self._forwarding_errors += 1
             log.error(f"Error handling user event: {e}", exc_info=True)
 
+    async def _handle_company_event(self, event: Dict[str, Any]) -> None:
+        """Handle company domain event"""
+        try:
+            event_type = event.get("event_type")
+            company_id = event.get("company_id") or event.get("aggregate_id")
+
+            if not event_type or not company_id:
+                log.warning(f"Company event missing event_type or company_id: {event}")
+                return
+
+            # Map to WebSocket event type
+            ws_event_type = self._event_type_map.get(event_type)
+            if not ws_event_type:
+                self._events_filtered += 1
+                log.debug(f"No WSE mapping for company event type: {event_type}")
+                return
+
+            # Transform to WebSocket format
+            wse_event = {
+                "event_type": ws_event_type,
+                "company_id": str(company_id),
+                "data": self._transform_company_event(event),
+                "timestamp": event.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                "event_id": event.get("event_id"),
+            }
+
+            # Publish to company-specific events topic
+            topic = f"company:{company_id}:events"
+            await self._pubsub_bus.publish(
+                topic=topic,
+                event=wse_event,
+            )
+
+            # Also publish user-specific events for membership changes
+            user_id = event.get("user_id")
+            if user_id and event_type in ("UserAddedToCompany", "UserRemovedFromCompany", "UserCompanyRoleChanged"):
+                user_topic = f"user:{user_id}:events"
+                await self._pubsub_bus.publish(
+                    topic=user_topic,
+                    event=wse_event,
+                )
+
+            self._events_forwarded += 1
+            log.debug(f"Forwarded {event_type} -> {ws_event_type} to {topic}")
+
+        except Exception as e:
+            self._forwarding_errors += 1
+            log.error(f"Error handling company event: {e}", exc_info=True)
+
+    async def _handle_chat_event(self, event: Dict[str, Any]) -> None:
+        """Handle chat domain event"""
+        try:
+            event_type = event.get("event_type")
+            chat_id = event.get("chat_id") or event.get("aggregate_id")
+
+            if not event_type or not chat_id:
+                log.warning(f"Chat event missing event_type or chat_id: {event}")
+                return
+
+            # Map to WebSocket event type
+            ws_event_type = self._event_type_map.get(event_type)
+            if not ws_event_type:
+                self._events_filtered += 1
+                log.debug(f"No WSE mapping for chat event type: {event_type}")
+                return
+
+            # Transform to WebSocket format
+            wse_event = {
+                "event_type": ws_event_type,
+                "chat_id": str(chat_id),
+                "data": self._transform_chat_event(event),
+                "timestamp": event.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                "event_id": event.get("event_id"),
+            }
+
+            # Publish to chat-specific events topic
+            topic = f"chat:{chat_id}:events"
+            await self._pubsub_bus.publish(
+                topic=topic,
+                event=wse_event,
+            )
+
+            # For typing events, publish to all participants quickly
+            # For messages, frontend React Query will invalidate chat list
+            self._events_forwarded += 1
+            log.debug(f"Forwarded {event_type} -> {ws_event_type} to {topic}")
+
+        except Exception as e:
+            self._forwarding_errors += 1
+            log.error(f"Error handling chat event: {e}", exc_info=True)
+
     # =========================================================================
     # EVENT TRANSFORMERS
     # =========================================================================
@@ -275,6 +422,68 @@ class WSEDomainPublisher:
             "compensating_event": event.get("compensating_event", False),
         }
 
+    def _transform_company_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Transform company event to WSE format."""
+        return {
+            "company_id": event.get("aggregate_id") or event.get("company_id"),
+            "name": event.get("name"),
+            "company_type": event.get("company_type"),
+            "vat": event.get("vat"),
+            "city": event.get("city"),
+            "is_active": event.get("is_active", True),
+            # User-related fields for membership events
+            "user_id": event.get("user_id"),
+            "relationship_type": event.get("relationship_type"),
+            "added_by": event.get("added_by"),
+            "removed_by": event.get("removed_by"),
+            "changed_by": event.get("changed_by"),
+            # Telegram fields
+            "telegram_group_id": event.get("telegram_group_id"),
+            "telegram_title": event.get("title"),
+            "invite_link": event.get("invite_link"),
+            # Balance fields
+            "balance": event.get("new_balance"),
+            "change_amount": event.get("change_amount"),
+            "reason": event.get("reason"),
+            # Timestamps
+            "created_at": event.get("created_at"),
+            "updated_at": event.get("updated_at"),
+        }
+
+    def _transform_chat_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Transform chat event to WSE format."""
+        return {
+            "chat_id": event.get("aggregate_id") or event.get("chat_id"),
+            "name": event.get("name"),
+            "chat_type": event.get("chat_type"),
+            "is_active": event.get("is_active", True),
+            # Message fields
+            "message_id": event.get("message_id"),
+            "content": event.get("content"),
+            "message_type": event.get("message_type"),
+            "sender_id": event.get("sender_id"),
+            "sender_name": event.get("sender_name"),
+            "reply_to_id": event.get("reply_to_id"),
+            "file_url": event.get("file_url"),
+            "file_name": event.get("file_name"),
+            # Participant fields
+            "user_id": event.get("user_id"),
+            "participant_role": event.get("role"),
+            # Typing fields
+            "typing_user_id": event.get("typing_user_id"),
+            "typing_user_name": event.get("typing_user_name"),
+            # Read status
+            "read_message_ids": event.get("message_ids"),
+            "read_by": event.get("read_by"),
+            # Telegram integration
+            "telegram_chat_id": event.get("telegram_chat_id"),
+            "telegram_topic_id": event.get("telegram_topic_id"),
+            "telegram_message_id": event.get("telegram_message_id"),
+            # Timestamps
+            "created_at": event.get("created_at"),
+            "updated_at": event.get("updated_at"),
+        }
+
     # =========================================================================
     # METRICS & STATUS
     # =========================================================================
@@ -289,6 +498,8 @@ class WSEDomainPublisher:
             "forwarding_errors": self._forwarding_errors,
             "enabled_domains": {
                 "users": self._enable_user_events,
+                "companies": self._enable_company_events,
+                "chats": self._enable_chat_events,
             }
         }
 

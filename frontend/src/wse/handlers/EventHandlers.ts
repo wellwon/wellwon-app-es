@@ -144,6 +144,384 @@ export class EventHandlers {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Company Domain Events
+  // ─────────────────────────────────────────────────────────────────────────
+
+  static handleCompanyCreated(message: WSMessage): void {
+    try {
+      const company = message.p;
+      logger.info('Company created:', company);
+
+      // Invalidate company list queries
+      queryClient.invalidateQueries({ queryKey: ['companies'] });
+      queryClient.invalidateQueries({ queryKey: ['my-companies'] });
+
+      window.dispatchEvent(new CustomEvent('companyCreated', { detail: company }));
+    } catch (error) {
+      logger.error('Error handling company created:', error);
+    }
+  }
+
+  static handleCompanyUpdated(message: WSMessage): void {
+    try {
+      const company = message.p;
+      logger.info('Company updated:', company);
+
+      // Invalidate specific company and list queries
+      queryClient.invalidateQueries({ queryKey: ['company', company.company_id] });
+      queryClient.invalidateQueries({ queryKey: ['companies'] });
+
+      window.dispatchEvent(new CustomEvent('companyUpdated', { detail: company }));
+    } catch (error) {
+      logger.error('Error handling company updated:', error);
+    }
+  }
+
+  static handleCompanyArchived(message: WSMessage): void {
+    try {
+      const company = message.p;
+      logger.info('Company archived:', company);
+
+      queryClient.invalidateQueries({ queryKey: ['company', company.company_id] });
+      queryClient.invalidateQueries({ queryKey: ['companies'] });
+      queryClient.invalidateQueries({ queryKey: ['my-companies'] });
+
+      window.dispatchEvent(new CustomEvent('companyArchived', { detail: company }));
+    } catch (error) {
+      logger.error('Error handling company archived:', error);
+    }
+  }
+
+  static handleCompanyRestored(message: WSMessage): void {
+    try {
+      const company = message.p;
+      logger.info('Company restored:', company);
+
+      queryClient.invalidateQueries({ queryKey: ['company', company.company_id] });
+      queryClient.invalidateQueries({ queryKey: ['companies'] });
+
+      window.dispatchEvent(new CustomEvent('companyRestored', { detail: company }));
+    } catch (error) {
+      logger.error('Error handling company restored:', error);
+    }
+  }
+
+  static handleCompanyDeleted(message: WSMessage): void {
+    try {
+      const company = message.p;
+      logger.info('Company deleted:', company);
+
+      queryClient.removeQueries({ queryKey: ['company', company.company_id] });
+      queryClient.invalidateQueries({ queryKey: ['companies'] });
+      queryClient.invalidateQueries({ queryKey: ['my-companies'] });
+
+      window.dispatchEvent(new CustomEvent('companyDeleted', { detail: company }));
+    } catch (error) {
+      logger.error('Error handling company deleted:', error);
+    }
+  }
+
+  static handleCompanyMemberJoined(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Company member joined:', data);
+
+      queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'users'] });
+      queryClient.invalidateQueries({ queryKey: ['company', data.company_id] });
+
+      window.dispatchEvent(new CustomEvent('companyMemberJoined', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling company member joined:', error);
+    }
+  }
+
+  static handleCompanyMemberLeft(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Company member left:', data);
+
+      queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'users'] });
+      queryClient.invalidateQueries({ queryKey: ['company', data.company_id] });
+
+      window.dispatchEvent(new CustomEvent('companyMemberLeft', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling company member left:', error);
+    }
+  }
+
+  static handleCompanyMemberRoleChanged(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Company member role changed:', data);
+
+      queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'users'] });
+
+      window.dispatchEvent(new CustomEvent('companyMemberRoleChanged', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling company member role changed:', error);
+    }
+  }
+
+  static handleCompanyTelegramCreated(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Company Telegram group created:', data);
+
+      queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'telegram'] });
+
+      window.dispatchEvent(new CustomEvent('companyTelegramCreated', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling company telegram created:', error);
+    }
+  }
+
+  static handleCompanyTelegramLinked(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Company Telegram group linked:', data);
+
+      queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'telegram'] });
+
+      window.dispatchEvent(new CustomEvent('companyTelegramLinked', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling company telegram linked:', error);
+    }
+  }
+
+  static handleCompanyTelegramUnlinked(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Company Telegram group unlinked:', data);
+
+      queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'telegram'] });
+
+      window.dispatchEvent(new CustomEvent('companyTelegramUnlinked', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling company telegram unlinked:', error);
+    }
+  }
+
+  static handleCompanyBalanceUpdated(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Company balance updated:', data);
+
+      queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'balance'] });
+      queryClient.invalidateQueries({ queryKey: ['company', data.company_id] });
+
+      window.dispatchEvent(new CustomEvent('companyBalanceUpdated', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling company balance updated:', error);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Chat Domain Events
+  // ─────────────────────────────────────────────────────────────────────────
+
+  static handleChatCreated(message: WSMessage): void {
+    try {
+      const chat = message.p;
+      logger.info('Chat created:', chat);
+
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+
+      window.dispatchEvent(new CustomEvent('chatCreated', { detail: chat }));
+    } catch (error) {
+      logger.error('Error handling chat created:', error);
+    }
+  }
+
+  static handleChatUpdated(message: WSMessage): void {
+    try {
+      const chat = message.p;
+      logger.info('Chat updated:', chat);
+
+      queryClient.invalidateQueries({ queryKey: ['chat', chat.chat_id] });
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+
+      window.dispatchEvent(new CustomEvent('chatUpdated', { detail: chat }));
+    } catch (error) {
+      logger.error('Error handling chat updated:', error);
+    }
+  }
+
+  static handleChatArchived(message: WSMessage): void {
+    try {
+      const chat = message.p;
+      logger.info('Chat archived:', chat);
+
+      queryClient.invalidateQueries({ queryKey: ['chat', chat.chat_id] });
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+
+      window.dispatchEvent(new CustomEvent('chatArchived', { detail: chat }));
+    } catch (error) {
+      logger.error('Error handling chat archived:', error);
+    }
+  }
+
+  static handleChatDeleted(message: WSMessage): void {
+    try {
+      const chat = message.p;
+      logger.info('Chat deleted:', chat);
+
+      queryClient.removeQueries({ queryKey: ['chat', chat.chat_id] });
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+
+      window.dispatchEvent(new CustomEvent('chatDeleted', { detail: chat }));
+    } catch (error) {
+      logger.error('Error handling chat deleted:', error);
+    }
+  }
+
+  static handleMessageCreated(message: WSMessage): void {
+    try {
+      const msg = message.p;
+      logger.info('Message created:', msg);
+
+      // Invalidate messages for the chat
+      queryClient.invalidateQueries({ queryKey: ['chat', msg.chat_id, 'messages'] });
+      // Update chat list (for last message preview)
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+      // Update unread count
+      queryClient.invalidateQueries({ queryKey: ['unread-count'] });
+
+      window.dispatchEvent(new CustomEvent('messageCreated', { detail: msg }));
+    } catch (error) {
+      logger.error('Error handling message created:', error);
+    }
+  }
+
+  static handleMessageUpdated(message: WSMessage): void {
+    try {
+      const msg = message.p;
+      logger.info('Message updated:', msg);
+
+      queryClient.invalidateQueries({ queryKey: ['chat', msg.chat_id, 'messages'] });
+
+      window.dispatchEvent(new CustomEvent('messageUpdated', { detail: msg }));
+    } catch (error) {
+      logger.error('Error handling message updated:', error);
+    }
+  }
+
+  static handleMessageDeleted(message: WSMessage): void {
+    try {
+      const msg = message.p;
+      logger.info('Message deleted:', msg);
+
+      queryClient.invalidateQueries({ queryKey: ['chat', msg.chat_id, 'messages'] });
+
+      window.dispatchEvent(new CustomEvent('messageDeleted', { detail: msg }));
+    } catch (error) {
+      logger.error('Error handling message deleted:', error);
+    }
+  }
+
+  static handleParticipantJoined(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Participant joined chat:', data);
+
+      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id, 'participants'] });
+      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id] });
+
+      window.dispatchEvent(new CustomEvent('participantJoined', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling participant joined:', error);
+    }
+  }
+
+  static handleParticipantLeft(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Participant left chat:', data);
+
+      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id, 'participants'] });
+      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id] });
+
+      window.dispatchEvent(new CustomEvent('participantLeft', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling participant left:', error);
+    }
+  }
+
+  static handleParticipantRoleChanged(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Participant role changed:', data);
+
+      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id, 'participants'] });
+
+      window.dispatchEvent(new CustomEvent('participantRoleChanged', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling participant role changed:', error);
+    }
+  }
+
+  static handleUserTyping(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.debug('User typing:', data);
+
+      window.dispatchEvent(new CustomEvent('userTyping', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling user typing:', error);
+    }
+  }
+
+  static handleUserStoppedTyping(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.debug('User stopped typing:', data);
+
+      window.dispatchEvent(new CustomEvent('userStoppedTyping', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling user stopped typing:', error);
+    }
+  }
+
+  static handleMessagesRead(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.debug('Messages read:', data);
+
+      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id, 'messages'] });
+      queryClient.invalidateQueries({ queryKey: ['unread-count'] });
+
+      window.dispatchEvent(new CustomEvent('messagesRead', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling messages read:', error);
+    }
+  }
+
+  static handleChatTelegramLinked(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Chat Telegram linked:', data);
+
+      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id] });
+
+      window.dispatchEvent(new CustomEvent('chatTelegramLinked', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling chat telegram linked:', error);
+    }
+  }
+
+  static handleChatTelegramUnlinked(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Chat Telegram unlinked:', data);
+
+      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id] });
+
+      window.dispatchEvent(new CustomEvent('chatTelegramUnlinked', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling chat telegram unlinked:', error);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Generic Entity Update Handler
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -345,7 +723,7 @@ export class EventHandlers {
   // ─────────────────────────────────────────────────────────────────────────
 
   static registerAll(messageProcessor: any): void {
-    logger.info('=== REGISTERING GENERIC EVENT HANDLERS ===');
+    logger.info('=== REGISTERING EVENT HANDLERS ===');
 
     try {
       // User account events
@@ -354,6 +732,41 @@ export class EventHandlers {
 
       // CES Events (Compensating Event System - External Admin Changes)
       messageProcessor.registerHandler('user_admin_change', this.handleUserAdminChange);
+
+      // ─────────────────────────────────────────────────────────────────────────
+      // Company Domain Events
+      // ─────────────────────────────────────────────────────────────────────────
+      messageProcessor.registerHandler('company_created', this.handleCompanyCreated);
+      messageProcessor.registerHandler('company_updated', this.handleCompanyUpdated);
+      messageProcessor.registerHandler('company_archived', this.handleCompanyArchived);
+      messageProcessor.registerHandler('company_restored', this.handleCompanyRestored);
+      messageProcessor.registerHandler('company_deleted', this.handleCompanyDeleted);
+      messageProcessor.registerHandler('company_member_joined', this.handleCompanyMemberJoined);
+      messageProcessor.registerHandler('company_member_left', this.handleCompanyMemberLeft);
+      messageProcessor.registerHandler('company_member_role_changed', this.handleCompanyMemberRoleChanged);
+      messageProcessor.registerHandler('company_telegram_created', this.handleCompanyTelegramCreated);
+      messageProcessor.registerHandler('company_telegram_linked', this.handleCompanyTelegramLinked);
+      messageProcessor.registerHandler('company_telegram_unlinked', this.handleCompanyTelegramUnlinked);
+      messageProcessor.registerHandler('company_balance_updated', this.handleCompanyBalanceUpdated);
+
+      // ─────────────────────────────────────────────────────────────────────────
+      // Chat Domain Events
+      // ─────────────────────────────────────────────────────────────────────────
+      messageProcessor.registerHandler('chat_created', this.handleChatCreated);
+      messageProcessor.registerHandler('chat_updated', this.handleChatUpdated);
+      messageProcessor.registerHandler('chat_archived', this.handleChatArchived);
+      messageProcessor.registerHandler('chat_deleted', this.handleChatDeleted);
+      messageProcessor.registerHandler('message_created', this.handleMessageCreated);
+      messageProcessor.registerHandler('message_updated', this.handleMessageUpdated);
+      messageProcessor.registerHandler('message_deleted', this.handleMessageDeleted);
+      messageProcessor.registerHandler('participant_joined', this.handleParticipantJoined);
+      messageProcessor.registerHandler('participant_left', this.handleParticipantLeft);
+      messageProcessor.registerHandler('participant_role_changed', this.handleParticipantRoleChanged);
+      messageProcessor.registerHandler('user_typing', this.handleUserTyping);
+      messageProcessor.registerHandler('user_stopped_typing', this.handleUserStoppedTyping);
+      messageProcessor.registerHandler('messages_read', this.handleMessagesRead);
+      messageProcessor.registerHandler('chat_telegram_linked', this.handleChatTelegramLinked);
+      messageProcessor.registerHandler('chat_telegram_unlinked', this.handleChatTelegramUnlinked);
 
       // Generic entity events
       messageProcessor.registerHandler('entity_update', this.handleEntityUpdate);
@@ -368,7 +781,7 @@ export class EventHandlers {
       // Notification events
       messageProcessor.registerHandler('notification', this.handleNotification);
 
-      logger.info('All generic event handlers registered successfully');
+      logger.info('All event handlers registered successfully');
 
       // Log the registered handlers for debugging
       const registeredHandlers = messageProcessor.getRegisteredHandlers();

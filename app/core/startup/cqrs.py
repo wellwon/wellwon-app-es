@@ -64,6 +64,24 @@ async def _import_all_handler_modules() -> Dict[str, Any]:
         ("app.user_account.query_handlers.profile_query_handlers", "user profile queries"),
         ("app.user_account.query_handlers.auth_query_handlers", "user auth queries"),
         ("app.user_account.query_handlers.session_query_handlers", "user session queries"),
+
+        # Company domain - Command handlers
+        ("app.company.command_handlers.company_handlers", "company lifecycle commands"),
+        ("app.company.command_handlers.user_handlers", "company user commands"),
+        ("app.company.command_handlers.telegram_handlers", "company telegram commands"),
+        ("app.company.command_handlers.balance_handlers", "company balance commands"),
+
+        # Company query handlers
+        ("app.company.query_handlers.company_query_handlers", "company queries"),
+
+        # Chat domain - Command handlers
+        ("app.chat.command_handlers.chat_handlers", "chat commands"),
+        ("app.chat.command_handlers.message_handlers", "message commands"),
+        ("app.chat.command_handlers.participant_handlers", "participant commands"),
+
+        # Chat query handlers
+        ("app.chat.query_handlers.chat_query_handlers", "chat queries"),
+        ("app.chat.query_handlers.message_query_handlers", "message queries"),
     ]
 
     successful_imports = 0

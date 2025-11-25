@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from app.infra.cqrs.query_bus import QueryBus
     from app.services.application.user_auth_service import UserAuthenticationService
     from app.infra.read_repos.user_account_read_repo import UserAccountReadRepo
+    from app.infra.read_repos.company_read_repo import CompanyReadRepo
+    from app.infra.read_repos.chat_read_repo import ChatReadRepo
     from app.infra.persistence.cache_manager import CacheManager
     from app.infra.saga.saga_manager import SagaManager
 
@@ -39,6 +41,8 @@ class HandlerDependencies:
     saga_manager: Optional['SagaManager'] = None
 
     user_read_repo: Optional['UserAccountReadRepo'] = None
+    company_read_repo: Optional['CompanyReadRepo'] = None
+    chat_read_repo: Optional['ChatReadRepo'] = None
 
     cache_manager: Optional['CacheManager'] = None
 

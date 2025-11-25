@@ -1,46 +1,30 @@
 # =============================================================================
 # File: app/infra/telegram/bot_client.py
-# Description: Telegram Bot API client using aiogram 3.x
+# Description: Telegram Bot API client using python-telegram-bot 22.x
 # =============================================================================
 
 from __future__ import annotations
 
-import logging
-import asyncio
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
 
+from app.config.logging_config import get_logger
 from app.infra.telegram.config import TelegramConfig
 
-log = logging.getLogger("wellwon.telegram.bot_client")
+log = get_logger("wellwon.telegram.bot_client")
 
-# Lazy import aiogram to avoid import errors when not installed
+# Lazy import python-telegram-bot to avoid import errors when not installed
 try:
-    from aiogram import Bot, Dispatcher
-    from aiogram.types import (
-        Message,
-        Update,
-        InputFile,
-        FSInputFile,
-        URLInputFile,
-        BufferedInputFile,
-        InlineKeyboardMarkup,
-        InlineKeyboardButton,
-        ReplyKeyboardMarkup,
-        KeyboardButton,
-        ChatMemberUpdated,
-    )
-    from aiogram.enums import ParseMode, ChatType
-    from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
-    AIOGRAM_AVAILABLE = True
+    from telegram import Bot, Update, InputFile
+    from telegram.constants import ParseMode
+    from telegram.error import TelegramError, RetryAfter
+    PTB_AVAILABLE = True
 except ImportError:
-    AIOGRAM_AVAILABLE = False
+    PTB_AVAILABLE = False
     Bot = None
-    Dispatcher = None
-    Message = None
     Update = None
-    log.warning("aiogram not installed. Telegram Bot API features will be disabled.")
+    log.warning("python-telegram-bot not installed. Telegram Bot API features will be disabled.")
 
 
 @dataclass
@@ -76,7 +60,7 @@ class TelegramBotClient:
     """
     Telegram Bot API client for message operations.
 
-    Uses aiogram 3.x for modern async implementation.
+    Uses python-telegram-bot 22.x for modern async implementation.
     Handles:
     - Sending messages (text, files, voice)
     - Receiving webhook updates
@@ -87,14 +71,13 @@ class TelegramBotClient:
     def __init__(self, config: TelegramConfig):
         self.config = config
         self._bot: Optional['Bot'] = None
-        self._dispatcher: Optional['Dispatcher'] = None
         self._initialized = False
         self._rate_limiter: Dict[int, List[datetime]] = {}  # chat_id -> timestamps
 
     async def initialize(self) -> bool:
         """Initialize the bot client"""
-        if not AIOGRAM_AVAILABLE:
-            log.error("aiogram not installed. Cannot initialize Telegram bot.")
+        if not PTB_AVAILABLE:
+            log.error("python-telegram-bot not installed. Cannot initialize Telegram bot.")
             return False
 
         if self._initialized:
@@ -102,7 +85,6 @@ class TelegramBotClient:
 
         try:
             self._bot = Bot(token=self.config.bot_token)
-            self._dispatcher = Dispatcher()
 
             # Verify bot token
             me = await self._bot.get_me()
@@ -118,9 +100,8 @@ class TelegramBotClient:
     async def close(self) -> None:
         """Close the bot client"""
         if self._bot:
-            await self._bot.session.close()
+            await self._bot.shutdown()
             self._bot = None
-            self._dispatcher = None
             self._initialized = False
             log.info("Telegram bot client closed")
 
@@ -128,11 +109,6 @@ class TelegramBotClient:
     def bot(self) -> Optional['Bot']:
         """Get bot instance"""
         return self._bot
-
-    @property
-    def dispatcher(self) -> Optional['Dispatcher']:
-        """Get dispatcher instance"""
-        return self._dispatcher
 
     # =========================================================================
     # Webhook Management
@@ -187,11 +163,11 @@ class TelegramBotClient:
 
         Returns TelegramMessage if it's a message update, None otherwise.
         """
-        if not AIOGRAM_AVAILABLE or not self._initialized:
+        if not PTB_AVAILABLE or not self._initialized:
             return None
 
         try:
-            update = Update.model_validate(update_data)
+            update = Update.de_json(update_data, self._bot)
 
             if update.message:
                 return self._parse_message(update.message)
@@ -206,8 +182,8 @@ class TelegramBotClient:
             log.error(f"Failed to process update: {e}", exc_info=True)
             return None
 
-    def _parse_message(self, msg: 'Message') -> TelegramMessage:
-        """Parse aiogram Message to TelegramMessage"""
+    def _parse_message(self, msg) -> TelegramMessage:
+        """Parse telegram Message to TelegramMessage"""
         result = TelegramMessage(
             message_id=msg.message_id,
             chat_id=msg.chat.id,
@@ -288,11 +264,11 @@ class TelegramBotClient:
             self._record_message(chat_id)
             return SendMessageResult(success=True, message_id=msg.message_id)
 
-        except TelegramRetryAfter as e:
+        except RetryAfter as e:
             log.warning(f"Rate limited by Telegram. Retry after {e.retry_after}s")
             return SendMessageResult(success=False, error=f"Rate limited. Retry after {e.retry_after}s")
 
-        except TelegramAPIError as e:
+        except TelegramError as e:
             log.error(f"Telegram API error: {e}")
             return SendMessageResult(success=False, error=str(e))
 
@@ -318,21 +294,21 @@ class TelegramBotClient:
         try:
             # Determine file type from extension
             file_ext = file_url.lower().split(".")[-1] if "." in file_url else ""
-            input_file = URLInputFile(file_url, filename=file_name)
 
             if file_ext in ("jpg", "jpeg", "png", "gif", "webp"):
                 msg = await self._bot.send_photo(
                     chat_id=chat_id,
-                    photo=input_file,
+                    photo=file_url,
                     caption=caption,
                     message_thread_id=topic_id,
                 )
             else:
                 msg = await self._bot.send_document(
                     chat_id=chat_id,
-                    document=input_file,
+                    document=file_url,
                     caption=caption,
                     message_thread_id=topic_id,
+                    filename=file_name,
                 )
 
             self._record_message(chat_id)
@@ -358,10 +334,9 @@ class TelegramBotClient:
             return SendMessageResult(success=False, error="Rate limit exceeded")
 
         try:
-            input_file = URLInputFile(voice_url)
             msg = await self._bot.send_voice(
                 chat_id=chat_id,
-                voice=input_file,
+                voice=voice_url,
                 duration=duration,
                 caption=caption,
                 message_thread_id=topic_id,
@@ -454,7 +429,7 @@ class TelegramBotClient:
 
         try:
             file = await self._bot.get_file(file_id)
-            return f"https://api.telegram.org/file/bot{self.config.bot_token}/{file.file_path}"
+            return file.file_path
 
         except Exception as e:
             log.error(f"Failed to get file URL: {e}", exc_info=True)
