@@ -20,30 +20,31 @@ try:
     from telethon.sessions import StringSession
     from telethon.tl.functions.channels import (
         CreateChannelRequest,
-        CreateForumTopicRequest,
-        EditForumTopicRequest,
-        DeleteTopicHistoryRequest,
         EditAdminRequest,
         InviteToChannelRequest,
         EditTitleRequest,
-        EditAboutRequest,
         EditPhotoRequest,
-        GetForumTopicsRequest,
-        UpdatePinnedForumTopicRequest,
         EditBannedRequest,
+        ToggleForumRequest,
     )
     from telethon.tl.functions.messages import (
         ExportChatInviteRequest,
         EditChatDefaultBannedRightsRequest,
+        EditChatAboutRequest,
+        CreateForumTopicRequest,
+        EditForumTopicRequest,
+        DeleteTopicHistoryRequest,
+        GetForumTopicsRequest,
+        UpdatePinnedForumTopicRequest,
     )
     from telethon.tl.functions.contacts import ResolveUsernameRequest
     from telethon.tl.types import ChatAdminRights, ChatBannedRights
     TELETHON_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     TELETHON_AVAILABLE = False
     TelegramClient = None
     StringSession = None
-    log.warning("telethon not installed. MTProto features will be disabled.")
+    log.warning(f"telethon not installed or import error: {e}. MTProto features will be disabled.")
 
 
 # Emoji ID mapping for forum topics
@@ -297,7 +298,7 @@ class TelegramMTProtoClient:
 
         try:
             group = await self._client.get_entity(group_id)
-            await self._client(EditAboutRequest(channel=group, about=description))
+            await self._client(EditChatAboutRequest(peer=group, about=description))
             log.info(f"Group {group_id} description updated")
             return True
         except Exception as e:

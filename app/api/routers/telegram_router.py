@@ -33,7 +33,7 @@ from app.api.models.telegram_api_models import (
 
 log = logging.getLogger("wellwon.telegram.webhook")
 
-router = APIRouter(prefix="/api/telegram", tags=["telegram"])
+router = APIRouter(prefix="/telegram", tags=["telegram"])
 
 
 async def get_adapter() -> TelegramAdapter:

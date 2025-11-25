@@ -9,10 +9,9 @@ import uuid
 import logging
 from typing import Annotated, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 
 from app.security.jwt_auth import get_current_user
-from app.api.dependencies.cqrs_deps import get_handler_dependencies
 
 # API Models
 from app.api.models.company_api_models import (
@@ -78,7 +77,25 @@ from app.company.queries import (
 
 log = logging.getLogger("wellwon.api.company")
 
-router = APIRouter(prefix="/api/companies", tags=["companies"])
+router = APIRouter(prefix="/companies", tags=["companies"])
+
+
+# =============================================================================
+# Dependency Injection
+# =============================================================================
+
+async def get_command_bus(request: Request):
+    """Get command bus from application state"""
+    if not hasattr(request.app.state, 'command_bus'):
+        raise RuntimeError("Command bus not configured")
+    return request.app.state.command_bus
+
+
+async def get_query_bus(request: Request):
+    """Get query bus from application state"""
+    if not hasattr(request.app.state, 'query_bus'):
+        raise RuntimeError("Query bus not configured")
+    return request.app.state.query_bus
 
 
 # =============================================================================
@@ -89,7 +106,8 @@ router = APIRouter(prefix="/api/companies", tags=["companies"])
 async def create_company(
     request: CreateCompanyRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Create a new company"""
     try:
@@ -117,7 +135,7 @@ async def create_company(
             tg_support=request.tg_support,
         )
 
-        result_id = await deps["command_bus"].dispatch(command)
+        result_id = await command_bus.dispatch(command)
         log.info(f"Company created: {result_id} by user {current_user['user_id']}")
         return CompanyResponse(id=result_id, message="Company created")
 
@@ -131,7 +149,8 @@ async def create_company(
 @router.get("", response_model=List[CompanySummaryResponse])
 async def get_my_companies(
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
     include_archived: bool = Query(False),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -144,14 +163,15 @@ async def get_my_companies(
         offset=offset,
     )
 
-    results = await deps["query_bus"].query(query)
+    results = await query_bus.query(query)
     return [CompanySummaryResponse(**r.model_dump()) for r in results]
 
 
 @router.get("/search", response_model=List[CompanySummaryResponse])
 async def search_companies(
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
     q: str = Query(..., min_length=1, max_length=100),
     limit: int = Query(20, ge=1, le=50),
 ):
@@ -161,7 +181,7 @@ async def search_companies(
         limit=limit,
     )
 
-    results = await deps["query_bus"].query(query)
+    results = await query_bus.query(query)
     return [CompanySummaryResponse(**r.model_dump()) for r in results]
 
 
@@ -169,11 +189,12 @@ async def search_companies(
 async def get_company_by_vat(
     vat: str,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Get company by VAT (INN)"""
     query = GetCompanyByVatQuery(vat=vat)
-    result = await deps["query_bus"].query(query)
+    result = await query_bus.query(query)
 
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
@@ -185,11 +206,12 @@ async def get_company_by_vat(
 async def get_company(
     company_id: uuid.UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Get company details"""
     query = GetCompanyByIdQuery(company_id=company_id)
-    result = await deps["query_bus"].query(query)
+    result = await query_bus.query(query)
 
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
@@ -202,7 +224,8 @@ async def update_company(
     company_id: uuid.UUID,
     request: UpdateCompanyRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Update company details"""
     try:
@@ -229,7 +252,7 @@ async def update_company(
             tg_support=request.tg_support,
         )
 
-        await deps["command_bus"].dispatch(command)
+        await command_bus.dispatch(command)
         return CompanyResponse(id=company_id, message="Company updated")
 
     except ValueError as e:
@@ -241,7 +264,8 @@ async def archive_company(
     company_id: uuid.UUID,
     request: ArchiveCompanyRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Archive (soft delete) a company"""
     try:
@@ -251,7 +275,7 @@ async def archive_company(
             reason=request.reason,
         )
 
-        await deps["command_bus"].dispatch(command)
+        await command_bus.dispatch(command)
         return CompanyResponse(id=company_id, message="Company archived")
 
     except ValueError as e:
@@ -262,7 +286,8 @@ async def archive_company(
 async def restore_company(
     company_id: uuid.UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Restore an archived company"""
     try:
@@ -271,7 +296,7 @@ async def restore_company(
             restored_by=current_user["user_id"],
         )
 
-        await deps["command_bus"].dispatch(command)
+        await command_bus.dispatch(command)
         return CompanyResponse(id=company_id, message="Company restored")
 
     except ValueError as e:
@@ -282,7 +307,8 @@ async def restore_company(
 async def delete_company(
     company_id: uuid.UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Permanently delete a company (hard delete)"""
     try:
@@ -291,7 +317,7 @@ async def delete_company(
             deleted_by=current_user["user_id"],
         )
 
-        await deps["command_bus"].dispatch(command)
+        await command_bus.dispatch(command)
         return CompanyResponse(id=company_id, message="Company deleted")
 
     except ValueError as e:
@@ -306,7 +332,8 @@ async def delete_company(
 async def get_company_users(
     company_id: uuid.UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
     include_inactive: bool = Query(False),
 ):
     """Get users of a company"""
@@ -315,7 +342,7 @@ async def get_company_users(
         include_inactive=include_inactive,
     )
 
-    results = await deps["query_bus"].query(query)
+    results = await query_bus.query(query)
     return [CompanyUserResponse(**r.model_dump()) for r in results]
 
 
@@ -324,7 +351,8 @@ async def add_user_to_company(
     company_id: uuid.UUID,
     request: AddUserToCompanyRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Add a user to company"""
     try:
@@ -335,7 +363,7 @@ async def add_user_to_company(
             added_by=current_user["user_id"],
         )
 
-        await deps["command_bus"].dispatch(command)
+        await command_bus.dispatch(command)
         return CompanyResponse(id=company_id, message="User added to company")
 
     except ValueError as e:
@@ -347,7 +375,8 @@ async def remove_user_from_company(
     company_id: uuid.UUID,
     user_id: uuid.UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
     reason: Optional[str] = Query(None, max_length=500),
 ):
     """Remove a user from company"""
@@ -359,7 +388,7 @@ async def remove_user_from_company(
             reason=reason,
         )
 
-        await deps["command_bus"].dispatch(command)
+        await command_bus.dispatch(command)
         return CompanyResponse(id=company_id, message="User removed from company")
 
     except ValueError as e:
@@ -372,7 +401,8 @@ async def change_user_company_role(
     user_id: uuid.UUID,
     request: ChangeUserRoleRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Change a user's role in company"""
     try:
@@ -383,7 +413,7 @@ async def change_user_company_role(
             changed_by=current_user["user_id"],
         )
 
-        await deps["command_bus"].dispatch(command)
+        await command_bus.dispatch(command)
         return CompanyResponse(id=company_id, message="User role changed")
 
     except ValueError as e:
@@ -395,7 +425,8 @@ async def get_user_company_relationship(
     company_id: uuid.UUID,
     user_id: uuid.UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Get user's relationship with company"""
     query = GetUserCompanyRelationshipQuery(
@@ -403,7 +434,7 @@ async def get_user_company_relationship(
         user_id=user_id,
     )
 
-    result = await deps["query_bus"].query(query)
+    result = await query_bus.query(query)
     if not result or not result.is_member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not in company")
 
@@ -425,11 +456,12 @@ async def get_user_company_relationship(
 async def get_company_telegram_supergroups(
     company_id: uuid.UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Get Telegram supergroups for company"""
     query = GetCompanyTelegramSupergroupsQuery(company_id=company_id)
-    results = await deps["query_bus"].query(query)
+    results = await query_bus.query(query)
     return [TelegramSupergroupResponse(**r.model_dump()) for r in results]
 
 
@@ -438,7 +470,8 @@ async def create_telegram_supergroup(
     company_id: uuid.UUID,
     request: CreateTelegramSupergroupRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Create a Telegram supergroup for company"""
     try:
@@ -470,7 +503,7 @@ async def create_telegram_supergroup(
             created_by=current_user["user_id"],
         )
 
-        await deps["command_bus"].dispatch(command)
+        await command_bus.dispatch(command)
 
         return CreateSupergroupResponse(
             success=True,
@@ -491,7 +524,8 @@ async def link_telegram_supergroup(
     company_id: uuid.UUID,
     request: LinkTelegramSupergroupRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Link an existing Telegram supergroup to company"""
     try:
@@ -501,7 +535,7 @@ async def link_telegram_supergroup(
             linked_by=current_user["user_id"],
         )
 
-        await deps["command_bus"].dispatch(command)
+        await command_bus.dispatch(command)
         return CompanyResponse(id=company_id, message="Telegram supergroup linked")
 
     except ValueError as e:
@@ -513,7 +547,8 @@ async def unlink_telegram_supergroup(
     company_id: uuid.UUID,
     telegram_group_id: int,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Unlink a Telegram supergroup from company"""
     try:
@@ -523,7 +558,7 @@ async def unlink_telegram_supergroup(
             unlinked_by=current_user["user_id"],
         )
 
-        await deps["command_bus"].dispatch(command)
+        await command_bus.dispatch(command)
         return CompanyResponse(id=company_id, message="Telegram supergroup unlinked")
 
     except ValueError as e:
@@ -536,7 +571,8 @@ async def update_telegram_supergroup(
     telegram_group_id: int,
     request: UpdateTelegramSupergroupRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Update Telegram supergroup info"""
     try:
@@ -547,7 +583,7 @@ async def update_telegram_supergroup(
             description=request.description,
         )
 
-        await deps["command_bus"].dispatch(command)
+        await command_bus.dispatch(command)
         return CompanyResponse(id=company_id, message="Telegram supergroup updated")
 
     except ValueError as e:
@@ -562,11 +598,12 @@ async def update_telegram_supergroup(
 async def get_company_balance(
     company_id: uuid.UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Get company balance"""
     query = GetCompanyBalanceQuery(company_id=company_id)
-    result = await deps["query_bus"].query(query)
+    result = await query_bus.query(query)
 
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
@@ -579,7 +616,8 @@ async def update_company_balance(
     company_id: uuid.UUID,
     request: UpdateBalanceRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
 ):
     """Update company balance"""
     try:
@@ -591,11 +629,11 @@ async def update_company_balance(
             updated_by=current_user["user_id"],
         )
 
-        await deps["command_bus"].dispatch(command)
+        await command_bus.dispatch(command)
 
         # Return updated balance
         query = GetCompanyBalanceQuery(company_id=company_id)
-        result = await deps["query_bus"].query(query)
+        result = await query_bus.query(query)
         return BalanceResponse(**result.model_dump())
 
     except ValueError as e:
@@ -606,14 +644,15 @@ async def update_company_balance(
 async def get_company_balance_history(
     company_id: uuid.UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    deps: Annotated[dict, Depends(get_handler_dependencies)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
     """Get company balance transaction history"""
     # Get current balance
     balance_query = GetCompanyBalanceQuery(company_id=company_id)
-    balance_result = await deps["query_bus"].query(balance_query)
+    balance_result = await query_bus.query(balance_query)
 
     if not balance_result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
@@ -624,7 +663,7 @@ async def get_company_balance_history(
         limit=limit,
         offset=offset,
     )
-    transactions = await deps["query_bus"].query(history_query)
+    transactions = await query_bus.query(history_query)
 
     return BalanceHistoryResponse(
         company_id=company_id,
