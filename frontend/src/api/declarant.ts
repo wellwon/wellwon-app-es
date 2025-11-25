@@ -5,8 +5,7 @@
 // Currently uses MOCK data for UI development
 // Replace with real API calls when backend is ready
 
-import { API } from './core';
-import {  CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { CheckCircle, AlertCircle } from 'lucide-react';
 import type {
   DeclarantBatch,
   DeclarantStats,
@@ -106,9 +105,7 @@ export const MOCK_BATCHES: MockBatch[] = [
  * TODO: Replace with real API call when backend ready
  */
 export async function getDeclarantBatches(): Promise<DeclarantBatch[]> {
-  // Simulated API delay
-  await new Promise((resolve) => setTimeout(resolve, 500));
-
+  // MOCK: No delay - instant response
   // Convert MOCK_BATCHES to proper DeclarantBatch format
   return MOCK_BATCHES.map((batch) => ({
     id: batch.id,
@@ -117,14 +114,10 @@ export async function getDeclarantBatches(): Promise<DeclarantBatch[]> {
     documents_total: parseInt(batch.docs.split('/')[1]),
     documents_processed: parseInt(batch.docs.split('/')[0]),
     extracts_count: batch.extracts,
-    created_at: new Date(batch.date).toISOString(),
-    updated_at: new Date(batch.date).toISOString(),
+    created_at: batch.date, // Keep original formatted date for mock
+    updated_at: batch.date,
     error_message: batch.status === 'error' ? 'Ошибка обработки документов' : undefined,
   }));
-
-  // Real API call (commented out):
-  // const { data } = await API.get<DeclarantBatch[]>('/api/declarant/batches');
-  // return data;
 }
 
 /**
@@ -132,14 +125,8 @@ export async function getDeclarantBatches(): Promise<DeclarantBatch[]> {
  * TODO: Replace with real API call when backend ready
  */
 export async function getDeclarantStats(): Promise<DeclarantStats> {
-  // Simulated API delay
-  await new Promise((resolve) => setTimeout(resolve, 300));
-
+  // MOCK: No delay - instant response
   return MOCK_STATS;
-
-  // Real API call (commented out):
-  // const { data } = await API.get<DeclarantStats>('/api/declarant/stats');
-  // return data;
 }
 
 /**
@@ -168,14 +155,6 @@ export async function createDeclarantBatch(
     batch: newBatch,
     message: 'Пакет создан успешно',
   };
-
-  // Real API call (commented out):
-  // const formData = new FormData();
-  // batchData.documents.forEach((file) => formData.append('documents', file));
-  // if (batchData.template_id) formData.append('template_id', batchData.template_id);
-  // if (batchData.priority) formData.append('priority', batchData.priority);
-  // const { data } = await API.post<CreateBatchResponse>('/api/declarant/batches', formData);
-  // return data;
 }
 
 /**
@@ -186,14 +165,12 @@ export async function deleteDeclarantBatch(batchId: string): Promise<DeleteBatch
   // Simulated API delay
   await new Promise((resolve) => setTimeout(resolve, 500));
 
+  console.log('Deleting batch:', batchId);
+
   return {
     success: true,
     message: 'Пакет удален успешно',
   };
-
-  // Real API call (commented out):
-  // const { data } = await API.delete<DeleteBatchResponse>(`/api/declarant/batches/${batchId}`);
-  // return data;
 }
 
 /**

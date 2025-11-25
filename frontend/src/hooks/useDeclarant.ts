@@ -14,7 +14,7 @@ import type { DeclarantBatch, DeclarantStats } from '@/types/declarant';
  *
  * Returns:
  * - Server state: batches, stats, loading states
- * - UI state: filters, selections, preferences
+ * - UI state: filters, selections, preferenc
  * - Actions: toggle filters, select batches, etc.
  */
 export function useDeclarant() {
