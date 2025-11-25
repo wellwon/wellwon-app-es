@@ -5,8 +5,14 @@
 // Включает собственный sidebar, header и переключатель темы
 
 import React, { useState } from 'react';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   FileText,
   CheckCircle,
@@ -16,6 +22,7 @@ import {
   Trash2,
   Download,
   Eye,
+  Copy,
   Activity,
   BarChart3,
   Truck,
@@ -28,7 +35,8 @@ import {
   ArrowLeft,
   FileJson,
   Sun,
-  Moon
+  Moon,
+  ScanText
 } from 'lucide-react';
 
 // =============================================================================
@@ -109,6 +117,61 @@ const mockBatches = [
     iconColor: 'text-accent-green',
     statusText: 'Завершено'
   },
+  {
+    id: '7',
+    number: 'FTS-00098',
+    status: 'processing',
+    docs: '2/5',
+    extracts: 2,
+    date: '08 нояб. 2025, 15:30',
+    icon: Clock,
+    iconColor: 'text-amber-500',
+    statusText: 'В обработке'
+  },
+  {
+    id: '8',
+    number: 'FTS-00097',
+    status: 'completed',
+    docs: '6/6',
+    extracts: 6,
+    date: '07 нояб. 2025, 14:22',
+    icon: CheckCircle,
+    iconColor: 'text-accent-green',
+    statusText: 'Завершено'
+  },
+  {
+    id: '9',
+    number: 'FTS-00096',
+    status: 'error',
+    docs: '1/4',
+    extracts: 1,
+    date: '06 нояб. 2025, 10:45',
+    icon: AlertCircle,
+    iconColor: 'text-accent-red',
+    statusText: 'Ошибка'
+  },
+  {
+    id: '10',
+    number: 'FTS-00095',
+    status: 'completed',
+    docs: '2/2',
+    extracts: 2,
+    date: '05 нояб. 2025, 16:18',
+    icon: CheckCircle,
+    iconColor: 'text-accent-green',
+    statusText: 'Завершено'
+  },
+  {
+    id: '11',
+    number: 'FTS-00094',
+    status: 'processing',
+    docs: '0/3',
+    extracts: 0,
+    date: '04 нояб. 2025, 09:05',
+    icon: Clock,
+    iconColor: 'text-amber-500',
+    statusText: 'В обработке'
+  },
 ];
 
 // =============================================================================
@@ -141,8 +204,8 @@ const SidebarMock = ({
   };
 
   const sections = [
-    { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
-    { id: 'logistics', label: 'Логистика', icon: Truck },
+    { id: 'dashboard', label: 'Декларации AI', icon: ScanText },
+    { id: 'logistics', label: 'Документы', icon: FileText },
     { id: 'finance', label: 'Финансы', icon: DollarSign },
     { id: 'analytics', label: 'Аналитика', icon: LineChart },
     { id: 'settings', label: 'Настройки', icon: Settings },
@@ -168,7 +231,7 @@ const SidebarMock = ({
 
         <button
           onClick={toggleSidebar}
-          className={`h-8 w-8 p-0 rounded-lg flex items-center justify-center ${theme.button.default}`}
+          className="h-8 w-8 rounded-lg flex items-center justify-center bg-white/5 border border-white/10 hover:border-white/20 hover:scale-105 transition-all text-gray-400 hover:text-white hover:bg-white/10"
         >
           {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
         </button>
@@ -314,8 +377,8 @@ const HeaderBarMock = ({
   activeSection: string;
 }) => {
   const sectionLabels: Record<string, string> = {
-    dashboard: 'Dashboard',
-    logistics: 'Логистика',
+    dashboard: 'Декларации AI',
+    logistics: 'Документы',
     finance: 'Финансы',
     analytics: 'Аналитика',
     settings: 'Настройки',
@@ -347,7 +410,14 @@ const HeaderBarMock = ({
   return (
     <div className={`h-16 border-b flex items-center justify-between ${theme.header}`}>
       <div className="flex items-center px-6">
-        <button className={`mr-4 h-8 px-3 flex items-center gap-2 rounded-lg ${theme.button.default}`}>
+        <button
+          className={`mr-4 h-8 px-3 flex items-center gap-2 rounded-xl border ${
+            isDark
+              ? 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10 hover:text-white hover:border-white/20'
+              : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200 hover:text-gray-900'
+          }`}
+          aria-label="Назад"
+        >
           <ArrowLeft size={16} />
           <span className="text-sm">Назад</span>
         </button>
@@ -387,16 +457,51 @@ const HeaderBarMock = ({
 // =============================================================================
 
 const DeclarantContent: React.FC = () => {
-  const [isDark, setIsDark] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [isDark, setIsDark] = useState(() => {
+    const saved = sessionStorage.getItem('declarant-theme-dark');
+    return saved ? JSON.parse(saved) : false;
+  });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    const saved = sessionStorage.getItem('declarant-sidebar-collapsed');
+    return saved ? JSON.parse(saved) : false;
+  });
   const [activeSection, setActiveSection] = useState('dashboard');
+  const [rowsPerPage, setRowsPerPage] = useState(() => {
+    const saved = sessionStorage.getItem('declarant-rows-per-page');
+    return saved ? Number(saved) : 10;
+  });
+  const [currentPage, setCurrentPage] = useState(1);
 
   const toggleTheme = () => {
-    setIsDark(!isDark);
+    const newValue = !isDark;
+    setIsDark(newValue);
+    sessionStorage.setItem('declarant-theme-dark', JSON.stringify(newValue));
   };
 
   const toggleSidebar = () => {
-    setSidebarCollapsed(!sidebarCollapsed);
+    const newValue = !sidebarCollapsed;
+    setSidebarCollapsed(newValue);
+    sessionStorage.setItem('declarant-sidebar-collapsed', JSON.stringify(newValue));
+  };
+
+  // Пагинация
+  const totalItems = mockBatches.length;
+  const totalPages = Math.ceil(totalItems / rowsPerPage);
+  const startIndex = (currentPage - 1) * rowsPerPage;
+  const endIndex = Math.min(startIndex + rowsPerPage, totalItems);
+  const paginatedBatches = mockBatches.slice(startIndex, endIndex);
+
+  const handleRowsPerPageChange = (value: string) => {
+    const newValue = Number(value);
+    setRowsPerPage(newValue);
+    setCurrentPage(1);
+    sessionStorage.setItem('declarant-rows-per-page', value);
+  };
+
+  const goToPage = (page: number) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page);
+    }
   };
 
   const theme = isDark ? {
@@ -415,7 +520,7 @@ const DeclarantContent: React.FC = () => {
     },
     table: {
       header: 'border-white/10',
-      row: 'divide-white/10 hover:bg-[#232328]/30',
+      row: 'divide-white/10 hover:bg-white/5',
       border: 'border-white/10'
     }
   } : {
@@ -535,26 +640,11 @@ const DeclarantContent: React.FC = () => {
 
           {/* Таблица деклараций */}
           <div className={`rounded-2xl p-6 border ${theme.card.background} ${theme.card.border}`}>
-            <div className="space-y-4">
-              <div className={`flex items-center justify-between pb-4 border-b ${theme.table.border}`}>
-                <h3 className={`text-lg font-semibold ${theme.text.primary}`}>
-                  Пакеты деклараций
-                </h3>
-                <div className="flex items-center gap-2">
-                  <span className={`text-sm ${theme.text.secondary}`}>
-                    Всего: {mockBatches.length}
-                  </span>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className={`border-b ${theme.table.border}`}>
-                      <th className="text-left py-3 px-2 w-12">
-                        <Checkbox className={`${isDark ? 'border-white/20' : 'border-gray-300'} data-[state=checked]:bg-accent-red data-[state=checked]:border-accent-red`} />
-                      </th>
-                      <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className={`border-b ${theme.table.border}`}>
+                    <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
                         Номер пакета
                       </th>
                       <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
@@ -569,25 +659,25 @@ const DeclarantContent: React.FC = () => {
                       <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
                         Создан
                       </th>
+                      <th className={`text-right py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
+                        Действия
+                      </th>
                     </tr>
                   </thead>
                   <tbody className={`divide-y ${theme.table.row.split(' ')[0]}`}>
-                    {mockBatches.map((batch) => {
+                    {paginatedBatches.map((batch) => {
                       const Icon = batch.icon;
                       return (
                         <tr
                           key={batch.id}
                           className={`cursor-pointer ${theme.table.row.split(' ').slice(1).join(' ')}`}
                         >
-                          <td className="py-4 px-2">
-                            <Checkbox className={`${isDark ? 'border-white/20' : 'border-gray-300'} data-[state=checked]:bg-accent-red data-[state=checked]:border-accent-red`} />
-                          </td>
-                          <td className="py-4 px-4">
-                            <span className={`font-mono font-medium ${theme.text.primary}`}>
+                          <td className="py-3 px-4">
+                            <span className={`font-mono text-sm ${theme.text.primary}`}>
                               {batch.number}
                             </span>
                           </td>
-                          <td className="py-4 px-4">
+                          <td className="py-3 px-4">
                             <div className="flex items-center gap-2">
                               <Icon className={`w-4 h-4 ${batch.iconColor}`} />
                               <span className={`text-sm ${batch.iconColor}`}>
@@ -595,43 +685,142 @@ const DeclarantContent: React.FC = () => {
                               </span>
                             </div>
                           </td>
-                          <td className="py-4 px-4">
-                            <span className={`font-mono text-sm ${theme.text.primary}`}>
+                          <td className="py-3 px-4">
+                            <span className={`text-sm ${theme.text.primary}`}>
                               {batch.docs}
                             </span>
                           </td>
-                          <td className="py-4 px-4">
-                            <span className={`font-mono text-sm ${theme.text.primary}`}>
+                          <td className="py-3 px-4">
+                            <span className={`text-sm ${theme.text.primary}`}>
                               {batch.extracts}
                             </span>
                           </td>
-                          <td className="py-4 px-4">
+                          <td className="py-3 px-4">
                             <span className={`text-sm ${theme.text.secondary}`}>
                               {batch.date}
                             </span>
+                          </td>
+                          <td className="py-3 pl-4 pr-0 text-right">
+                            <div className="flex items-center gap-2 justify-end">
+                              {/* Кнопка копирования - glass стиль */}
+                              <button
+                                className={`h-8 px-3 rounded-lg flex items-center justify-center border ${
+                                  isDark
+                                    ? 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10 hover:text-white hover:border-white/20'
+                                    : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200 hover:text-gray-900'
+                                }`}
+                                aria-label="Копировать"
+                              >
+                                <Copy className="h-4 w-4" />
+                              </button>
+
+                              {/* Кнопка удаления - accent-red стиль */}
+                              <button
+                                className="h-8 px-3 rounded-lg flex items-center justify-center bg-accent-red/10 text-accent-red border border-accent-red/20 hover:bg-accent-red/20 hover:border-accent-red/25"
+                                aria-label="Удалить"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
+            </div>
+
+            <div className={`flex items-center justify-between pt-4 border-t ${theme.table.border}`}>
+              {/* Выбор количества строк */}
+              <div className="flex items-center gap-2">
+                <Select value={String(rowsPerPage)} onValueChange={handleRowsPerPageChange}>
+                  <SelectTrigger className={`w-[70px] h-8 focus:outline-none focus:ring-0 focus:ring-offset-0 focus:ring-transparent ${
+                    isDark
+                      ? 'bg-[#232328] border-white/10 text-white focus:border-white/10 data-[state=open]:border-white/10'
+                      : 'bg-white border-gray-200 text-gray-900 focus:border-gray-200 data-[state=open]:border-gray-200'
+                  }`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className={isDark
+                    ? 'bg-[#232328] border-white/10'
+                    : 'bg-white border-gray-200'
+                  }>
+                    <SelectItem value="10" className={isDark
+                      ? 'focus:bg-white/10 focus:text-white text-white'
+                      : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'
+                    }>10</SelectItem>
+                    <SelectItem value="20" className={isDark
+                      ? 'focus:bg-white/10 focus:text-white text-white'
+                      : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'
+                    }>20</SelectItem>
+                    <SelectItem value="50" className={isDark
+                      ? 'focus:bg-white/10 focus:text-white text-white'
+                      : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'
+                    }>50</SelectItem>
+                    <SelectItem value="100" className={isDark
+                      ? 'focus:bg-white/10 focus:text-white text-white'
+                      : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'
+                    }>100</SelectItem>
+                  </SelectContent>
+                </Select>
+                <span className={`text-sm ${theme.text.secondary}`}>строк на странице</span>
               </div>
 
-              <div className={`flex items-center justify-between pt-4 border-t ${theme.table.border}`}>
-                <div className={`text-sm ${theme.text.secondary}`}>
-                  Показано {mockBatches.length} из {mockBatches.length} записей
-                </div>
-                <div className="flex items-center gap-2">
-                  <button className={`px-3 py-1 ${isDark ? 'text-gray-500 bg-white/5' : 'text-gray-400 bg-gray-100'} rounded-lg text-sm cursor-not-allowed`} disabled>
-                    Предыдущая
+              {/* Информация о записях */}
+              <div className={`text-sm ${theme.text.secondary}`}>
+                Показано {startIndex + 1}-{endIndex} из {totalItems} записей
+              </div>
+
+              {/* Кнопки навигации */}
+              <div className="flex items-center gap-1">
+                <button
+                  disabled={currentPage === 1}
+                  onClick={() => goToPage(currentPage - 1)}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                    currentPage === 1
+                      ? isDark
+                        ? 'text-gray-600 bg-white/5 cursor-not-allowed'
+                        : 'text-gray-400 bg-gray-100 cursor-not-allowed'
+                      : isDark
+                        ? 'text-gray-300 bg-white/5 hover:bg-white/10 cursor-pointer'
+                        : 'text-gray-600 bg-gray-100 hover:bg-gray-200 cursor-pointer'
+                  }`}
+                >
+                  <ChevronLeft size={16} />
+                </button>
+
+                {/* Номера страниц */}
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                  <button
+                    key={page}
+                    onClick={() => goToPage(page)}
+                    className={`w-8 h-8 rounded-lg text-sm font-medium ${
+                      currentPage === page
+                        ? 'bg-accent-red text-white'
+                        : isDark
+                          ? 'text-gray-300 bg-white/5 hover:bg-white/10'
+                          : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+                    }`}
+                  >
+                    {page}
                   </button>
-                  <div className={`px-3 py-1 rounded-lg bg-accent-red text-white text-sm font-medium ${isDark ? '' : 'shadow-sm'}`}>
-                    1
-                  </div>
-                  <button className={`px-3 py-1 ${isDark ? 'text-gray-500 bg-white/5' : 'text-gray-400 bg-gray-100'} rounded-lg text-sm cursor-not-allowed`} disabled>
-                    Следующая
-                  </button>
-                </div>
+                ))}
+
+                <button
+                  disabled={currentPage === totalPages}
+                  onClick={() => goToPage(currentPage + 1)}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                    currentPage === totalPages
+                      ? isDark
+                        ? 'text-gray-600 bg-white/5 cursor-not-allowed'
+                        : 'text-gray-400 bg-gray-100 cursor-not-allowed'
+                      : isDark
+                        ? 'text-gray-300 bg-white/5 hover:bg-white/10 cursor-pointer'
+                        : 'text-gray-600 bg-gray-100 hover:bg-gray-200 cursor-pointer'
+                  }`}
+                >
+                  <ChevronRight size={16} />
+                </button>
               </div>
             </div>
           </div>

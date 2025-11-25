@@ -8,7 +8,7 @@
 
 ## Table of Contents
 
-1. [Color Palette](#1-color-palette)
+1. [Color Pelette](#1-color-palette)
 2. [Typography System](#2-typography-system)
 3. [Spacing System](#3-spacing-system)
 4. [Border Radius](#4-border-radius)

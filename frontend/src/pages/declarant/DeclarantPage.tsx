@@ -17,8 +17,8 @@ import {
   LineChart,
   Settings,
   Users,
-  ChevronLeft,
-  ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
   ArrowLeft,
   FileJson,
   Sun,
@@ -168,7 +168,7 @@ const SidebarMock = memo(({
           onClick={toggleSidebar}
           className={`h-8 w-8 p-0 rounded-lg transition-colors flex items-center justify-center ${theme.button.default}`}
         >
-          {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
         </button>
       </div>
 
