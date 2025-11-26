@@ -7,10 +7,11 @@ import { GlassCard } from '@/components/design-system/GlassCard';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { TelegramIcon } from '@/components/ui/TelegramIcon';
-import { Crown, Edit3, Check, X, AlertCircle, Briefcase } from 'lucide-react';
+import { Crown, Edit3, Check, X, AlertCircle, Briefcase, Users } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { logger } from '@/utils/logger';
 import { avatarCache } from '@/utils/avatarCache';
+import { usePlatform } from '@/contexts/PlatformContext';
 
 interface ChatParticipantsSectionProps {
   activeChat: any;
@@ -37,6 +38,7 @@ interface Manager {
 
 export const ChatParticipantsSection: React.FC<ChatParticipantsSectionProps> = ({ activeChat }) => {
   const { toast } = useToast();
+  const { isLightTheme } = usePlatform();
   const [telegramParticipants, setTelegramParticipants] = useState<TelegramParticipant[]>([]);
   const [managers, setManagers] = useState<Manager[]>([]);
   const [loading, setLoading] = useState(false);
@@ -44,6 +46,18 @@ export const ChatParticipantsSection: React.FC<ChatParticipantsSectionProps> = (
   const [editingManagerId, setEditingManagerId] = useState<string | null>(null);
   const [editingRoleValue, setEditingRoleValue] = useState<string>('');
   const [managersAvatarsLoaded, setManagersAvatarsLoaded] = useState<Record<string, boolean>>({});
+
+  const theme = isLightTheme ? {
+    text: {
+      primary: 'text-gray-900',
+      secondary: 'text-gray-500'
+    }
+  } : {
+    text: {
+      primary: 'text-white',
+      secondary: 'text-gray-400'
+    }
+  };
 
   // Preload manager avatars
   useEffect(() => {
@@ -269,9 +283,13 @@ export const ChatParticipantsSection: React.FC<ChatParticipantsSectionProps> = (
 
   if (!activeChat || !activeChat.telegram_supergroup_id) {
     return (
-      <GlassCard variant="default" padding="lg" className="text-center" hover={false}>
-        <div className="text-white/60">Выберите чат для просмотра участников</div>
-      </GlassCard>
+      <div className="flex flex-col items-center justify-center h-full text-center py-16">
+        <Users size={48} className={`mb-4 ${theme.text.secondary}`} />
+        <h3 className={`font-medium mb-2 ${theme.text.primary}`}>Пользователи</h3>
+        <p className={`text-sm max-w-xs ${theme.text.secondary}`}>
+          Выберите чат для просмотра участников
+        </p>
+      </div>
     );
   }
 

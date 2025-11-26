@@ -6,19 +6,22 @@ import DeveloperPanel from '../developer/DeveloperPanel';
 
 
 const PlatformLayout = () => {
-  const { activeSection, userTheme } = usePlatform();
+  const { activeSection, userTheme, isLightTheme } = usePlatform();
 
-  // Обычный фон без градиентов
+  // Light theme support (like Declarant page)
+  // Sidebar stays dark (#232328), only content area changes
+  const contentBgClass = isLightTheme ? 'bg-[#f4f4f4]' : 'bg-dark-gray';
 
   return (
-    <div className={`h-screen bg-dark-gray flex overflow-hidden ${userTheme}`}>
+    <div className={`h-screen flex overflow-hidden ${userTheme}`}>
+      {/* Sidebar - always dark (#232328) */}
       <PlatformSidebar />
-      
-      {/* Основная область контента */}
-      <div className="flex-1 flex flex-col min-w-0 relative bg-dark-gray">
+
+      {/* Основная область контента - supports light/dark theme */}
+      <div className={`flex-1 flex flex-col min-w-0 relative ${contentBgClass}`}>
         <SafeContentRenderer sectionId={activeSection} />
       </div>
-      
+
       {/* Floating Developer Panel */}
       <DeveloperPanel />
     </div>

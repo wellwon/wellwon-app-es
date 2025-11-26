@@ -32,12 +32,22 @@ import {
   Users,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   ArrowLeft,
   FileJson,
   Sun,
   Moon,
-  ScanText
+  ScanText,
+  Search,
+  SlidersHorizontal,
+  X
 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 
 // =============================================================================
 // Mock Data
@@ -471,6 +481,21 @@ const DeclarantContent: React.FC = () => {
     return saved ? Number(saved) : 10;
   });
   const [currentPage, setCurrentPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
+
+  // Новые фильтры
+  const [mainDocumentFilter, setMainDocumentFilter] = useState('all');
+  const [procedureCodeFilter, setProcedureCodeFilter] = useState('all');
+  const [featureFilter, setFeatureFilter] = useState('all');
+  const [recipientFilter, setRecipientFilter] = useState('all');
+  const [senderFilter, setSenderFilter] = useState('all');
+  const [registrationDateFilter, setRegistrationDateFilter] = useState('all');
+  const [documentTypeFilter, setDocumentTypeFilter] = useState('all');
+  const [documentFilter, setDocumentFilter] = useState('all');
+  const [documentDateFilter, setDocumentDateFilter] = useState('all');
 
   const toggleTheme = () => {
     const newValue = !isDark;
@@ -638,6 +663,272 @@ const DeclarantContent: React.FC = () => {
             </div>
           </div>
 
+          {/* Секция фильтров */}
+          <div className={`rounded-2xl p-6 border ${theme.card.background} ${theme.card.border}`}>
+            <div>
+              <div className="flex items-center gap-3">
+                {/* Поиск */}
+                <div className="relative flex-1">
+                  <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${theme.text.secondary}`} />
+                  <Input
+                    placeholder="Поиск декларации..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className={`pl-10 h-10 rounded-xl transition-none ${
+                      isDark
+                        ? 'bg-[#1a1a1e] border-white/10 text-white placeholder:text-gray-500'
+                        : 'bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400'
+                    }`}
+                  />
+                </div>
+
+                {/* Кнопка фильтров */}
+                <button
+                  onClick={() => setFiltersOpen(!filtersOpen)}
+                  className={`flex items-center gap-2 px-4 h-10 rounded-xl border ${
+                    isDark
+                      ? 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border-white/10'
+                      : 'bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-900 border-gray-300'
+                  }`}
+                >
+                  <SlidersHorizontal size={16} />
+                  <span className="font-medium">Фильтры</span>
+                  <ChevronDown size={16} className={`transition-transform ${filtersOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {/* Кнопка сброса фильтров - показывается только при активных фильтрах */}
+                {(searchQuery !== '' ||
+                  mainDocumentFilter !== 'all' ||
+                  procedureCodeFilter !== 'all' ||
+                  featureFilter !== 'all' ||
+                  recipientFilter !== 'all' ||
+                  senderFilter !== 'all' ||
+                  registrationDateFilter !== 'all' ||
+                  documentTypeFilter !== 'all' ||
+                  documentFilter !== 'all' ||
+                  documentDateFilter !== 'all') && (
+                  <button
+                    onClick={() => {
+                      setMainDocumentFilter('all');
+                      setProcedureCodeFilter('all');
+                      setFeatureFilter('all');
+                      setRecipientFilter('all');
+                      setSenderFilter('all');
+                      setRegistrationDateFilter('all');
+                      setDocumentTypeFilter('all');
+                      setDocumentFilter('all');
+                      setDocumentDateFilter('all');
+                      setSearchQuery('');
+                    }}
+                    className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent-red/10 text-accent-red border border-accent-red/20 hover:bg-accent-red/20 hover:border-accent-red/30"
+                    title="Сбросить фильтры"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+
+              {/* Раскрывающиеся фильтры */}
+              <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
+                <CollapsibleContent className="pt-4">
+                  <div className="space-y-4">
+                    {/* Первый ряд: Основной документ, Код процедуры, Особенность */}
+                    <div className="grid grid-cols-3 gap-4">
+                      {/* Основной документ */}
+                      <div className="space-y-1.5">
+                        <label className={`text-sm ${theme.text.primary}`}>Основной документ</label>
+                        <Select value={mainDocumentFilter} onValueChange={setMainDocumentFilter}>
+                          <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
+                            isDark
+                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              : 'bg-gray-50 border-gray-300 text-gray-900'
+                          }`}>
+                            <SelectValue placeholder="Все" />
+                          </SelectTrigger>
+                          <SelectContent className={isDark ? 'bg-[#232328] border-white/10' : 'bg-white border-gray-200'}>
+                            <SelectItem value="all" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Все</SelectItem>
+                            <SelectItem value="dt" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>ДТ</SelectItem>
+                            <SelectItem value="ets" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>ЭТС</SelectItem>
+                            <SelectItem value="td" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>ТД</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Код процедуры */}
+                      <div className="space-y-1.5">
+                        <label className={`text-sm ${theme.text.primary}`}>Код процедуры</label>
+                        <Select value={procedureCodeFilter} onValueChange={setProcedureCodeFilter}>
+                          <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
+                            isDark
+                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              : 'bg-gray-50 border-gray-300 text-gray-900'
+                          }`}>
+                            <SelectValue placeholder="Все" />
+                          </SelectTrigger>
+                          <SelectContent className={isDark ? 'bg-[#232328] border-white/10' : 'bg-white border-gray-200'}>
+                            <SelectItem value="all" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Все</SelectItem>
+                            <SelectItem value="10" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>10 - Выпуск для внутреннего потребления</SelectItem>
+                            <SelectItem value="40" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>40 - Экспорт</SelectItem>
+                            <SelectItem value="31" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>31 - Реэкспорт</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Особенность */}
+                      <div className="space-y-1.5">
+                        <label className={`text-sm ${theme.text.primary}`}>Особенность</label>
+                        <Select value={featureFilter} onValueChange={setFeatureFilter}>
+                          <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
+                            isDark
+                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              : 'bg-gray-50 border-gray-300 text-gray-900'
+                          }`}>
+                            <SelectValue placeholder="Все" />
+                          </SelectTrigger>
+                          <SelectContent className={isDark ? 'bg-[#232328] border-white/10' : 'bg-white border-gray-200'}>
+                            <SelectItem value="all" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Все</SelectItem>
+                            <SelectItem value="standard" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Стандартная</SelectItem>
+                            <SelectItem value="urgent" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Срочная</SelectItem>
+                            <SelectItem value="special" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Особая</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {/* Второй ряд: Получатель, Отправитель, Дата регистрации */}
+                    <div className="grid grid-cols-3 gap-4">
+                      {/* Получатель */}
+                      <div className="space-y-1.5">
+                        <label className={`text-sm ${theme.text.primary}`}>Получатель</label>
+                        <Select value={recipientFilter} onValueChange={setRecipientFilter}>
+                          <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
+                            isDark
+                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              : 'bg-gray-50 border-gray-300 text-gray-900'
+                          }`}>
+                            <SelectValue placeholder="Все" />
+                          </SelectTrigger>
+                          <SelectContent className={isDark ? 'bg-[#232328] border-white/10' : 'bg-white border-gray-200'}>
+                            <SelectItem value="all" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Все</SelectItem>
+                            <SelectItem value="company1" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>ООО "Компания 1"</SelectItem>
+                            <SelectItem value="company2" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>ООО "Компания 2"</SelectItem>
+                            <SelectItem value="company3" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>АО "Компания 3"</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Отправитель */}
+                      <div className="space-y-1.5">
+                        <label className={`text-sm ${theme.text.primary}`}>Отправитель</label>
+                        <Select value={senderFilter} onValueChange={setSenderFilter}>
+                          <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
+                            isDark
+                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              : 'bg-gray-50 border-gray-300 text-gray-900'
+                          }`}>
+                            <SelectValue placeholder="Все" />
+                          </SelectTrigger>
+                          <SelectContent className={isDark ? 'bg-[#232328] border-white/10' : 'bg-white border-gray-200'}>
+                            <SelectItem value="all" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Все</SelectItem>
+                            <SelectItem value="sender1" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>China Export Ltd.</SelectItem>
+                            <SelectItem value="sender2" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Germany Trade GmbH</SelectItem>
+                            <SelectItem value="sender3" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>USA Supplies Inc.</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Дата регистрации */}
+                      <div className="space-y-1.5">
+                        <label className={`text-sm ${theme.text.primary}`}>Дата регистрации</label>
+                        <Select value={registrationDateFilter} onValueChange={setRegistrationDateFilter}>
+                          <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
+                            isDark
+                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              : 'bg-gray-50 border-gray-300 text-gray-900'
+                          }`}>
+                            <SelectValue placeholder="За все время" />
+                          </SelectTrigger>
+                          <SelectContent className={isDark ? 'bg-[#232328] border-white/10' : 'bg-white border-gray-200'}>
+                            <SelectItem value="all" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>За все время</SelectItem>
+                            <SelectItem value="today" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Сегодня</SelectItem>
+                            <SelectItem value="week" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>За неделю</SelectItem>
+                            <SelectItem value="month" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>За месяц</SelectItem>
+                            <SelectItem value="quarter" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>За квартал</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {/* Третий ряд: Вид документа, Документ, Дата документа */}
+                    <div className="grid grid-cols-3 gap-4">
+                      {/* Вид документа */}
+                      <div className="space-y-1.5">
+                        <label className={`text-sm ${theme.text.primary}`}>Вид документа</label>
+                        <Select value={documentTypeFilter} onValueChange={setDocumentTypeFilter}>
+                          <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
+                            isDark
+                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              : 'bg-gray-50 border-gray-300 text-gray-900'
+                          }`}>
+                            <SelectValue placeholder="Все" />
+                          </SelectTrigger>
+                          <SelectContent className={isDark ? 'bg-[#232328] border-white/10' : 'bg-white border-gray-200'}>
+                            <SelectItem value="all" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Все</SelectItem>
+                            <SelectItem value="contract" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Контракт</SelectItem>
+                            <SelectItem value="invoice" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Инвойс</SelectItem>
+                            <SelectItem value="certificate" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Сертификат</SelectItem>
+                            <SelectItem value="license" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Лицензия</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Документ */}
+                      <div className="space-y-1.5">
+                        <label className={`text-sm ${theme.text.primary}`}>Документ</label>
+                        <Select value={documentFilter} onValueChange={setDocumentFilter}>
+                          <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
+                            isDark
+                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              : 'bg-gray-50 border-gray-300 text-gray-900'
+                          }`}>
+                            <SelectValue placeholder="Все" />
+                          </SelectTrigger>
+                          <SelectContent className={isDark ? 'bg-[#232328] border-white/10' : 'bg-white border-gray-200'}>
+                            <SelectItem value="all" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Все</SelectItem>
+                            <SelectItem value="doc1" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Документ №1234</SelectItem>
+                            <SelectItem value="doc2" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Документ №5678</SelectItem>
+                            <SelectItem value="doc3" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Документ №9012</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Дата документа */}
+                      <div className="space-y-1.5">
+                        <label className={`text-sm ${theme.text.primary}`}>Дата документа</label>
+                        <Select value={documentDateFilter} onValueChange={setDocumentDateFilter}>
+                          <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
+                            isDark
+                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              : 'bg-gray-50 border-gray-300 text-gray-900'
+                          }`}>
+                            <SelectValue placeholder="За все время" />
+                          </SelectTrigger>
+                          <SelectContent className={isDark ? 'bg-[#232328] border-white/10' : 'bg-white border-gray-200'}>
+                            <SelectItem value="all" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>За все время</SelectItem>
+                            <SelectItem value="today" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>Сегодня</SelectItem>
+                            <SelectItem value="week" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>За неделю</SelectItem>
+                            <SelectItem value="month" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>За месяц</SelectItem>
+                            <SelectItem value="quarter" className={isDark ? 'focus:bg-white/10 focus:text-white text-white' : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'}>За квартал</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            </div>
+          </div>
+
           {/* Таблица деклараций */}
           <div className={`rounded-2xl p-6 border ${theme.card.background} ${theme.card.border}`}>
             <div className="overflow-x-auto">
@@ -734,10 +1025,10 @@ const DeclarantContent: React.FC = () => {
               {/* Выбор количества строк */}
               <div className="flex items-center gap-2">
                 <Select value={String(rowsPerPage)} onValueChange={handleRowsPerPageChange}>
-                  <SelectTrigger className={`w-[70px] h-8 focus:outline-none focus:ring-0 focus:ring-offset-0 focus:ring-transparent ${
+                  <SelectTrigger className={`w-[70px] h-8 focus:outline-none focus:ring-0 transition-none ${
                     isDark
-                      ? 'bg-[#232328] border-white/10 text-white focus:border-white/10 data-[state=open]:border-white/10'
-                      : 'bg-white border-gray-200 text-gray-900 focus:border-gray-200 data-[state=open]:border-gray-200'
+                      ? 'bg-[#1a1a1e] border-white/10 text-white'
+                      : 'bg-gray-50 border-gray-200 text-gray-900'
                   }`}>
                     <SelectValue />
                   </SelectTrigger>

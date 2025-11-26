@@ -153,11 +153,11 @@ const SidebarMain = () => {
       badge: (section.id === 'chat' || section.id === 'personal-chats') && shouldShowBadge ? unreadCount : section.badge
     }))
   }));
-  return <div 
+  return <div
     className="h-screen backdrop-blur-sm border-r border-white/10 flex flex-col"
-    style={{ 
-      backgroundColor: '#2c2c33',
-      width: sidebarCollapsed ? '80px' : '272px' 
+    style={{
+      backgroundColor: '#232328',
+      width: sidebarCollapsed ? '80px' : '272px'
     }}
   >
       {/* Header с логотипом */}

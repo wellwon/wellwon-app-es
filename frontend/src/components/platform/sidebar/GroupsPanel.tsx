@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { TelegramChatService } from '@/services/TelegramChatService';
 import { CompanyService } from '@/services/CompanyService';
 import { useRealtimeChatContext } from '@/contexts/RealtimeChatContext';
+import { usePlatform } from '@/contexts/PlatformContext';
 import { supabase } from '@/integrations/supabase/client';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
@@ -38,6 +39,42 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
   onModeChange
 }) => {
   const { setScopeBySupergroup } = useRealtimeChatContext();
+  const { isLightTheme } = usePlatform();
+
+  // Theme-aware styles
+  const theme = isLightTheme ? {
+    bg: 'bg-[#e8e8e8]',
+    bgCard: 'bg-white',
+    bgCardHover: 'hover:bg-gray-50',
+    bgCardSelected: 'bg-gray-100',
+    border: 'border-gray-300',
+    text: {
+      primary: 'text-gray-900',
+      secondary: 'text-gray-600',
+      muted: 'text-gray-500'
+    },
+    input: 'bg-white border-gray-300 text-gray-900 placeholder:text-gray-400',
+    button: {
+      ghost: 'bg-white border border-gray-300 text-gray-600 hover:text-gray-900 hover:bg-gray-50',
+      active: 'bg-white border border-accent-red text-accent-red hover:bg-accent-red/10'
+    }
+  } : {
+    bg: 'bg-[#232328]',
+    bgCard: 'bg-[#2e2e33]',
+    bgCardHover: 'hover:bg-[#3a3a40]',
+    bgCardSelected: 'bg-white/5',
+    border: 'border-white/10',
+    text: {
+      primary: 'text-white',
+      secondary: 'text-gray-400',
+      muted: 'text-gray-500'
+    },
+    input: 'bg-white/5 border-white/10 text-white placeholder:!text-[#9da3af]',
+    button: {
+      ghost: 'text-gray-300 hover:text-white hover:bg-white/10',
+      active: 'text-accent-red border-accent-red/60 bg-accent-red/10 hover:bg-accent-red/20'
+    }
+  };
   const [activeSupergroups, setActiveSupergroups] = useState<TelegramSupergroup[]>([]);
   const [archivedSupergroups, setArchivedSupergroups] = useState<TelegramSupergroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -328,47 +365,47 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
 
   if (loading) {
     return (
-      <div 
-        className="h-full border-r border-white/10 flex flex-col"
-        style={{ width: `${width}px`, backgroundColor: '#232328' }}
+      <div
+        className={`h-full border-r ${theme.border} flex flex-col ${theme.bg}`}
+        style={{ width: `${width}px` }}
       >
         {collapsed ? (
           <>
             {/* Заголовок с кнопкой разворачивания */}
-            <div className="h-16 border-b border-white/10 flex items-center justify-center px-3">
+            <div className={`h-16 border-b ${theme.border} flex items-center justify-center px-3`}>
               <Button
                 size="icon"
                 variant="ghost"
                 onClick={onToggleGroups}
-                className="h-8 w-8 p-0 hover:bg-white/10 text-gray-300 hover:text-white transition-colors"
+                className={`h-8 w-8 p-0 transition-colors ${theme.button.ghost}`}
               >
                 <ChevronRight size={16} />
               </Button>
             </div>
-            
+
         {/* Кнопка архива */}
-        <div className="h-16 border-b border-white/10 flex items-center justify-center px-3">
+        <div className={`h-16 border-b ${theme.border} flex items-center justify-center px-3`}>
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 p-0 hover:bg-white/10 text-gray-300 hover:text-white transition-colors"
+            className={`h-8 w-8 p-0 transition-colors ${theme.button.ghost}`}
           >
             <Archive size={14} />
           </Button>
         </div>
-            
+
             {/* Загрузка групп */}
             <div className="flex items-center justify-center py-4">
-              <span className="text-gray-400 text-sm">Загрузка...</span>
+              <span className={`text-sm ${theme.text.secondary}`}>Загрузка...</span>
             </div>
           </>
         ) : (
           <>
             {/* Заголовок */}
-            <div className="h-16 border-b border-white/10 flex items-center justify-between pl-6 pr-4">
-              <div className="text-white">
-                <h2 className="font-semibold text-lg">Группы</h2>
-                <p className="text-xs text-gray-400">
+            <div className={`h-16 border-b ${theme.border} flex items-center justify-between pl-6 pr-4`}>
+              <div>
+                <h2 className={`font-semibold text-lg ${theme.text.primary}`}>Группы</h2>
+                <p className={`text-xs ${theme.text.secondary}`}>
                   0 групп
                 </p>
               </div>
@@ -377,7 +414,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                   size="icon"
                   variant="ghost"
                   onClick={() => setIsCreateCompanyModalOpen(true)}
-                  className="h-8 w-8 p-0 hover:bg-white/10 text-gray-300 hover:text-white transition-colors"
+                  className={`h-8 w-8 p-0 transition-colors ${theme.button.ghost}`}
                   title="Создать компанию"
                 >
                   <Plus size={16} />
@@ -386,21 +423,21 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                   size="icon"
                   variant="ghost"
                   onClick={onToggleGroups}
-                  className="h-8 w-8 p-0 hover:bg-white/10 text-gray-300 hover:text-white transition-colors"
+                  className={`h-8 w-8 p-0 transition-colors ${theme.button.ghost}`}
                 >
                   <ChevronLeft size={16} />
                 </Button>
               </div>
             </div>
-            
-            <div className="h-16 border-b border-white/10 flex flex-col justify-center px-6">
-              <span className="text-gray-400 text-sm">Загрузка...</span>
+
+            <div className={`h-16 border-b ${theme.border} flex flex-col justify-center px-6`}>
+              <span className={`text-sm ${theme.text.secondary}`}>Загрузка...</span>
             </div>
-            
+
             <div className="flex-1">
               <ScrollArea className="h-full">
                 <div className="flex items-center justify-center py-8">
-                  <span className="text-gray-400 text-sm">Загрузка групп...</span>
+                  <span className={`text-sm ${theme.text.secondary}`}>Загрузка групп...</span>
                 </div>
               </ScrollArea>
             </div>
@@ -412,9 +449,9 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
 
   if (error) {
     return (
-      <div 
-        className="h-full border-r border-white/10 flex flex-col items-center justify-center p-4"
-        style={{ width: `${width}px`, backgroundColor: '#232328' }}
+      <div
+        className={`h-full border-r ${theme.border} flex flex-col items-center justify-center p-4 ${theme.bg}`}
+        style={{ width: `${width}px` }}
       >
         {!collapsed && <p className="text-red-400 text-sm text-center">{error}</p>}
       </div>
@@ -424,32 +461,32 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
   // Collapsed mini mode
   if (collapsed) {
     return (
-      <div 
-        className="h-full border-r border-white/10 flex flex-col"
-        style={{ width: `${width}px`, backgroundColor: '#232328' }}
+      <div
+        className={`h-full border-r ${theme.border} flex flex-col ${theme.bg}`}
+        style={{ width: `${width}px` }}
       >
         {/* Заголовок с кнопкой разворачивания */}
-        <div className="h-16 border-b border-white/10 flex items-center justify-center px-3 shrink-0">
+        <div className={`h-16 border-b ${theme.border} flex items-center justify-center px-3 shrink-0`}>
           <Button
             size="icon"
             variant="ghost"
             onClick={onToggleGroups}
-            className="h-8 w-8 p-0 hover:bg-white/10 text-gray-300 hover:text-white transition-colors"
+            className={`h-8 w-8 p-0 transition-colors ${theme.button.ghost}`}
           >
             <ChevronRight size={16} />
           </Button>
         </div>
-        
+
         {/* Кнопка архива */}
-        <div className="h-16 border-t border-b border-white/10 flex items-center justify-center px-3 shrink-0">
+        <div className={`h-16 border-t border-b ${theme.border} flex items-center justify-center px-3 shrink-0`}>
         <Button
           size="icon"
           variant="ghost"
           onClick={() => setShowArchived(!showArchived)}
           className={`h-8 w-8 p-0 transition-colors ${
-            showArchived 
-              ? 'text-accent-red border border-accent-red/60 bg-accent-red/10 hover:bg-accent-red/20' 
-              : 'text-gray-300 hover:text-white hover:bg-white/10'
+            showArchived
+              ? theme.button.active
+              : theme.button.ghost
           }`}
           title={`Архив (${archivedSupergroups.length})`}
           aria-label={`${showArchived ? 'Скрыть' : 'Показать'} архив групп (${archivedSupergroups.length})`}
@@ -457,7 +494,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
           <Archive size={14} />
         </Button>
         </div>
-        
+
         <div className="flex-1 flex flex-col items-center py-3 space-y-3">
           {filteredSupergroups.map((group) => (
             <div
@@ -468,12 +505,14 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                      }}
               title={group.title}
               className={`
-                ${selectedSupergroupId === group.id ? 'w-14 h-14' : 'w-12 h-12'} 
+                ${selectedSupergroupId === group.id ? 'w-14 h-14' : 'w-12 h-12'}
                 flex items-center justify-center rounded-md cursor-pointer overflow-hidden
                 backdrop-blur-sm border transition-all duration-200
-                ${selectedSupergroupId === group.id 
-                  ? 'bg-primary/20 border-primary/30 text-primary' 
-                  : 'bg-medium-gray/60 text-gray-400 border-white/10 hover:text-white hover:bg-medium-gray/80 hover:border-white/20'
+                ${selectedSupergroupId === group.id
+                  ? 'bg-primary/20 border-primary/30 text-primary'
+                  : isLightTheme
+                    ? 'bg-gray-200 text-gray-600 border-gray-300 hover:text-gray-900 hover:bg-gray-300'
+                    : 'bg-medium-gray/60 text-gray-400 border-white/10 hover:text-white hover:bg-medium-gray/80 hover:border-white/20'
                 }
               `}
             >
@@ -491,7 +530,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
             </div>
           ))}
         </div>
-        
+
         {/* Модальные окна - рендерятся и в collapsed режиме */}
         <AdminFormsModal
           isOpen={isCreateCompanyModalOpen}
@@ -501,7 +540,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
         />
 
         {/* Кнопки типов групп внизу в 2 ряда */}
-        <div className="border-t border-white/10 mt-auto p-2 min-h-24 flex items-center">
+        <div className={`border-t ${theme.border} mt-auto p-2 min-h-24 flex items-center`}>
           <div className="grid grid-cols-3 gap-1 w-full">
             {groupTypes.map((groupType) => {
               const IconComponent = groupType.icon;
@@ -515,8 +554,8 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                   }}
                   className={`h-6 w-full p-0 text-xs transition-colors ${
                     selectedTypeFilter === groupType.type
-                      ? 'text-accent-red border border-accent-red/60 bg-accent-red/10 hover:bg-accent-red/20' 
-                      : 'text-gray-300 hover:text-white hover:bg-white/10'
+                      ? theme.button.active
+                      : theme.button.ghost
                   }`}
                   title={groupType.label}
                 >
@@ -549,15 +588,15 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
   }
 
   return (
-    <div 
-      className="h-full border-r border-white/10 flex flex-col"
-      style={{ width: `${width}px`, backgroundColor: '#232328' }}
+    <div
+      className={`h-full border-r ${theme.border} flex flex-col ${theme.bg}`}
+      style={{ width: `${width}px` }}
     >
       {/* Заголовок - Все группы с кнопками */}
-      <div className="h-16 border-b border-white/10 flex items-center justify-between pl-6 pr-4">
-        <div className="text-white">
-          <h2 className="font-semibold text-lg">Группы</h2>
-          <p className="text-xs text-gray-400">
+      <div className={`h-16 border-b ${theme.border} flex items-center justify-between pl-6 pr-4`}>
+        <div>
+          <h2 className={`font-semibold text-lg ${theme.text.primary}`}>Группы</h2>
+          <p className={`text-xs ${theme.text.secondary}`}>
             {filteredSupergroups.length} групп{showArchived ? ' (архив)' : ''}
           </p>
         </div>
@@ -566,7 +605,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
             size="icon"
             variant="ghost"
             onClick={onToggleGroups}
-            className="h-8 w-8 p-0 hover:bg-white/10 text-gray-300 hover:text-white transition-colors"
+            className={`h-8 w-8 p-0 transition-colors ${theme.button.ghost}`}
           >
             <ChevronLeft size={16} />
           </Button>
@@ -581,19 +620,19 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
       </div>
 
       {/* Панель поиска и фильтров */}
-      <div className="h-16 px-4 border-b border-white/10 flex flex-col justify-center space-y-1">
+      <div className={`h-16 px-4 border-b ${theme.border} flex flex-col justify-center space-y-1`}>
         {/* Строка поиска с кнопками справа */}
         <div className="flex items-center gap-3">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${theme.text.secondary}`} />
             <Input
               placeholder="Поиск групп..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 bg-white/5 border-white/10 text-white placeholder:!text-[#9da3af] focus:border-white/20"
+              className={`pl-10 ${theme.input} focus:border-primary/50`}
             />
           </div>
-          
+
           {/* Кнопки фильтров справа */}
           <div className="flex items-center gap-2">
             <Button
@@ -601,9 +640,9 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
               variant="ghost"
               onClick={() => setShowArchived(!showArchived)}
               className={`h-8 w-8 transition-colors ${
-                showArchived 
-                  ? 'text-accent-red border border-accent-red/60 bg-accent-red/10 hover:bg-accent-red/20' 
-                  : 'text-gray-400 hover:text-white hover:bg-white/10'
+                showArchived
+                  ? theme.button.active
+                  : theme.button.ghost
               }`}
               title={`Архив (${archivedSupergroups.length})`}
             >
@@ -612,14 +651,14 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
             <Button
               size="icon"
               variant="ghost"
-              className="h-8 w-8 text-gray-400 hover:text-white hover:bg-white/10"
+              className={`h-8 w-8 ${theme.button.ghost}`}
               title="Фильтры"
             >
               <Filter size={14} />
             </Button>
           </div>
         </div>
-        
+
       </div>
 
       {/* Список групп */}
@@ -627,8 +666,8 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
         <div className="px-4 pt-3 pb-3 space-y-3">
           {filteredSupergroups.length === 0 ? (
             <div className="text-center py-12">
-              <Users size={32} className="mx-auto text-gray-500 mb-3" />
-              <p className="text-gray-400 text-sm">
+              <Users size={32} className={`mx-auto mb-3 ${theme.text.muted}`} />
+              <p className={`text-sm ${theme.text.secondary}`}>
                 {searchQuery ? 'Группы не найдены' : 'Нет групп'}
               </p>
             </div>
@@ -636,15 +675,19 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
             filteredSupergroups.map((group) => {
               const isExpanded = expandedGroupId === group.id;
               const companyBalance = group.company_id ? companyBalances[group.company_id] : null;
-              
+
               return (
                 <div
                   key={group.id}
                   className={`
                     border rounded-lg overflow-hidden
                     ${selectedSupergroupId === group.id
-                      ? 'bg-white/5 border-white/15'
-                      : 'bg-[#2e2e33] border-white/10 hover:bg-[#3a3a40] hover:border-white/20'
+                      ? isLightTheme
+                        ? 'bg-gray-100 border-gray-300'
+                        : 'bg-white/5 border-white/15'
+                      : isLightTheme
+                        ? 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'
+                        : 'bg-[#2e2e33] border-white/10 hover:bg-[#3a3a40] hover:border-white/20'
                     }
                     ${isExpanded ? 'pb-4' : ''}
                   `}
@@ -666,13 +709,13 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                     }}
                     className={`w-full px-3 py-2.5 cursor-pointer transition-colors rounded-lg ${
                       selectedSupergroupId === group.id
-                        ? 'text-white bg-white/5'
-                        : 'text-gray-300 hover:bg-white/10 hover:text-white'
+                        ? isLightTheme ? 'text-gray-900 bg-gray-100' : 'text-white bg-white/5'
+                        : isLightTheme ? 'text-gray-700 hover:bg-gray-50 hover:text-gray-900' : 'text-gray-300 hover:bg-white/10 hover:text-white'
                     }`}
                   >
                     <div className="flex items-center gap-3 w-full">
                       {/* Иконка группы */}
-                      <div className="flex-shrink-0 w-10 h-10 bg-primary/20 rounded-md flex items-center justify-center overflow-hidden">
+                      <div className={`flex-shrink-0 w-10 h-10 rounded-md flex items-center justify-center overflow-hidden ${isLightTheme ? 'bg-gray-100' : 'bg-primary/20'}`}>
                         {group.company_logo ? (
                           <OptimizedImage
                             src={group.company_logo}
@@ -685,7 +728,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                           </span>
                         )}
                       </div>
-                      
+
                       {/* Информация о группе */}
                       <div className="flex-1 min-w-0 text-left">
                          <div className="flex items-center justify-between mb-1">
@@ -694,16 +737,16 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                            </p>
                             <div className="flex items-center gap-2 ml-2">
                               {chatCounts[group.id] && (
-                                <Badge 
-                                  variant="secondary" 
-                                  className="bg-white/10 text-white text-xs border-white/20"
+                                <Badge
+                                  variant="secondary"
+                                  className={isLightTheme ? 'bg-gray-100 text-gray-700 text-xs border-gray-300' : 'bg-white/10 text-white text-xs border-white/20'}
                                 >
                                   {chatCounts[group.id]}
                                 </Badge>
                               )}
                             </div>
                          </div>
-                        <div className="flex items-center gap-2 text-xs text-gray-400">
+                        <div className={`flex items-center gap-2 text-xs ${theme.text.secondary}`}>
                           <Users size={12} />
                           <span>{group.member_count}</span>
                           {!group.company_id && (
@@ -713,7 +756,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                             </div>
                           )}
                           {group.is_forum && (
-                            <Badge variant="outline" className="text-xs border-white/20 text-gray-400">
+                            <Badge variant="outline" className={`text-xs ${isLightTheme ? 'border-gray-300 text-gray-500' : 'border-white/20 text-gray-400'}`}>
                               Форум
                             </Badge>
                           )}
@@ -727,23 +770,23 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                     <div className="px-3 pt-2 space-y-2">
                       {/* Баланс компании */}
                       {group.company_id && (
-                        <div className="flex items-center justify-between px-3 py-2 bg-white/5 rounded-lg">
-                          <span className="text-xs text-gray-400">Баланс компании:</span>
-                          <span className="text-sm font-medium text-white">
-                            {companyBalance !== null 
+                        <div className={`flex items-center justify-between px-3 py-2 rounded-lg ${isLightTheme ? 'bg-gray-100' : 'bg-white/5'}`}>
+                          <span className={`text-xs ${theme.text.secondary}`}>Баланс компании:</span>
+                          <span className={`text-sm font-medium ${theme.text.primary}`}>
+                            {companyBalance !== null
                               ? `${companyBalance.toLocaleString('ru-RU')} ₽`
                               : 'Загрузка...'
                             }
                           </span>
                         </div>
                       )}
-                      
+
                         {/* ID группы и кнопки */}
                         <div className="flex items-center gap-2">
-                          <div className="px-3 py-2 bg-white/5 rounded-lg w-3/5">
+                          <div className={`px-3 py-2 rounded-lg w-3/5 ${isLightTheme ? 'bg-gray-100' : 'bg-white/5'}`}>
                             <div className="flex items-center gap-2">
-                              <span className="text-xs text-gray-400">ID:</span>
-                              <span className="text-xs text-gray-300">{group.id}</span>
+                              <span className={`text-xs ${theme.text.secondary}`}>ID:</span>
+                              <span className={`text-xs ${isLightTheme ? 'text-gray-700' : 'text-gray-300'}`}>{group.id}</span>
                             </div>
                           </div>
                           <div className="flex items-center gap-2 w-2/5 justify-end">
@@ -754,7 +797,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                                 e.stopPropagation();
                                 setArchiveConfirmOpen(group.id);
                               }}
-                              className="h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-white/10"
+                              className={`h-6 w-6 p-0 ${theme.button.ghost}`}
                               title={group.is_active ? "Архивировать группу" : "Разархивировать группу"}
                             >
                               <Archive size={12} />
@@ -766,20 +809,20 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                                 e.stopPropagation();
                                 handleEditGroup(group.id, group.company_id);
                               }}
-                              className="h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-white/10"
+                              className={`h-6 w-6 p-0 ${theme.button.ghost}`}
                               title="Редактировать"
                             >
                               <Edit3 size={12} />
                             </Button>
                           </div>
                         </div>
-                        
+
                         {/* Дополнительная информация */}
                         {group.username && (
-                          <div className="px-3 py-2 bg-white/5 rounded-lg">
+                          <div className={`px-3 py-2 rounded-lg ${isLightTheme ? 'bg-gray-100' : 'bg-white/5'}`}>
                             <div className="flex items-center justify-between">
-                              <span className="text-xs text-gray-400">Username:</span>
-                              <span className="text-xs text-gray-300">@{group.username}</span>
+                              <span className={`text-xs ${theme.text.secondary}`}>Username:</span>
+                              <span className={`text-xs ${isLightTheme ? 'text-gray-700' : 'text-gray-300'}`}>@{group.username}</span>
                             </div>
                           </div>
                         )}
@@ -810,7 +853,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
           })()}
           description={(() => {
             const group = filteredSupergroups.find(g => g.id === archiveConfirmOpen);
-            return group?.is_active 
+            return group?.is_active
               ? "Группа будет перемещена в архив и скрыта из основного списка."
               : "Группа будет восстановлена из архива и появится в основном списке.";
           })()}
@@ -824,7 +867,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
       )}
 
       {/* Кнопки типов групп внизу */}
-      <div className="min-h-24 border-t border-white/10 mt-auto px-4 py-3 shrink-0">
+      <div className={`min-h-24 border-t ${theme.border} mt-auto px-4 py-3 shrink-0`}>
         <div className="grid grid-cols-3 gap-2">
           {groupTypes.map((groupType) => {
             const IconComponent = groupType.icon;
@@ -838,8 +881,8 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                 }}
                 className={`h-8 px-2 text-xs transition-colors flex items-center gap-1 ${
                   selectedTypeFilter === groupType.type
-                    ? 'text-accent-red border border-accent-red/60 bg-accent-red/10 hover:bg-accent-red/20' 
-                    : 'text-gray-300 hover:text-white hover:bg-white/10'
+                    ? theme.button.active
+                    : theme.button.ghost
                 }`}
                 title={groupType.label}
               >

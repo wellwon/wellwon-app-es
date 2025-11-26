@@ -24,6 +24,7 @@
 14. [Select Component Styling](#14-select-component-styling)
 15. [Pagination Component](#15-pagination-component)
 16. [Table Action Buttons](#16-table-action-buttons)
+17. [Filter Section Component](#17-filter-section-component)
 
 ---
 
@@ -710,6 +711,202 @@ className="..." // без transition
 
 | Version | Date | Changes |
 |---------|------|---------|
+| **3.1** | 2025-11-25 | Added §13-§16: UI State Persistence, Select, Pagination, Action Buttons |
+| **3.0** | 2025-11-25 | Complete rewrite with HEX colors from `/test-app` audit |
+| **2.0** | 2025-10-15 | Added hybrid theme architecture, glassmorphism specs |
+| **1.0** | 2025-08-01 | Initial design system documentation |
+
+---
+
+## 17. Filter Section Component
+
+### 17.1 Структура секции фильтров
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ [🔍 Поиск...                    ] [⚙ Фильтры ▼] [✕]                 │
+│                                                                       │
+│ (при открытии фильтров)                                              │
+│ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                     │
+│ │ Документ ▼  │ │ Статус ▼    │ │ Дата ▼      │                     │
+│ └─────────────┘ └─────────────┘ └─────────────┘                     │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### 17.2 Поле поиска
+
+```tsx
+<div className="relative flex-1">
+  <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${theme.text.secondary}`} />
+  <Input
+    placeholder="Поиск..."
+    value={searchQuery}
+    onChange={(e) => setSearchQuery(e.target.value)}
+    className={`pl-10 h-10 rounded-xl transition-none ${
+      isDark
+        ? 'bg-[#1a1a1e] border-white/10 text-white placeholder:text-gray-500'
+        : 'bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400'
+    }`}
+  />
+</div>
+```
+
+### 17.3 Кнопка "Фильтры"
+
+Кнопка с бордером, высота совпадает с полем поиска (h-10).
+
+```tsx
+<button
+  onClick={() => setFiltersOpen(!filtersOpen)}
+  className={`flex items-center gap-2 px-4 h-10 rounded-xl border ${
+    isDark
+      ? 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border-white/10'
+      : 'bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-900 border-gray-300'
+  }`}
+>
+  <SlidersHorizontal size={16} />
+  <span className="font-medium">Фильтры</span>
+  <ChevronDown size={16} className={`transition-transform ${filtersOpen ? 'rotate-180' : ''}`} />
+</button>
+```
+
+### 17.4 Кнопка сброса фильтров (условная)
+
+**Важно:** Кнопка появляется ТОЛЬКО когда есть активные фильтры.
+
+Стиль: Danger Button (как кнопка удаления в таблицах).
+
+```tsx
+const hasActiveFilters =
+  searchQuery !== '' ||
+  filter1 !== 'all' ||
+  filter2 !== 'all' ||
+  filterN !== 'all';
+
+{hasActiveFilters && (
+  <button
+    onClick={resetAllFilters}
+    className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent-red/10 text-accent-red border border-accent-red/20 hover:bg-accent-red/20 hover:border-accent-red/30"
+    title="Сбросить фильтры"
+  >
+    <X size={16} />
+  </button>
+)}
+```
+
+### 17.5 Раскрывающиеся фильтры (Collapsible)
+
+```tsx
+<Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
+  <CollapsibleContent className="pt-4">
+    <div className="grid grid-cols-3 gap-4">
+      {/* Select фильтры */}
+    </div>
+  </CollapsibleContent>
+</Collapsible>
+```
+
+### 17.6 Функция сброса всех фильтров
+
+```tsx
+const resetAllFilters = () => {
+  setSearchQuery('');
+  setFilter1('all');
+  setFilter2('all');
+  // ... остальные фильтры
+  setFilterN('all');
+};
+```
+
+### 17.7 Консистентность высоты элементов
+
+Все элементы в строке фильтров должны иметь **одинаковую высоту h-10** (40px):
+
+| Элемент | Высота | Классы |
+|---------|--------|--------|
+| Input поиска | 40px | `h-10 rounded-xl` |
+| Кнопка "Фильтры" | 40px | `h-10 rounded-xl` |
+| Кнопка сброса | 40px | `w-10 h-10 rounded-lg` |
+
+### 17.8 Полный пример секции фильтров
+
+```tsx
+const [searchQuery, setSearchQuery] = useState('');
+const [statusFilter, setStatusFilter] = useState('all');
+const [dateFilter, setDateFilter] = useState('all');
+const [filtersOpen, setFiltersOpen] = useState(false);
+
+const hasActiveFilters = searchQuery !== '' || statusFilter !== 'all' || dateFilter !== 'all';
+
+const resetFilters = () => {
+  setSearchQuery('');
+  setStatusFilter('all');
+  setDateFilter('all');
+};
+
+return (
+  <div className={`rounded-2xl p-6 border ${theme.card.background} ${theme.card.border}`}>
+    <div className="flex items-center gap-3">
+      {/* Поиск */}
+      <div className="relative flex-1">
+        <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${theme.text.secondary}`} />
+        <Input
+          placeholder="Поиск..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className={`pl-10 h-10 rounded-xl transition-none ${
+            isDark
+              ? 'bg-[#1a1a1e] border-white/10 text-white placeholder:text-gray-500'
+              : 'bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400'
+          }`}
+        />
+      </div>
+
+      {/* Кнопка фильтров */}
+      <button
+        onClick={() => setFiltersOpen(!filtersOpen)}
+        className={`flex items-center gap-2 px-4 h-10 rounded-xl border ${
+          isDark
+            ? 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border-white/10'
+            : 'bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-900 border-gray-300'
+        }`}
+      >
+        <SlidersHorizontal size={16} />
+        <span className="font-medium">Фильтры</span>
+        <ChevronDown size={16} className={`transition-transform ${filtersOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {/* Кнопка сброса (условная) */}
+      {hasActiveFilters && (
+        <button
+          onClick={resetFilters}
+          className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent-red/10 text-accent-red border border-accent-red/20 hover:bg-accent-red/20 hover:border-accent-red/30"
+          title="Сбросить фильтры"
+        >
+          <X size={16} />
+        </button>
+      )}
+    </div>
+
+    {/* Раскрывающиеся фильтры */}
+    <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
+      <CollapsibleContent className="pt-4">
+        <div className="grid grid-cols-3 gap-4">
+          {/* Select фильтры */}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  </div>
+);
+```
+
+---
+
+## Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| **3.2** | 2025-11-26 | Added §17: Filter Section Component with conditional reset button |
 | **3.1** | 2025-11-25 | Added §13-§16: UI State Persistence, Select, Pagination, Action Buttons |
 | **3.0** | 2025-11-25 | Complete rewrite with HEX colors from `/test-app` audit |
 | **2.0** | 2025-10-15 | Added hybrid theme architecture, glassmorphism specs |

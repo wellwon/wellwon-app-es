@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Paperclip } from 'lucide-react';
 import { useRealtimeChatContext } from '@/contexts/RealtimeChatContext';
 import { useToast } from '@/hooks/use-toast';
+import { usePlatform } from '@/contexts/PlatformContext';
 
 interface FileUploadButtonProps {
   disabled?: boolean;
@@ -12,6 +13,7 @@ export function FileUploadButton({ disabled }: FileUploadButtonProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { sendFile } = useRealtimeChatContext();
   const { toast } = useToast();
+  const { isLightTheme } = usePlatform();
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -64,10 +66,14 @@ export function FileUploadButton({ disabled }: FileUploadButtonProps) {
         onChange={handleFileSelect}
         accept="*/*"
       />
-      <Button 
-        variant="ghost" 
-        size="icon" 
-        className="text-text-gray-400 hover:text-white hover:bg-white/10 rounded-full h-11 w-11"
+      <Button
+        variant="ghost"
+        size="icon"
+        className={`rounded-full h-11 w-11 transition-all ${
+          isLightTheme
+            ? 'text-gray-500 hover:text-accent-red bg-[#e8e8e8] hover:bg-accent-red/10 border border-gray-300 hover:border-accent-red/30'
+            : 'text-gray-400 hover:text-accent-red hover:bg-accent-red/10 border border-transparent hover:border-accent-red/30'
+        }`}
         onClick={openFileDialog}
         disabled={disabled}
       >
