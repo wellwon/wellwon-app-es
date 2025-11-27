@@ -47,11 +47,12 @@ if [ "$ENV" = "production" ]; then
         --http 2 \
         --log-level info
 else
-    echo "Mode: DEVELOPMENT (reload enabled)"
+    echo "Mode: DEVELOPMENT (reload enabled, watching only app/ folder)"
     exec granian --interface asgi app.server:app \
         --host 0.0.0.0 \
         --port ${PORT} \
         --reload \
+        --reload-paths app \
         --http 1 \
         --log-level info
 fi

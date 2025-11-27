@@ -13,16 +13,19 @@ const FilterButton: React.FC<{
   label: string;
   active: boolean;
   onClick: () => void;
-}> = ({ label, active, onClick }) => (
+  isLightTheme?: boolean;
+}> = ({ label, active, onClick, isLightTheme }) => (
   <Button
     variant="ghost"
     size="sm"
     onClick={onClick}
     className={`
       h-7 px-2 text-xs font-medium rounded-md transition-all
-      ${active 
-        ? 'bg-accent-red/20 text-accent-red border border-accent-red/30' 
-        : 'text-gray-400 hover:text-white hover:bg-white/10'
+      ${active
+        ? 'bg-accent-red/20 text-accent-red border border-accent-red/30'
+        : isLightTheme
+          ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+          : 'text-gray-400 hover:text-white hover:bg-white/10'
       }
     `}
   >
@@ -32,11 +35,30 @@ const FilterButton: React.FC<{
 
 const ChatNavigationBar: React.FC = () => {
   const { activeChat, updateChat, initialLoading, sendInteractiveMessage, createChat, selectChat, messageFilter, setMessageFilter } = useRealtimeChatContext();
-  const { isDeveloper } = usePlatform();
+  const { isDeveloper, isLightTheme } = usePlatform();
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const { toast } = useToast();
-  
+
   const isAdmin = isDeveloper;
+
+  // Theme-aware styles (like Declarant page)
+  const theme = isLightTheme ? {
+    header: 'bg-white border-gray-300 shadow-sm',
+    text: {
+      primary: 'text-gray-900',
+      secondary: 'text-[#6b7280]'
+    },
+    button: 'text-gray-600 hover:text-gray-900 hover:bg-gray-100',
+    icon: 'bg-gray-200'
+  } : {
+    header: 'bg-dark-gray border-white/10',
+    text: {
+      primary: 'text-white',
+      secondary: 'text-gray-400'
+    },
+    button: 'text-gray-400 hover:text-white hover:bg-white/10',
+    icon: 'bg-accent-gray'
+  };
 
   const handleSendTemplate = async () => {
     try {
@@ -106,27 +128,27 @@ const ChatNavigationBar: React.FC = () => {
   };
 
   return (
-    <div className="h-16 bg-dark-gray border-b border-white/10 flex items-center justify-between px-6 relative z-20">
+    <div className={`h-16 border-b flex items-center justify-between px-6 relative z-20 ${theme.header}`}>
       <div className="flex items-center gap-3 relative z-10">
         {activeChat && (
-          <div className="w-8 h-8 bg-accent-gray rounded-lg flex items-center justify-center">
-            <MessageSquare size={16} className="text-white" />
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${theme.icon}`}>
+            <MessageSquare size={16} className={isLightTheme ? 'text-gray-600' : 'text-white'} />
           </div>
         )}
-        
+
         <div>
           {initialLoading ? (
             <>
-              <h1 className="text-white font-semibold text-lg"></h1>
-              <p className="text-gray-400 text-sm"></p>
+              <h1 className={`font-semibold text-lg ${theme.text.primary}`}></h1>
+              <p className={`text-sm ${theme.text.secondary}`}></p>
             </>
           ) : (
             <>
-              <h1 className="text-white font-semibold text-lg">
+              <h1 className={`font-semibold text-lg ${theme.text.primary}`}>
                 {activeChat ? activeChat.name || `Чат ${activeChat.id.slice(-8)}` : ''}
               </h1>
-              <p className="text-gray-400 text-sm">
-                {activeChat 
+              <p className={`text-sm ${theme.text.secondary}`}>
+                {activeChat
                   ? (activeChat.metadata as any)?.description || 'Краткое описание чата'
                   : ''
                 }
@@ -140,51 +162,58 @@ const ChatNavigationBar: React.FC = () => {
         {/* Message filter buttons */}
         {activeChat && (
           <div className="flex items-center gap-1 mr-4">
-            <FilterButton 
-              label="ALL" 
-              active={messageFilter === 'all'} 
-              onClick={() => setMessageFilter('all')} 
+            <FilterButton
+              label="ALL"
+              active={messageFilter === 'all'}
+              onClick={() => setMessageFilter('all')}
+              isLightTheme={isLightTheme}
             />
-            <FilterButton 
-              label="PIC" 
-              active={messageFilter === 'images'} 
-              onClick={() => setMessageFilter('images')} 
+            <FilterButton
+              label="PIC"
+              active={messageFilter === 'images'}
+              onClick={() => setMessageFilter('images')}
+              isLightTheme={isLightTheme}
             />
-            <FilterButton 
-              label="PDF" 
-              active={messageFilter === 'pdf'} 
-              onClick={() => setMessageFilter('pdf')} 
+            <FilterButton
+              label="PDF"
+              active={messageFilter === 'pdf'}
+              onClick={() => setMessageFilter('pdf')}
+              isLightTheme={isLightTheme}
             />
-            <FilterButton 
-              label="DOC" 
-              active={messageFilter === 'doc'} 
-              onClick={() => setMessageFilter('doc')} 
+            <FilterButton
+              label="DOC"
+              active={messageFilter === 'doc'}
+              onClick={() => setMessageFilter('doc')}
+              isLightTheme={isLightTheme}
             />
-            <FilterButton 
-              label="XLS" 
-              active={messageFilter === 'xls'} 
-              onClick={() => setMessageFilter('xls')} 
+            <FilterButton
+              label="XLS"
+              active={messageFilter === 'xls'}
+              onClick={() => setMessageFilter('xls')}
+              isLightTheme={isLightTheme}
             />
-            <FilterButton 
-              label="MIC" 
-              active={messageFilter === 'voice'} 
-              onClick={() => setMessageFilter('voice')} 
+            <FilterButton
+              label="MIC"
+              active={messageFilter === 'voice'}
+              onClick={() => setMessageFilter('voice')}
+              isLightTheme={isLightTheme}
             />
-            <FilterButton 
-              label="OTH" 
-              active={messageFilter === 'other'} 
-              onClick={() => setMessageFilter('other')} 
+            <FilterButton
+              label="OTH"
+              active={messageFilter === 'other'}
+              onClick={() => setMessageFilter('other')}
+              isLightTheme={isLightTheme}
             />
           </div>
         )}
-        
+
         {/* Кнопка "Поделиться ссылкой" */}
         {activeChat && (
           <Button
             variant="ghost"
             size="icon"
             onClick={handleShareChat}
-            className="text-gray-400 hover:text-white hover:bg-white/10 h-8 w-8"
+            className={`h-8 w-8 ${theme.button}`}
           >
             <Share2 size={14} />
           </Button>
@@ -196,7 +225,7 @@ const ChatNavigationBar: React.FC = () => {
             variant="ghost"
             size="icon"
             onClick={handleEditChat}
-            className="text-gray-400 hover:text-white hover:bg-white/10 h-8 w-8"
+            className={`h-8 w-8 ${theme.button}`}
           >
             <Edit size={14} />
           </Button>

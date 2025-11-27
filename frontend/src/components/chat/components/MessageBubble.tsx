@@ -50,18 +50,22 @@ interface MessageBubbleProps {
   className?: string;
 }
 
-export function MessageBubble({ 
-  message, 
-  isOwn, 
+export function MessageBubble({
+  message,
+  isOwn,
   isSending = false,
   currentUser,
-  onReply, 
-  className = '' 
+  onReply,
+  className = ''
 }: MessageBubbleProps) {
   const { options } = useChatDisplayOptions();
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
   const openVoiceRef = useRef(false);
   const [avatarLoaded, setAvatarLoaded] = useState(() => avatarCache.isLoaded(message.sender_profile?.avatar_url || ''));
+
+  // Import platform context for theme
+  const { usePlatform } = require('@/contexts/PlatformContext');
+  const { isLightTheme } = usePlatform();
   
   // Avatar optimization
   useEffect(() => {
@@ -618,7 +622,13 @@ export function MessageBubble({
     }
 
     return (
-      <div className={`flex items-center gap-1 text-xs ${isOwn ? 'text-white/80' : 'text-gray-400'}`}>
+      <div className={`flex items-center gap-1 text-xs ${
+        isOwn
+          ? 'text-white/80'
+          : isLightTheme
+            ? 'text-gray-500'
+            : 'text-gray-400'
+      }`}>
         {editedEl}
         {timeEl}
         {statusEl}
@@ -820,28 +830,31 @@ export function MessageBubble({
 
           {/* Пузырь сообщения с именем внутри */}
           <div className={`flex-1 flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
-            <div 
+            <div
               className={`
                 message-bubble relative rounded-2xl min-w-0
-                ${message.message_type === 'image' ? 
-                  (message.metadata?.imageDimensions?.aspectRatio && message.metadata.imageDimensions.aspectRatio < 1 
+                ${message.message_type === 'image' ?
+                  (message.metadata?.imageDimensions?.aspectRatio && message.metadata.imageDimensions.aspectRatio < 1
                     ? 'inline-block w-auto' // Портретные изображения - автоширина по содержимому
                     : 'w-[92%] sm:w-[min(70%,450px)]' // Горизонтальные и квадратные - шире
-                  ) 
+                  )
                   : 'max-w-[66.666%]'
                 }
-                ${isOwn 
-                  ? 'bg-accent-red/20 text-white rounded-br-md border border-accent-red/30' 
-                  : 'bg-[hsl(var(--light-gray))] text-white rounded-bl-md border border-white/10'
+                ${isOwn
+                  ? 'bg-accent-red/20 rounded-br-md border border-accent-red/30'
+                  : isLightTheme
+                    ? 'bg-white rounded-bl-md border border-gray-200 shadow-sm'
+                    : 'bg-[hsl(var(--light-gray))] rounded-bl-md border border-white/10'
                 }
+                ${isLightTheme && !isOwn ? 'text-gray-900' : 'text-white'}
               `}
             >
               {/* Имя и тип пользователя внутри сообщения */}
-              <div className="px-3 pt-2 pb-1 border-b border-white/10">
-                <div className={`text-xs font-medium text-white/90 flex items-center gap-2 ${isOwn ? 'justify-end' : 'justify-start'}`}>
+              <div className={`px-3 pt-2 pb-1 border-b ${isLightTheme && !isOwn ? 'border-gray-200' : 'border-white/10'}`}>
+                <div className={`text-xs font-medium flex items-center gap-2 ${isOwn ? 'justify-end' : 'justify-start'} ${isLightTheme && !isOwn ? 'text-gray-700' : 'text-white/90'}`}>
                   {isOwn && (
-                    <Badge 
-                      variant="outline" 
+                    <Badge
+                      variant="outline"
                       className={`text-[10px] py-0 px-1 h-4 bg-accent-red/20 border-red-400/30 ${
                         message.metadata?.role_label === 'Нет роли' ? 'text-accent-red' : 'text-red-300'
                       }`}
@@ -850,16 +863,20 @@ export function MessageBubble({
                     </Badge>
                   )}
                   <div className="flex items-center gap-1">
-                    <span className={isOwn ? "" : "text-[#969699]"}>{displayName}</span>
+                    <span className={isOwn ? "" : isLightTheme ? "text-gray-600" : "text-[#969699]"}>{displayName}</span>
                     {isFromTelegram && (
                       <TelegramIcon className="w-3 h-3 text-blue-400" />
                     )}
                   </div>
                   {!isOwn && (
-                    <Badge 
-                      variant="outline" 
-                      className={`text-[10px] py-0 px-1 h-4 bg-white/10 border-white/20 ${
-                        message.metadata?.role_label === 'Нет роли' ? 'text-accent-red' : 'text-white/60'
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] py-0 px-1 h-4 ${
+                        isLightTheme
+                          ? 'bg-gray-100 border-gray-300'
+                          : 'bg-white/10 border-white/20'
+                      } ${
+                        message.metadata?.role_label === 'Нет роли' ? 'text-accent-red' : isLightTheme ? 'text-gray-500' : 'text-white/60'
                       }`}
                     >
                       {message.metadata?.role_label || 'Нет роли'}

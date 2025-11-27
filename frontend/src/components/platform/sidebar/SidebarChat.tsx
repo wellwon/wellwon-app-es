@@ -42,8 +42,44 @@ const SidebarChat: React.FC = () => {
   } = useUnifiedSidebar();
   const {
     setActiveSection,
-    isDeveloper
+    isDeveloper,
+    isLightTheme
   } = usePlatform();
+
+  // Theme-aware styles
+  const theme = isLightTheme ? {
+    bg: 'bg-[#e8e8e8]',
+    bgCard: 'bg-white',
+    bgCardHover: 'hover:bg-gray-50',
+    bgCardSelected: 'bg-gray-100',
+    border: 'border-gray-300',
+    text: {
+      primary: 'text-gray-900',
+      secondary: 'text-gray-600',
+      muted: 'text-gray-500'
+    },
+    input: 'bg-white border-gray-300 text-gray-900 placeholder:text-gray-400',
+    button: {
+      ghost: 'bg-white border border-gray-300 text-gray-600 hover:text-gray-900 hover:bg-gray-50',
+      active: 'bg-white border border-accent-red text-accent-red hover:bg-accent-red/10'
+    }
+  } : {
+    bg: 'bg-[#232328]',
+    bgCard: 'bg-[#2e2e33]',
+    bgCardHover: 'hover:bg-[#3a3a40]',
+    bgCardSelected: 'bg-white/5',
+    border: 'border-white/10',
+    text: {
+      primary: 'text-white',
+      secondary: 'text-gray-400',
+      muted: 'text-gray-500'
+    },
+    input: 'bg-white/5 border-white/10 text-white placeholder:!text-[#9da3af]',
+    button: {
+      ghost: 'text-gray-400 hover:text-white hover:bg-white/10',
+      active: 'text-accent-red border-accent-red/60 bg-accent-red/10 hover:bg-accent-red/20'
+    }
+  };
   const {
     user
   } = useAuth();
@@ -639,40 +675,39 @@ const SidebarChat: React.FC = () => {
       )}
 
       {/* Основная панель чатов */}
-      <div 
-        className="h-screen border-r border-white/10 flex flex-col" 
+      <div
+        className={`h-screen border-r ${theme.border} flex flex-col ${theme.bg}`}
         style={{
-          backgroundColor: '#232328',
           width: '320px'
         }}
       >
         {/* Заголовок с кнопкой создания */}
-        <div className="h-16 flex items-center justify-between pl-6 pr-4 border-b border-white/10">
+        <div className={`h-16 flex items-center justify-between pl-6 pr-4 border-b ${theme.border}`}>
           <div className="flex-1">
             {activeMode === 'personal' ? (
-              <div className="text-white">
-                <h2 className="font-semibold text-lg">Чаты с ботом</h2>
-                <p className="text-xs text-gray-400">
+              <div>
+                <h2 className={`font-semibold text-lg ${theme.text.primary}`}>Чаты с ботом</h2>
+                <p className={`text-xs ${theme.text.secondary}`}>
                   {filteredConversations.length} чатов
                 </p>
               </div>
             ) : selectedSupergroupId !== null ? (
-              <div className="text-white">
-                <h2 className="font-semibold text-lg">Темы / запросы</h2>
-                <p className="text-xs text-gray-400">
+              <div>
+                <h2 className={`font-semibold text-lg ${theme.text.primary}`}>Темы / запросы</h2>
+                <p className={`text-xs ${theme.text.secondary}`}>
                   {filteredConversations.length} тем
                 </p>
               </div>
             ) : !groupsPanelCollapsed ? (
-              <div className="text-white">
-                <h2 className="font-semibold text-lg">Все чаты</h2>
-                <p className="text-xs text-gray-400">
+              <div>
+                <h2 className={`font-semibold text-lg ${theme.text.primary}`}>Все чаты</h2>
+                <p className={`text-xs ${theme.text.secondary}`}>
                   {conversations.length} диалогов
                 </p>
               </div>
             ) : null}
           </div>
-          
+
           {/* Кнопки действий */}
           <div className="flex items-center gap-2">
             {/* Кнопка синхронизации топиков */}
@@ -682,15 +717,15 @@ const SidebarChat: React.FC = () => {
               onClick={handleRefreshClick}
               disabled={isVerifying || selectedSupergroupId === null}
               className={`h-8 w-8 p-0 transition-colors ${
-                selectedSupergroupId !== null 
-                  ? 'text-gray-400 hover:text-white hover:bg-white/10' 
-                  : 'text-gray-500 cursor-not-allowed'
+                selectedSupergroupId !== null
+                  ? theme.button.ghost
+                  : `${theme.text.muted} cursor-not-allowed`
               }`}
               title={selectedSupergroupId ? "Синхронизировать топики с Telegram (Shift+клик — только проверка)" : "Выберите группу для синхронизации"}
             >
               <RefreshCw size={16} className={isVerifying ? 'animate-spin' : ''} />
             </Button>
-            
+
             {/* Кнопка создания новой темы */}
             <Button
               size="icon"
@@ -698,9 +733,9 @@ const SidebarChat: React.FC = () => {
               onClick={() => selectedSupergroupId ? setIsDialogOpen(true) : undefined}
               disabled={isCreatingChat || selectedSupergroupId === null}
               className={`h-8 w-8 p-0 transition-colors ${
-                selectedSupergroupId !== null 
-                  ? 'bg-accent-red hover:bg-accent-red-dark text-white' 
-                  : 'text-gray-500 cursor-not-allowed'
+                selectedSupergroupId !== null
+                  ? 'bg-accent-red hover:bg-accent-red-dark text-white'
+                  : `${theme.text.muted} cursor-not-allowed`
               }`}
               title={selectedSupergroupId ? "Создать новую тему" : "Выберите группу для создания темы"}
             >
@@ -710,39 +745,39 @@ const SidebarChat: React.FC = () => {
         </div>
 
         {/* Панель поиска и фильтров */}
-        <div className="h-16 pl-6 pr-4 border-b border-white/10 flex flex-col justify-center space-y-1">
+        <div className={`h-16 px-4 border-b ${theme.border} flex flex-col justify-center space-y-1`}>
           <div className="flex items-center gap-3">
             {/* Поле поиска слева */}
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input 
-                placeholder="Поиск чатов..." 
-                className="pl-10 bg-white/5 border-white/10 text-white placeholder:!text-[#9da3af] focus:border-white/20" 
+              <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${theme.text.secondary}`} />
+              <Input
+                placeholder="Поиск чатов..."
+                className={`pl-10 ${theme.input} focus:border-primary/50`}
               />
             </div>
             
             {/* Кнопки фильтров справа */}
             <div className="flex items-center gap-2">
-              <Button 
+              <Button
                 size="icon"
-                variant="ghost" 
-                onClick={() => setActiveFilter(activeFilter === 'archive' ? null : 'archive')} 
+                variant="ghost"
+                onClick={() => setActiveFilter(activeFilter === 'archive' ? null : 'archive')}
                 className={`h-8 w-8 transition-colors ${
-                  activeFilter === 'archive' 
-                    ? 'text-accent-red border border-accent-red/60 bg-accent-red/10 hover:bg-accent-red/20' 
-                    : 'text-gray-400 hover:text-white hover:bg-white/10'
+                  activeFilter === 'archive'
+                    ? theme.button.active
+                    : theme.button.ghost
                 }`}
               >
                 <Archive size={14} />
               </Button>
-              <Button 
+              <Button
                 size="icon"
-                variant="ghost" 
-                onClick={() => setActiveFilter(activeFilter === 'filter' ? null : 'filter')} 
+                variant="ghost"
+                onClick={() => setActiveFilter(activeFilter === 'filter' ? null : 'filter')}
                 className={`h-8 w-8 transition-colors ${
-                  activeFilter === 'filter' 
-                    ? 'text-accent-red border border-accent-red/60 bg-accent-red/10 hover:bg-accent-red/20' 
-                    : 'text-gray-400 hover:text-white hover:bg-white/10'
+                  activeFilter === 'filter'
+                    ? theme.button.active
+                    : theme.button.ghost
                 }`}
               >
                 <Filter size={14} />
@@ -758,19 +793,19 @@ const SidebarChat: React.FC = () => {
               <>
                 {initialLoading ? (
                   <div className="hidden">
-                    
+
                   </div>
                 ) : conversations.length === 0 ? (
                   <div className="space-y-2 pb-4">
                     {selectedSupergroupId && showNoChatsHint ? (
                       <div className="text-center py-4">
-                        <p className="text-gray-500 text-xs">
+                        <p className={`text-xs ${theme.text.muted}`}>
                           Нет чатов в выбранной группе
                         </p>
                       </div>
                     ) : !user?.id ? (
                       <div className="text-center py-4">
-                        <p className="text-gray-500 text-xs">
+                        <p className={`text-xs ${theme.text.muted}`}>
                           Войдите в систему для создания чатов
                         </p>
                       </div>
@@ -801,15 +836,16 @@ const SidebarChat: React.FC = () => {
                     handleSaveRename={handleSaveRename}
                     setEditingChatId={setEditingChatId}
                     className="space-y-2 pb-4 px-4"
+                    isLightTheme={isLightTheme}
                   />
                 )}
               </>
             )}
           </ScrollArea>
         </div>
-        
+
         {/* Bottom alignment container - buttons removed, now controlled by main sidebar */}
-        <div className={`border-t border-white/10 mt-auto min-h-24 flex items-center ${!groupsPanelCollapsed ? 'p-2' : 'p-3'}`}>
+        <div className={`border-t ${theme.border} mt-auto min-h-24 flex items-center ${!groupsPanelCollapsed ? 'p-2' : 'p-3'}`}>
           {/* Empty container for potential future use */}
         </div>
         

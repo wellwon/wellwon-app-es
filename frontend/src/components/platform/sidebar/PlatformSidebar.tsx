@@ -18,8 +18,8 @@ const PlatformSidebar = () => {
 
   return (
     <div className="flex h-screen">
-      {/* Главное меню - цвет #2c2c33 */}
-      <div style={{ backgroundColor: '#2c2c33' }}>
+      {/* Главное меню - цвет #232328 (согласно дизайн-системе Declarant) */}
+      <div style={{ backgroundColor: '#232328' }}>
         <SidebarMain />
       </div>
       {/* Чат-сайдбар - цвет #232328 */}

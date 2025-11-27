@@ -52,6 +52,8 @@ const UniversalProfileDropdown = ({
 
   const handleSignOut = async () => {
     onClose();
+    // Сохраняем текущий путь для редиректа после повторного входа
+    const currentPath = location.pathname;
     const { error } = await signOut();
     if (error) {
       toast({
@@ -65,7 +67,10 @@ const UniversalProfileDropdown = ({
         description: "Вы вышли из системы",
         variant: "success",
       });
-      navigate('/');
+      // Редиректим на страницу авторизации с сохранением текущего пути
+      // Это позволит вернуться обратно после повторного входа
+      const redirectParam = encodeURIComponent(currentPath);
+      navigate(`/auth?mode=login&redirect=${redirectParam}`);
     }
   };
 

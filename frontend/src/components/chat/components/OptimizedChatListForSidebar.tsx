@@ -24,6 +24,7 @@ interface OptimizedChatListForSidebarProps {
   handleSaveRename: (chatId: string, newName: string) => Promise<void>;
   setEditingChatId: (id: string | null) => void;
   className?: string;
+  isLightTheme?: boolean;
 }
 
 interface ChatItemProps {
@@ -41,24 +42,26 @@ interface ChatItemProps {
   editingChatId: string | null;
   handleSaveRename: (chatId: string, newName: string) => Promise<void>;
   setEditingChatId: (id: string | null) => void;
+  isLightTheme?: boolean;
 }
 
 // Мемоизированный элемент чата
-const ChatItem = memo<ChatItemProps>(({ 
-  conversation, 
-  chats, 
-  activeChat, 
-  onChatSelect, 
-  effectiveUserType, 
-  formatDate, 
-  handleRenameChat, 
+const ChatItem = memo<ChatItemProps>(({
+  conversation,
+  chats,
+  activeChat,
+  onChatSelect,
+  effectiveUserType,
+  formatDate,
+  handleRenameChat,
   handleDeleteConversation,
   isOpen,
   contentType,
   selectedDeal,
   editingChatId,
   handleSaveRename,
-  setEditingChatId
+  setEditingChatId,
+  isLightTheme
 }) => {
   const isActive = activeChat?.id === conversation.id;
   const isAdmin = effectiveUserType === 'ww_admin' || effectiveUserType === 'ww_manager' || effectiveUserType === 'ww_developer';
@@ -74,15 +77,19 @@ const ChatItem = memo<ChatItemProps>(({
         className={cn(
           "group relative px-3 py-2.5 rounded-lg cursor-pointer border-l-2",
           isActive
-            ? 'bg-white/10 border-l-accent-red border-r border-t border-b border-white/20'
-            : 'hover:bg-white/5 border-l-transparent group-hover:border-l-accent-red/60 border-r border-t border-b border-transparent hover:border-white/10'
+            ? isLightTheme
+              ? 'bg-gray-100 border-l-accent-red border-r border-t border-b border-gray-300'
+              : 'bg-white/10 border-l-accent-red border-r border-t border-b border-white/20'
+            : isLightTheme
+              ? 'bg-white hover:bg-gray-50 border-l-transparent group-hover:border-l-accent-red/60 border-r border-t border-b border-gray-200 hover:border-gray-300'
+              : 'hover:bg-white/5 border-l-transparent group-hover:border-l-accent-red/60 border-r border-t border-b border-transparent hover:border-white/10'
         )}
       >
         <div className="flex justify-between items-start gap-2">
           <div className="flex-1 min-w-0 mr-2">
             <div className="flex items-center justify-between gap-2 mb-1">
               <div className="flex items-center gap-1 flex-1 min-w-0">
-                <h4 className="text-white text-sm font-medium truncate pr-2">
+                <h4 className={`text-sm font-medium truncate pr-2 ${isLightTheme ? 'text-gray-900' : 'text-white'}`}>
                   {conversation.title}
                 </h4>
                 <TelegramIndicator chat={conversation} className="flex-shrink-0" />
@@ -101,8 +108,8 @@ const ChatItem = memo<ChatItemProps>(({
                     variant="secondary"
                     className={cn(
                       "text-[10px] h-auto shadow-lg px-1.5 py-0.5 flex-shrink-0 border",
-                      isOpen && contentType === 'deal-summary' && selectedDeal?.dealNumber === conversation.dealInfo.dealNumber 
-                        ? 'bg-accent-red text-white border-accent-red' 
+                      isOpen && contentType === 'deal-summary' && selectedDeal?.dealNumber === conversation.dealInfo.dealNumber
+                        ? 'bg-accent-red text-white border-accent-red'
                         : 'bg-accent-red/20 text-accent-red border-accent-red/30'
                     )}
                   >
@@ -115,7 +122,7 @@ const ChatItem = memo<ChatItemProps>(({
             {isAdmin ? (
               <CompanyBadge chatId={conversation.id} />
             ) : (
-              <p className="text-gray-400 text-xs">
+              <p className={`text-xs ${isLightTheme ? 'text-gray-500' : 'text-gray-400'}`}>
                 {formatDate(conversation.updatedAt)}
               </p>
             )}
@@ -130,11 +137,15 @@ const ChatItem = memo<ChatItemProps>(({
               variant="ghost"
               size="icon"
               onClick={e => handleRenameChat(e, conversation.id)}
-              className="absolute top-2 right-8 opacity-0 group-hover:opacity-100 h-6 w-6 hover:bg-white/20 text-gray-400 hover:text-white"
+              className={`absolute top-2 right-8 opacity-0 group-hover:opacity-100 h-6 w-6 ${
+                isLightTheme
+                  ? 'hover:bg-gray-200 text-gray-500 hover:text-gray-900'
+                  : 'hover:bg-white/20 text-gray-400 hover:text-white'
+              }`}
             >
               <Edit3 size={12} />
             </Button>
-            
+
             {/* Delete button */}
             <Button
               variant="ghost"
@@ -161,6 +172,7 @@ const ChatItem = memo<ChatItemProps>(({
     prevProps.editingChatId === nextProps.editingChatId &&
     prevProps.isOpen === nextProps.isOpen &&
     prevProps.contentType === nextProps.contentType &&
+    prevProps.isLightTheme === nextProps.isLightTheme &&
     JSON.stringify(prevProps.selectedDeal) === JSON.stringify(nextProps.selectedDeal)
   );
 });
@@ -168,7 +180,7 @@ const ChatItem = memo<ChatItemProps>(({
 ChatItem.displayName = 'ChatItem';
 
 // Главный оптимизированный компонент списка чатов для сайдбара
-export const OptimizedChatListForSidebar = memo<OptimizedChatListForSidebarProps>(({ 
+export const OptimizedChatListForSidebar = memo<OptimizedChatListForSidebarProps>(({
   chats,
   activeChat,
   onChatSelect,
@@ -183,7 +195,8 @@ export const OptimizedChatListForSidebar = memo<OptimizedChatListForSidebarProps
   editingChatId,
   handleSaveRename,
   setEditingChatId,
-  className 
+  className,
+  isLightTheme
 }) => {
   return (
     <div className={cn("space-y-2 pb-4", className)}>
@@ -204,6 +217,7 @@ export const OptimizedChatListForSidebar = memo<OptimizedChatListForSidebarProps
           editingChatId={editingChatId}
           handleSaveRename={handleSaveRename}
           setEditingChatId={setEditingChatId}
+          isLightTheme={isLightTheme}
         />
       ))}
     </div>
@@ -214,7 +228,8 @@ export const OptimizedChatListForSidebar = memo<OptimizedChatListForSidebarProps
     prevProps.conversations.length === nextProps.conversations.length &&
     prevProps.activeChat?.id === nextProps.activeChat?.id &&
     prevProps.editingChatId === nextProps.editingChatId &&
-    prevProps.conversations.every((conv, index) => 
+    prevProps.isLightTheme === nextProps.isLightTheme &&
+    prevProps.conversations.every((conv, index) =>
       conv.id === nextProps.conversations[index]?.id &&
       conv.title === nextProps.conversations[index]?.title &&
       conv.unreadCount === nextProps.conversations[index]?.unreadCount

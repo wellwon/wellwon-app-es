@@ -3,7 +3,7 @@
 // =============================================================================
 
 import React from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { usePlatformPro } from '@/contexts/PlatformProContext';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useAuth } from '@/contexts/AuthContext';
@@ -81,7 +81,7 @@ const PlatformProSidebar: React.FC = () => {
           className={`h-8 w-8 p-0 rounded-lg transition-colors flex items-center justify-center ${theme.button.default}`}
           aria-label={sidebarCollapsed ? 'Развернуть сайдбар' : 'Свернуть сайдбар'}
         >
-          {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
         </button>
       </div>
 

@@ -79,11 +79,12 @@ start_server() {
             --http 2 \
             > "${LOG_DIR}/server.log" 2>&1 &
     else
-        echo -e "${GREEN}Mode: DEVELOPMENT (reload enabled)${NC}"
+        echo -e "${GREEN}Mode: DEVELOPMENT (reload enabled, watching only app/ folder)${NC}"
         nohup granian --interface asgi app.server:app \
             --host 0.0.0.0 \
             --port 5002 \
             --reload \
+            --reload-paths app \
             --http 1 \
             > "${LOG_DIR}/server.log" 2>&1 &
     fi

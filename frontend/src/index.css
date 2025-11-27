@@ -162,6 +162,12 @@
 }
 
 @layer components {
+  /* Disable all transitions during theme switch */
+  .no-transitions,
+  .no-transitions * {
+    transition: none !important;
+  }
+
   /* Glass Card Effect */
   .glass-card {
     background: linear-gradient(135deg, hsl(var(--light-gray) / 0.8) 0%, hsl(var(--dark-gray) / 0.8) 100%);
