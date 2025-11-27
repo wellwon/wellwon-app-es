@@ -34,13 +34,11 @@ INTERNAL_TO_WS_EVENT_TYPE_MAP = {
     'UserAuthenticated': 'user_account_update',
     'UserPasswordChanged': 'user_account_update',
     'UserPasswordReset': 'user_account_update',
-    'UserPasswordResetViaSecret': 'user_account_update',
     'UserProfileUpdated': 'user_profile_updated',
     'UserEmailVerified': 'user_account_update',
     'UserAccountDeleted': 'user_account_remove',
     'UserAccountDeactivated': 'user_account_update',
     'UserAccountReactivated': 'user_account_update',
-    'UserAdminStatusUpdated': 'user_admin_status_updated',  # Admin panel status changes
 
     # =========================================================================
     # CES EVENTS (Compensating Event System - External Change Detection)
@@ -89,7 +87,6 @@ INTERNAL_TO_WS_EVENT_TYPE_MAP = {
     'MessagesRead': 'messages_read',
     'ChatTelegramLinked': 'chat_telegram_linked',
     'ChatTelegramUnlinked': 'chat_telegram_unlinked',
-    'TelegramMessageReceived': 'message_created',  # Telegram message → same as regular message
 
     # =========================================================================
     # SYSTEM EVENTS
@@ -99,17 +96,6 @@ INTERNAL_TO_WS_EVENT_TYPE_MAP = {
     'SystemHealthUpdate': 'system_health_update',
     'ComponentHealthUpdate': 'component_health',
     'PerformanceMetrics': 'performance_metrics',
-
-    # =========================================================================
-    # SNAPSHOT EVENTS (Category: S - Full state sync)
-    # Used for initial sync on connect/reconnect
-    # =========================================================================
-    'UserSnapshot': 'user_snapshot',
-    'CompanySnapshot': 'company_snapshot',
-    'ChatSnapshot': 'chat_snapshot',
-    'ChatsListSnapshot': 'chats_list_snapshot',
-    'MessagesSnapshot': 'messages_snapshot',
-    'CompanyMembersSnapshot': 'company_members_snapshot',
 }
 
 

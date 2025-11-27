@@ -16,7 +16,6 @@ import os
 import logging
 import json
 import secrets
-import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, Final, Union, Tuple
 from uuid import UUID
@@ -68,158 +67,11 @@ JWT_REFRESH_TOKEN_REUSE_WINDOW: Final[int] = int(
     os.getenv("JWT_REFRESH_TOKEN_REUSE_WINDOW", "10")  # seconds
 )
 
-# =============================================================================
-# Token Fingerprinting Configuration (Context-based theft detection)
-# =============================================================================
-JWT_FINGERPRINT_ENABLED: Final[bool] = os.getenv("JWT_FINGERPRINT_ENABLED", "true").lower() == "true"
-JWT_FINGERPRINT_STRICT: Final[bool] = os.getenv("JWT_FINGERPRINT_STRICT", "false").lower() == "true"
-# Fingerprint mode: "ip_only" allows browser switching, "full" includes User-Agent
-JWT_FINGERPRINT_MODE: Final[str] = os.getenv("JWT_FINGERPRINT_MODE", "ip_only")
-
 if not JWT_SECRET_KEY_ENV:
     log.critical("CRITICAL: JWT_SECRET_KEY is not set; aborting startup.")
     raise RuntimeError("JWT_SECRET_KEY is required for JWT authentication.")
 
 JWT_SECRET_KEY: Final[str] = JWT_SECRET_KEY_ENV
-
-
-# =============================================================================
-# Context-Based Fingerprint Functions (Token Theft Detection)
-# =============================================================================
-
-def generate_fingerprint(
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
-        additional_context: Optional[str] = None
-) -> str:
-    """
-    Generate a fingerprint hash from client context.
-
-    Security Best Practice:
-    - Binds token to client context (IP and optionally User-Agent)
-    - Detects token theft when used from different context
-    - Uses SHA-256 for collision resistance
-
-    Modes (JWT_FINGERPRINT_MODE env var):
-    - "ip_only": Only IP address (allows browser switching on same machine)
-    - "full": IP + User-Agent (stricter, but logs out on browser switch)
-
-    Args:
-        ip_address: Client IP address (X-Forwarded-For or direct)
-        user_agent: Browser/client User-Agent header
-        additional_context: Optional extra binding (e.g., device ID)
-
-    Returns:
-        SHA-256 hash of combined context (truncated to 16 chars for token size)
-    """
-    # Normalize inputs
-    ip = (ip_address or "unknown").strip().lower()
-    extra = (additional_context or "").strip()
-
-    # Build context based on mode
-    if JWT_FINGERPRINT_MODE == "full":
-        # Full mode: IP + User-Agent (stricter security, but breaks on browser switch)
-        ua = (user_agent or "unknown").strip().lower()
-        context = f"{ip}|{ua}|{extra}"
-    else:
-        # IP-only mode (default): allows browser switching on same IP
-        context = f"{ip}|{extra}"
-
-    # Hash and truncate (16 chars = 64 bits, sufficient for fingerprint)
-    full_hash = hashlib.sha256(context.encode()).hexdigest()
-    return full_hash[:16]
-
-
-def extract_fingerprint_from_request(request: Request) -> str:
-    """
-    Extract fingerprint components from FastAPI Request.
-
-    Handles:
-    - X-Forwarded-For (proxy/load balancer)
-    - X-Real-IP (nginx)
-    - Direct client IP
-    - User-Agent header
-
-    Args:
-        request: FastAPI Request object
-
-    Returns:
-        Generated fingerprint hash
-    """
-    # Get IP address (handle proxies)
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        # X-Forwarded-For can be comma-separated list, take first (client)
-        ip_address = forwarded.split(",")[0].strip()
-    else:
-        ip_address = request.headers.get("X-Real-IP") or (
-            request.client.host if request.client else "unknown"
-        )
-
-    # Get User-Agent
-    user_agent = request.headers.get("User-Agent", "unknown")
-
-    return generate_fingerprint(ip_address, user_agent)
-
-
-def extract_fingerprint_from_websocket(websocket: WebSocket) -> str:
-    """
-    Extract fingerprint components from WebSocket connection.
-
-    Args:
-        websocket: FastAPI WebSocket object
-
-    Returns:
-        Generated fingerprint hash
-    """
-    # Get IP address
-    forwarded = websocket.headers.get("X-Forwarded-For")
-    if forwarded:
-        ip_address = forwarded.split(",")[0].strip()
-    else:
-        ip_address = websocket.headers.get("X-Real-IP") or (
-            websocket.client.host if websocket.client else "unknown"
-        )
-
-    # Get User-Agent
-    user_agent = websocket.headers.get("User-Agent", "unknown")
-
-    return generate_fingerprint(ip_address, user_agent)
-
-
-def validate_fingerprint(
-        token_fingerprint: Optional[str],
-        request_fingerprint: str,
-        strict: bool = False
-) -> bool:
-    """
-    Validate that token fingerprint matches request context.
-
-    Args:
-        token_fingerprint: Fingerprint stored in token (may be None for old tokens)
-        request_fingerprint: Fingerprint generated from current request
-        strict: If True, reject tokens without fingerprint
-
-    Returns:
-        True if fingerprint matches or validation is skipped
-    """
-    # No fingerprint in token
-    if not token_fingerprint:
-        if strict:
-            log.warning("Token missing fingerprint in strict mode")
-            return False
-        # Non-strict: allow tokens without fingerprint (backward compat)
-        return True
-
-    # Compare fingerprints
-    if token_fingerprint != request_fingerprint:
-        log.warning(
-            f"Fingerprint mismatch: token={token_fingerprint}, "
-            f"request={request_fingerprint}. Possible token theft."
-        )
-        return False
-
-    return True
 
 
 # =============================================================================
@@ -501,65 +353,27 @@ class JwtTokenManager:
             token: str,
             payload: Dict[str, Any]
     ) -> bool:
-        """
-        Validate refresh token against stored metadata using CacheManager.
-
-        IMPORTANT: If token is not found in Redis (e.g., Redis restart, TTL expired),
-        we trust the JWT signature and expiry as fallback. This prevents users from
-        being logged out when Redis data is lost.
-
-        Security model:
-        - JWT signature + expiry = cryptographic proof of validity
-        - Redis storage = ability to revoke tokens early
-        - If Redis is empty, we lose revocation but maintain session continuity
-        """
+        """Validate refresh token against stored metadata using CacheManager."""
         try:
             jti = payload.get('jti')
 
-            if not jti:
-                # Old tokens without JTI - trust JWT signature
-                log.debug(f"Refresh token for user {user_id} has no JTI, trusting JWT signature")
-                return True
-
-            # Check if token is explicitly revoked (blacklisted)
-            blacklist_key = self.cache_manager._make_key('auth', 'refresh', 'blacklist', jti)
-            if await self.cache_manager.exists(blacklist_key):
-                log.warning(f"Refresh token {jti[:8]}... is blacklisted for user {user_id}")
-                return False
-
-            # Check if token exists in active storage
+            # Check if token exists
             token_key = self.cache_manager._make_key('auth', 'refresh', 'token', user_id, jti)
             stored_data = await self.cache_manager.get_json(token_key)
 
             if stored_data:
-                is_active = stored_data.get("active", False)
-                if not is_active:
-                    log.debug(f"Refresh token {jti[:8]}... marked inactive for user {user_id}")
-                return is_active
+                return stored_data.get("active", False)
 
             # Check grace period for recently rotated tokens
             grace_key = self.cache_manager._make_key('auth', 'refresh', 'grace', user_id, jti)
             if await self.cache_manager.exists(grace_key):
-                log.debug(f"Refresh token {jti[:8]}... in grace period for user {user_id}")
                 return True
 
-            # TOKEN NOT FOUND IN REDIS - this is the key fix!
-            # Trust the JWT if it's cryptographically valid (signature + expiry checked earlier)
-            # This handles: Redis restart, TTL expiry, new Redis instance, etc.
-            log.info(
-                f"Refresh token {jti[:8]}... not found in Redis for user {user_id}. "
-                f"Trusting JWT signature (Redis may have restarted or token TTL expired)."
-            )
-
-            # Re-store the token so future refreshes work normally
-            await self._store_refresh_token(user_id, token)
-
-            return True
+            return False
 
         except Exception as e:
             log.error(f"Error validating refresh token: {e}")
-            # On error, trust the JWT signature rather than failing
-            return True
+            return False
 
     async def _revoke_refresh_token_with_grace(
             self,
@@ -662,7 +476,6 @@ async def get_current_user_ws(
     FastAPI dependency for WebSocket routes.
     - Tries ?token= query param, then 'Authorization: Bearer <token>' header.
     - On success returns the user_id (subject), else closes connection.
-    - SECURITY: Validates context fingerprint if enabled
     """
     token = token_from_query
 
@@ -680,28 +493,10 @@ async def get_current_user_ws(
         log.warning("WebSocket attempted without JWT token.")
         raise WebSocketException(code=WS_1008_POLICY_VIOLATION, reason="Token missing")
 
-    # Decode token to get payload and validate fingerprint
-    payload = JwtTokenManager.decode_token_payload(token)
-    if not payload:
+    user_id = JwtTokenManager.get_subject_from_token(token)
+    if not user_id:
         log.warning("WebSocket provided invalid or expired token.")
         raise WebSocketException(code=WS_1008_POLICY_VIOLATION, reason="Invalid token")
-
-    user_id = payload.get("sub")
-    if not user_id:
-        log.warning("WebSocket token missing subject claim.")
-        raise WebSocketException(code=WS_1008_POLICY_VIOLATION, reason="Invalid token")
-
-    # SECURITY: Validate fingerprint if enabled
-    if JWT_FINGERPRINT_ENABLED:
-        token_fingerprint = payload.get("fgp")
-        request_fingerprint = extract_fingerprint_from_websocket(websocket)
-
-        if not validate_fingerprint(token_fingerprint, request_fingerprint, JWT_FINGERPRINT_STRICT):
-            log.warning(f"WebSocket token fingerprint validation failed for user {user_id}")
-            raise WebSocketException(
-                code=WS_1008_POLICY_VIOLATION,
-                reason="Token context mismatch"
-            )
 
     log.debug(f"WebSocket authenticated user: {user_id}")
     return user_id
@@ -722,31 +517,13 @@ async def get_current_user(
     - Expects 'Authorization: Bearer <token>'.
     - Returns subject (user_id) or raises HTTPException(401).
     - CQRS COMPLIANT: Uses Query Bus instead of direct repository access
-    - SECURITY: Validates context fingerprint if enabled
     """
     if not credentials or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid auth scheme")
 
-    # Decode token to get full payload (for fingerprint validation)
-    payload = JwtTokenManager.decode_token_payload(credentials.credentials)
-    if not payload:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
-
-    user_id = payload.get("sub")
+    user_id = JwtTokenManager.get_subject_from_token(credentials.credentials)
     if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token subject")
-
-    # SECURITY: Validate context fingerprint if enabled
-    if JWT_FINGERPRINT_ENABLED and request:
-        token_fingerprint = payload.get("fgp")  # fingerprint claim
-        request_fingerprint = extract_fingerprint_from_request(request)
-
-        if not validate_fingerprint(token_fingerprint, request_fingerprint, JWT_FINGERPRINT_STRICT):
-            log.warning(f"Token fingerprint validation failed for user {user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token context mismatch - please re-authenticate"
-            )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
     try:
         user_uuid = UUID(user_id)

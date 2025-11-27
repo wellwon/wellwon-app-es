@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { API } from '@/api/core';
+import { supabase } from '@/integrations/supabase/client';
 import { GlassCard } from '@/components/design-system/GlassCard';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { X, Upload, Eye, EyeOff, Check, Camera } from 'lucide-react';
@@ -159,17 +159,20 @@ export const EnhancedProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOp
     setIsLoading(true);
 
     try {
-      // Upload avatar via API
-      const formDataUpload = new FormData();
-      formDataUpload.append('file', file);
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${user.id}/${Date.now()}.${fileExt}`;
 
-      const { data } = await API.post<{ url: string }>('/user/avatar', formDataUpload, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(fileName, file, { upsert: true });
 
-      setFormData(prev => ({ ...prev, avatar_url: data.url }));
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(fileName);
+
+      setFormData(prev => ({ ...prev, avatar_url: data.publicUrl }));
 
       toast({
         title: "Успех",
@@ -178,10 +181,9 @@ export const EnhancedProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOp
       });
     } catch (error) {
       logger.error('Avatar upload error', error, { component: 'EnhancedProfileEditModal' });
-      // API may not be implemented yet
       toast({
         title: "Ошибка",
-        description: "Загрузка аватара временно недоступна",
+        description: "Не удалось загрузить аватар",
         variant: "error"
       });
     } finally {

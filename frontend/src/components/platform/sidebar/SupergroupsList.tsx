@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import * as telegramApi from '@/api/telegram';
+import { TelegramChatService } from '@/services/TelegramChatService';
 import { useAuth } from '@/contexts/AuthContext';
 
 import { OptimizedImage } from '@/components/chat/components/OptimizedImage';
@@ -22,7 +22,7 @@ export const SupergroupsList: React.FC = () => {
         setError(null);
         
         // Для разработчиков загружаем все супергруппы, для обычных пользователей - только их компании
-        const data = await telegramApi.getAllSupergroups();
+        const data = await TelegramChatService.getAllSupergroups();
         setSupergroups(data);
         
         logger.info('Loaded all supergroups', { 

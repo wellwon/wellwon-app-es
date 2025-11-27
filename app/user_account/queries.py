@@ -97,28 +97,6 @@ class GetUserResourcesQuery(Query):
 
 
 # =============================================================================
-# Admin Management Queries
-# =============================================================================
-
-class GetAllUsersAdminQuery(Query):
-    """Get all users for admin management panel"""
-    include_inactive: bool = True
-    limit: int = 100
-    offset: int = 0
-
-
-class AdminUserInfo(BaseModel):
-    """User info for admin panel"""
-    id: uuid.UUID
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    email: Optional[str] = None
-    is_active: bool = True
-    is_developer: bool = False
-    created_at: datetime
-
-
-# =============================================================================
 # Auth Service Specific Queries
 # =============================================================================
 

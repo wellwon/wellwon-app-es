@@ -82,7 +82,6 @@ async def _import_all_handler_modules() -> Dict[str, Any]:
         # Chat query handlers
         ("app.chat.query_handlers.chat_query_handlers", "chat queries"),
         ("app.chat.query_handlers.message_query_handlers", "message queries"),
-        ("app.chat.query_handlers.template_query_handlers", "template queries"),
     ]
 
     successful_imports = 0

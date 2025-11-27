@@ -4,10 +4,7 @@
 # Description: Route registration for FastAPI application
 # =============================================================================
 
-import os
 import logging
-from pathlib import Path
-from starlette.staticfiles import StaticFiles
 from app.core.fastapi_types import FastAPI
 
 # Import routers from existing structure
@@ -16,7 +13,6 @@ from app.api.routers.wse_router import router as wse_router
 from app.api.routers.company_router import router as company_router
 from app.api.routers.chat_router import router as chat_router
 from app.api.routers.telegram_router import router as telegram_router
-from app.api.routers.admin_router import router as admin_router
 
 # Import health endpoints
 from app.core.health import register_health_endpoints
@@ -36,9 +32,6 @@ def setup_routes(app: FastAPI) -> None:
     # Register health endpoints
     register_health_endpoints(app)
 
-    # Mount static files for local storage (logos, chat files, etc.)
-    setup_static_files(app)
-
 
 def register_core_routers(app: FastAPI) -> None:
     """Register core application routers"""
@@ -48,7 +41,6 @@ def register_core_routers(app: FastAPI) -> None:
     app.include_router(company_router, tags=["Companies"])
     app.include_router(chat_router, tags=["Chat"])
     app.include_router(telegram_router, tags=["Telegram"])
-    app.include_router(admin_router, tags=["Admin"])
 
     logger.info("Core routers registered")
 
@@ -71,21 +63,3 @@ def register_optional_routers(app: FastAPI) -> None:
         logger.info("Prometheus metrics router registered")
     except ImportError:
         pass  # Not critical
-
-
-def setup_static_files(app: FastAPI) -> None:
-    """Mount static files directory for local file storage"""
-    storage_path = os.getenv("STORAGE_PATH", "storage")
-    storage_url = os.getenv("STORAGE_URL", "/static/storage")
-
-    # Create storage directory if it doesn't exist
-    storage_dir = Path(storage_path)
-    storage_dir.mkdir(parents=True, exist_ok=True)
-
-    # Mount static files
-    app.mount(
-        storage_url,
-        StaticFiles(directory=str(storage_dir)),
-        name="storage"
-    )
-    logger.info(f"Static files mounted: {storage_url} -> {storage_dir}")

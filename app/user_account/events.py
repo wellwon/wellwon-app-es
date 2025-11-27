@@ -96,17 +96,6 @@ class UserProfileUpdated(BaseEvent):
     user_type: Optional[str] = None
     is_developer: Optional[bool] = None
 
-
-@domain_event(category="domain")
-class UserAdminStatusUpdated(BaseEvent):
-    """User admin status updated (active, developer flags) by admin"""
-    event_type: Literal["UserAdminStatusUpdated"] = "UserAdminStatusUpdated"
-    user_id: uuid.UUID
-    admin_user_id: uuid.UUID
-    is_active: Optional[bool] = None
-    is_developer: Optional[bool] = None
-
-
 # =============================================================================
 # EOF
 # =============================================================================

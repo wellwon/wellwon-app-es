@@ -24,7 +24,6 @@ from app.user_account.events import (
     UserAccountDeleted,
     UserEmailVerified,
     UserProfileUpdated,
-    UserAdminStatusUpdated,
 )
 
 
@@ -52,7 +51,6 @@ class UserAccountAggregateState(BaseModel):
     phone: Optional[str] = None
     user_type: str = "client"  # Default user type, can be any string
     user_number: Optional[int] = None  # Auto-increment user number
-    is_developer: bool = False  # Developer flag for admin panel
 
 
 class UserAccountAggregate:
@@ -205,28 +203,6 @@ class UserAccountAggregate:
         )
         self._apply_and_record(event)
 
-    def update_admin_status(
-            self,
-            admin_user_id: uuid.UUID,
-            is_active: Optional[bool] = None,
-            is_developer: Optional[bool] = None
-    ) -> None:
-        """
-        Handle UpdateUserAdminStatusCommand:
-        - Update user admin status (active, developer flags).
-        - Emit UserAdminStatusUpdated event.
-        """
-        if is_active is None and is_developer is None:
-            raise ValueError("At least one status field must be provided.")
-
-        event = UserAdminStatusUpdated(
-            user_id=self.id,
-            admin_user_id=admin_user_id,
-            is_active=is_active,
-            is_developer=is_developer
-        )
-        self._apply_and_record(event)
-
     # -------------------------------------------------------------------------
     # Internal Event Application
     # -------------------------------------------------------------------------
@@ -254,8 +230,6 @@ class UserAccountAggregate:
             self._on_email_verified(event)
         elif isinstance(event, UserProfileUpdated):
             self._on_profile_updated(event)
-        elif isinstance(event, UserAdminStatusUpdated):
-            self._on_admin_status_updated(event)
 
     # -------------------------------------------------------------------------
     # State Update Methods
@@ -299,13 +273,6 @@ class UserAccountAggregate:
             self.state.bio = event.bio
         if event.phone is not None:
             self.state.phone = event.phone
-
-    def _on_admin_status_updated(self, event: UserAdminStatusUpdated) -> None:
-        """Apply UserAdminStatusUpdated event to state"""
-        if event.is_active is not None:
-            self.state.is_active = event.is_active
-        if event.is_developer is not None:
-            self.state.is_developer = event.is_developer
 
     # -------------------------------------------------------------------------
     # Snapshot Support for Event Store

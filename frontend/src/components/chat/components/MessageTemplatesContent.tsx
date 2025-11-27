@@ -7,7 +7,8 @@ import { Card } from '@/components/ui/card';
 import { InlineChatTemplateEdit } from './InlineChatTemplateEdit';
 import { useToast } from '@/hooks/use-toast';
 import { useRealtimeChatContext } from '@/contexts/RealtimeChatContext';
-import * as chatApi from '@/api/chat';
+import { MessageTemplateService } from '@/services/MessageTemplateService';
+import { supabase } from '@/integrations/supabase/client';
 import type { MessageTemplate } from '@/utils/messageTemplates';
 
 const CATEGORY_ICONS = {
@@ -27,16 +28,24 @@ export const MessageTemplatesContent: React.FC = () => {
   const [templates, setTemplates] = useState<Record<string, MessageTemplate[]>>({});
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load templates on component mount
+  // Load templates from Supabase on component mount
   useEffect(() => {
-    loadTemplates();
-    // Note: Real-time updates are handled via WSE, not subscription
+    loadTemplatesFromSupabase();
+    
+    // Subscribe to realtime changes
+    const channel = MessageTemplateService.subscribeToChanges(() => {
+      loadTemplatesFromSupabase();
+    });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
-  const loadTemplates = async () => {
+  const loadTemplatesFromSupabase = async () => {
     setIsLoading(true);
     try {
-      const templatesData = await chatApi.getTemplatesByCategory(true);
+      const templatesData = await MessageTemplateService.getAllTemplates();
       setTemplates(templatesData);
     } catch (error) {
       
@@ -89,27 +98,33 @@ export const MessageTemplatesContent: React.FC = () => {
   };
 
   const handleSaveTemplate = async (updatedTemplate: MessageTemplate) => {
-    // Template update API not yet implemented - apply changes locally only
-    // Update local state optimistically
-    setTemplates(prev => {
-      const newTemplates = { ...prev };
-      Object.keys(newTemplates).forEach(category => {
-        newTemplates[category] = newTemplates[category].map(t =>
-          t.id === updatedTemplate.id ? updatedTemplate : t
-        );
+    try {
+      const success = await MessageTemplateService.updateTemplate(updatedTemplate.id, updatedTemplate);
+      
+      if (success) {
+        toast({
+          title: "Шаблон сохранен",
+          description: "Изменения успешно сохранены",
+        });
+        
+        // Show visual feedback
+        setSavedTemplateId(updatedTemplate.id);
+        setTimeout(() => setSavedTemplateId(null), 2000);
+        
+        // Reload templates to get fresh data
+        await loadTemplatesFromSupabase();
+      } else {
+        throw new Error('Failed to update template');
+      }
+    } catch (error) {
+      
+      toast({
+        title: "Ошибка",
+        description: "Не удалось сохранить изменения",
+        variant: "error",
       });
-      return newTemplates;
-    });
-
-    toast({
-      title: "Шаблон обновлен",
-      description: "Изменения применены локально",
-    });
-
-    // Show visual feedback
-    setSavedTemplateId(updatedTemplate.id);
-    setTimeout(() => setSavedTemplateId(null), 2000);
-
+    }
+    
     setEditingTemplate(null);
   };
 

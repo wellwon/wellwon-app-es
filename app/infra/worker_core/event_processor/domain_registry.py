@@ -157,9 +157,7 @@ def create_company_domain() -> DomainRegistration:
 
     def company_projector_factory():
         from app.company.projectors import CompanyProjector
-        from app.infra.read_repos.company_read_repo import CompanyReadRepo
-        read_repo = CompanyReadRepo()
-        return CompanyProjector(read_repo)
+        return CompanyProjector()
 
     return DomainRegistration(
         name="company",
@@ -221,9 +219,7 @@ def create_chat_domain() -> DomainRegistration:
 
     def chat_projector_factory():
         from app.chat.projectors import ChatProjector
-        from app.infra.read_repos.chat_read_repo import ChatReadRepo
-        read_repo = ChatReadRepo()
-        return ChatProjector(read_repo)
+        return ChatProjector()
 
     return DomainRegistration(
         name="chat",

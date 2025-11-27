@@ -10,6 +10,8 @@ import { SidebarUserCard } from '@/components/chat';
 import CreateCompanyDialog from './CreateCompanyDialog';
 import { AdminFormsModal } from '@/components/chat/components/AdminFormsModal';
 import LayoutSwitcher from './LayoutSwitcher';
+import { CompanyService } from '@/services/CompanyService';
+import { supabase } from '@/integrations/supabase/client';
 import type { Company } from '@/types/realtime-chat';
 
 import { ChevronRight, ChevronLeft } from 'lucide-react';

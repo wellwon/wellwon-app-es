@@ -27,8 +27,10 @@ import { formatTime } from '@/utils/dateFormatter';
 import { USER_TYPE_LABELS, CHAT_CONSTANTS } from '@/constants/chat';
 
 import { logger } from '@/utils/logger';
+import { supabase } from '@/integrations/supabase/client';
 import type { Message } from '@/types/realtime-chat';
 import TelegramMessageBubble from './TelegramMessageBubble';
+import { TelegramChatService } from '@/services/TelegramChatService';
 import { TelegramIcon } from '@/components/ui/TelegramIcon';
 import { useChatDisplayOptions } from '@/contexts/chat';
 import { ReplyMessageBubble } from './ReplyMessageBubble';
@@ -80,20 +82,11 @@ export function MessageBubble({
   };
   
 
-  // Helper function to get Telegram user display name (inlined from service)
-  const getTelegramUserDisplayName = (userData: any): string => {
-    if (!userData) return 'Пользователь';
-    const firstName = userData.first_name || '';
-    const lastName = userData.last_name || '';
-    const fullName = `${firstName} ${lastName}`.trim();
-    return userData.username || fullName || 'Пользователь';
-  };
-
   // Определяем имя отправителя с учетом опций отображения
-  const displayName = message.sender_profile
+  const displayName = message.sender_profile 
     ? `${message.sender_profile.first_name || ''} ${message.sender_profile.last_name || ''}`.trim() || 'Пользователь'
-    : (options.showTelegramNames && message.telegram_user_data)
-      ? getTelegramUserDisplayName(message.telegram_user_data)
+    : (options.showTelegramNames && message.telegram_user_data) 
+      ? TelegramChatService.getTelegramUserDisplayName(message.telegram_user_data)
       : 'Пользователь';
     
   // Определяем источник имени для показа иконки Telegram
@@ -218,7 +211,7 @@ export function MessageBubble({
     
     // Если нет профиля, но есть telegram данные, генерируем инициалы из них
     if (message.telegram_user_data) {
-      const telegramName = getTelegramUserDisplayName(message.telegram_user_data);
+      const telegramName = TelegramChatService.getTelegramUserDisplayName(message.telegram_user_data);
       return extractInitials(telegramName);
     }
     
@@ -384,12 +377,49 @@ export function MessageBubble({
   };
 
   // Функция для создания подписанного URL для файла
-  // TODO: Implement file URL signing via backend API when MinIO/S3 is set up
   const createSignedUrl = async (fileUrl: string): Promise<string> => {
-    // For now, just return the original URL
-    // When file storage is migrated to MinIO/S3, this should call a backend endpoint
-    // to generate signed URLs
-    return fileUrl;
+    try {
+      const url = new URL(fileUrl);
+      
+      // Проверяем, является ли это URL Supabase Storage
+      if (!url.pathname.includes('/storage/v1/object/')) {
+        return fileUrl; // Возвращаем оригинальный URL для внешних ссылок
+      }
+      
+      const pathSegments = url.pathname.split('/');
+      
+      // Для Supabase Storage URL структура: /storage/v1/object/public/bucket-name/file-path
+      // или /storage/v1/object/sign/bucket-name/file-path  
+      const objectIndex = pathSegments.findIndex(segment => segment === 'object');
+      
+      if (objectIndex === -1 || objectIndex + 3 >= pathSegments.length) {
+        logger.warn('Invalid Supabase Storage URL format', { fileUrl });
+        return fileUrl;
+      }
+      
+      // Пропускаем 'public' или 'sign' сегмент
+      const bucketName = pathSegments[objectIndex + 2];
+      const filePath = decodeURIComponent(pathSegments.slice(objectIndex + 3).join('/'));
+      
+      if (!bucketName || !filePath) {
+        logger.warn('Missing bucket or file path', { bucketName, filePath });
+        return fileUrl;
+      }
+      
+      const { data, error } = await supabase.storage
+        .from(bucketName)
+        .createSignedUrl(filePath, 3600); // 1 час
+      
+      if (error) {
+        logger.error('Failed to create signed URL', error, { bucketName, filePath });
+        return fileUrl; // Fallback к оригинальному URL
+      }
+      
+      return data.signedUrl;
+    } catch (error) {
+      logger.error('Error creating signed URL', error, { fileUrl });
+      return fileUrl; // Fallback к оригинальному URL
+    }
   };
 
   const handleVoicePlay = async () => {

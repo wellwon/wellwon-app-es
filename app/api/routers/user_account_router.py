@@ -41,17 +41,10 @@ from app.api.models.user_account_api_models import (
     DeviceInfo,
     UserProfileResponse,
     TerminateSessionRequest,
-    ProfileWithTelegramResponse,
-    LinkTelegramRequest,
 )
 
 # Security - USE EXISTING SECURITY UTILITIES
-from app.security.jwt_auth import (
-    JwtTokenManager,
-    get_current_user,
-    extract_fingerprint_from_request,
-    JWT_FINGERPRINT_ENABLED,
-)
+from app.security.jwt_auth import JwtTokenManager, get_current_user
 
 # CQRS Commands
 from app.user_account.commands import (
@@ -240,50 +233,33 @@ async def login(
 
         session_result: SessionCreationResult = await query_bus.query(create_session_query)
 
-        # Generate cookie fingerprint for token binding (original mechanism)
+        # Generate fingerprint for token binding
         fingerprint, hashed_fingerprint = _generate_fingerprint()
-
-        # Generate context fingerprint (IP-based) for theft detection
-        context_fingerprint = extract_fingerprint_from_request(request) if JWT_FINGERPRINT_ENABLED else None
 
         # Create JWT tokens using the JWT manager
         # Family ID is used for refresh token rotation tracking
         token_family_id = secrets.token_urlsafe(32)
 
-        # Build additional claims for access token
-        access_claims = {
-            "username": username,
-            "role": role,
-            "session_id": session_result.session_id,
-            "fp": hashed_fingerprint,  # Cookie fingerprint hash for validation
-            "family_id": token_family_id,  # Token family for tracking
-        }
-
-        # Add context fingerprint if enabled (IP-based theft detection)
-        if context_fingerprint:
-            access_claims["fgp"] = context_fingerprint
-
         # Create access token with session metadata
         access_token = jwt_manager.create_access_token(
             subject=user_id_str,
-            additional_claims=access_claims,
+            additional_claims={
+                "username": username,
+                "role": role,
+                "session_id": session_result.session_id,
+                "fp": hashed_fingerprint,  # Fingerprint hash for validation
+                "family_id": token_family_id,  # Token family for tracking
+            },
             expires_delta=timedelta(minutes=15)  # 15 minutes for access token
         )
-
-        # Build additional claims for refresh token
-        refresh_claims = {
-            "fp": hashed_fingerprint,  # Cookie fingerprint for validation
-        }
-
-        # Add context fingerprint to refresh token too
-        if context_fingerprint:
-            refresh_claims["fgp"] = context_fingerprint
 
         # Create refresh token with family tracking and fingerprint
         refresh_token = jwt_manager.create_refresh_token(
             subject=user_id_str,
             token_family=token_family_id,
-            additional_claims=refresh_claims
+            additional_claims={
+                "fp": hashed_fingerprint,  # Include fingerprint for validation
+            }
         )
 
         # Store refresh token metadata in Redis via JWT manager
@@ -968,92 +944,6 @@ async def refresh_access_token(
             detail="Invalid refresh token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-
-# =============================================================================
-# TELEGRAM INTEGRATION ENDPOINTS
-# =============================================================================
-
-@router.get("/profiles/with-telegram", response_model=list[ProfileWithTelegramResponse])
-async def get_profiles_with_telegram(
-        current_user_id: Annotated[str, Depends(get_current_user)],
-) -> list[ProfileWithTelegramResponse]:
-    """
-    Get all user profiles for mentions feature.
-
-    Returns users with their telegram_user_id for @mention functionality in chat.
-    Users with linked Telegram accounts appear first.
-    """
-    from app.infra.read_repos.user_account_read_repo import UserAccountReadRepo
-
-    try:
-        profiles = await UserAccountReadRepo.get_profiles_with_telegram()
-
-        return [
-            ProfileWithTelegramResponse(
-                user_id=p["user_id"],
-                first_name=p["first_name"],
-                last_name=p["last_name"],
-                avatar_url=p["avatar_url"],
-                role_label=p["role_label"],
-                telegram_user_id=p["telegram_user_id"],
-            )
-            for p in profiles
-        ]
-
-    except Exception as e:
-        log.error(f"Failed to get profiles with telegram: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get user profiles"
-        )
-
-
-@router.post("/link-telegram", response_model=StatusResponse)
-async def link_telegram_account(
-        payload: LinkTelegramRequest,
-        current_user_id: Annotated[str, Depends(get_current_user)],
-) -> StatusResponse:
-    """
-    Link a Telegram user ID to the current WellWon account.
-
-    This enables @mentions to notify users via Telegram.
-    """
-    from app.infra.read_repos.user_account_read_repo import UserAccountReadRepo
-
-    try:
-        user_uuid = uuid.UUID(current_user_id)
-        success = await UserAccountReadRepo.update_telegram_user_id(
-            user_id=user_uuid,
-            telegram_user_id=payload.telegram_user_id
-        )
-
-        if success:
-            log.info(f"User {current_user_id} linked to Telegram user {payload.telegram_user_id}")
-            return StatusResponse(
-                status="success",
-                message="Telegram account linked successfully"
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to link Telegram account"
-            )
-
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid user ID"
-        ) from exc
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.error(f"Failed to link Telegram account: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to link Telegram account"
-        )
-
 
 # =============================================================================
 # EOF

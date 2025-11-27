@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { InlineChatTemplateEdit } from './InlineChatTemplateEdit';
-import * as chatApi from '@/api/chat';
+import { MessageTemplateService } from '@/services/MessageTemplateService';
 import type { MessageTemplate } from '@/utils/messageTemplates';
 
 interface DraftMessageBubbleProps {
@@ -209,13 +209,30 @@ export const DraftMessageBubble: React.FC<DraftMessageBubbleProps> = ({
             isOpen={isEditing}
             onClose={() => setIsEditing(false)}
             onSave={async (updatedTemplate) => {
-              // Template update API not yet implemented - apply changes locally only
-              onTemplateChange?.(updatedTemplate);
-              setIsEditing(false);
-              toast({
-                title: "Шаблон обновлен",
-                description: "Изменения применены для текущего сообщения",
-              });
+              try {
+                const success = await MessageTemplateService.updateTemplate(template.id, updatedTemplate);
+                if (success) {
+                  onTemplateChange?.(updatedTemplate);
+                  setIsEditing(false);
+                  toast({
+                    title: "Шаблон сохранен",
+                    description: "Изменения успешно сохранены в базе данных",
+                  });
+                } else {
+                  toast({
+                     variant: "error",
+                    title: "Ошибка сохранения",
+                    description: "Не удалось сохранить изменения шаблона",
+                  });
+                }
+              } catch (error) {
+                
+                toast({
+                  variant: "error",
+                  title: "Ошибка сохранения",
+                  description: "Произошла ошибка при сохранении шаблона",
+                });
+              }
             }}
             onChange={onTemplateChange}
           />

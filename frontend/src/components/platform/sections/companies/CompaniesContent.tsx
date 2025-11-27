@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { GlassCard } from '@/components/design-system/GlassCard';
 import { useAuth } from '@/contexts/AuthContext';
-import * as companyApi from '@/api/company';
+import { CompanyService } from '@/services/CompanyService';
 import { logger } from '@/utils/logger';
 import type { Company } from '@/types/realtime-chat';
 
@@ -16,7 +16,7 @@ const CompaniesContent = () => {
       
       setIsLoading(true);
       try {
-        const companies = await companyApi.getMyCompanies();
+        const companies = await CompanyService.getUserCompanies(user.id);
         setUserCompanies(companies);
       } catch (error) {
         logger.error('Error loading user companies', error, { component: 'CompaniesContent' });

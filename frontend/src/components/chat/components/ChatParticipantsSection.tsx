@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import * as telegramApi from '@/api/telegram';
+import { TelegramChatService } from '@/services/TelegramChatService';
+import { supabase } from '@/integrations/supabase/client';
 import { GlassButton } from '@/components/design-system/GlassButton';
-import { API } from '@/api/core';
 import { GlassInput } from '@/components/design-system/GlassInput';
 import { GlassCard } from '@/components/design-system/GlassCard';
 import { Badge } from '@/components/ui/badge';
@@ -78,38 +78,44 @@ export const ChatParticipantsSection: React.FC<ChatParticipantsSectionProps> = (
     setLoading(true);
     try {
       // Получаем информацию о супергруппе
-      const supergroupInfo = await telegramApi.getGroupInfo(Number(groupId));
+      const supergroupInfo = await TelegramChatService.getSupergroupInfo(groupId);
       if (!supergroupInfo) return;
 
-      // Загружаем участников Telegram (уже включает role_label)
-      const members = await telegramApi.getGroupMembers(Number(groupId));
+      // Загружаем участников Telegram
+      const members = await TelegramChatService.getSupergroupMembers(groupId);
       const nonBotMembers = members.filter(m => !m.is_bot);
 
-      // Преобразуем в формат компонента
-      const participantsWithUserData: TelegramParticipant[] = nonBotMembers.map(member => ({
-        id: member.id,
-        telegram_user_id: member.telegram_user_id,
-        first_name: member.first_name,
-        last_name: member.last_name,
-        username: member.username,
-        is_bot: member.is_bot,
-        status: member.status,
-        roleLabel: (member as any).role_label || null
-      }));
-
+      // Получаем данные пользователей Telegram
+      const tgUserIds = nonBotMembers.map(m => m.telegram_user_id);
+      const tgUsers = await TelegramChatService.getTgUsersByIds(tgUserIds);
+      
+      // Объединяем данные участников с данными пользователей
+      const participantsWithUserData: TelegramParticipant[] = nonBotMembers.map(member => {
+        const userData = tgUsers.find(user => user.id === member.telegram_user_id);
+        return {
+          id: member.id,
+          telegram_user_id: member.telegram_user_id,
+          first_name: member.first_name,
+          last_name: member.last_name,
+          username: member.username,
+          is_bot: member.is_bot,
+          status: member.status,
+          roleLabel: userData?.role_label || null
+        };
+      });
+      
       setTelegramParticipants(participantsWithUserData);
 
-      // Получаем менеджеров компании - via user API
+      // Получаем менеджеров компании
       if (supergroupInfo?.company_id) {
-        try {
-          // TODO: Add company users endpoint to fetch managers
-          // For now, we'll use the company users endpoint when available
-          const { data: managersData } = await API.get('/users/active');
-          setManagers(managersData || []);
-        } catch (err) {
-          logger.warn('Failed to load managers - endpoint may not be available yet', { error: err });
-          setManagers([]);
-        }
+        const { data: managersData, error: managersError } = await supabase
+          .from('profiles')
+          .select('user_id, first_name, last_name, avatar_url, role_label')
+          .eq('active', true);
+          
+        if (managersError) throw managersError;
+        
+        setManagers(managersData || []);
       }
     } catch (error) {
       logger.error('Failed to load chat participants', error);
@@ -124,23 +130,20 @@ export const ChatParticipantsSection: React.FC<ChatParticipantsSectionProps> = (
   };
 
   const updateTelegramUserRole = async (telegramUserId: number, newRoleLabel: string) => {
-    const groupId = activeChat?.telegram_supergroup_id;
-    if (!groupId) return;
-
     try {
-      const roleToSave = newRoleLabel.trim() || '';
-      const success = await telegramApi.updateMemberRole(Number(groupId), telegramUserId, roleToSave);
-
+      const roleToSave = newRoleLabel.trim() || null;
+      const success = await TelegramChatService.updateTgUserRole(telegramUserId, roleToSave);
+      
       if (success) {
         // Обновляем локальное состояние
-        setTelegramParticipants(prev =>
-          prev.map(p =>
-            p.telegram_user_id === telegramUserId
-              ? { ...p, roleLabel: roleToSave || null }
+        setTelegramParticipants(prev => 
+          prev.map(p => 
+            p.telegram_user_id === telegramUserId 
+              ? { ...p, roleLabel: roleToSave }
               : p
           )
         );
-
+        
         toast({
           title: 'Роль обновлена',
           description: 'Роль пользователя успешно изменена',
@@ -165,19 +168,23 @@ export const ChatParticipantsSection: React.FC<ChatParticipantsSectionProps> = (
   const updateManagerRole = async (userId: string, newRoleLabel: string) => {
     try {
       const roleToSave = newRoleLabel.trim() || null;
-
-      // Update manager role via API
-      await API.patch(`/users/${userId}/profile`, { role_label: roleToSave });
-
+      
+      const { error } = await supabase
+        .from('profiles')
+        .update({ role_label: roleToSave })
+        .eq('user_id', userId);
+      
+      if (error) throw error;
+      
       // Обновляем локальное состояние
-      setManagers(prev =>
-        prev.map(m =>
-          m.user_id === userId
+      setManagers(prev => 
+        prev.map(m => 
+          m.user_id === userId 
             ? { ...m, role_label: roleToSave }
             : m
         )
       );
-
+      
       toast({
         title: 'Роль обновлена',
         description: 'Роль менеджера успешно изменена',

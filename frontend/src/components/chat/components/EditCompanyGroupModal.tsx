@@ -13,14 +13,14 @@ import { GlassButton } from '@/components/design-system/GlassButton';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Database } from '@/integrations/supabase/types';
 import { TelegramIcon } from '@/components/ui/TelegramIcon';
-import * as companyApi from '@/api/company';
-import * as telegramApi from '@/api/telegram';
+import { CompanyService } from '@/services/CompanyService';
+import { TelegramChatService } from '@/services/TelegramChatService';
 import { CompanyLogoUploader } from './CompanyLogoUploader';
 import { toast } from '@/hooks/use-toast';
 import { logger } from '@/utils/logger';
-import { useAuth } from '@/contexts/AuthContext';
-import { API } from '@/api/core';
+import { supabase } from '@/integrations/supabase/client';
 
 interface EditCompanyGroupModalProps {
   isOpen: boolean;
@@ -43,7 +43,6 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
   preloadedCompanyData,
   preloadedSupergroupData
 }) => {
-  const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(!preloadedCompanyData || !preloadedSupergroupData);
   const [isEditing, setIsEditing] = useState(true);
   const [errors, setErrors] = useState<FormValidationErrors>({});
@@ -167,7 +166,7 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
 
   const fetchMissingData = async () => {
     try {
-      const supergroupData = await telegramApi.getGroupInfo(supergroupId);
+      const supergroupData = await TelegramChatService.getSupergroupInfo(supergroupId);
       if (supergroupData) {
         setSupergroupFormData(prev => ({
           ...prev,
@@ -191,8 +190,8 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
     try {
       // Загружаем данные компании и супергруппы параллельно
       const [companyData, supergroupData] = await Promise.all([
-        companyApi.getCompanyById(companyId as number),
-        telegramApi.getGroupInfo(supergroupId)
+        CompanyService.getCompanyById(companyId), 
+        TelegramChatService.getSupergroupInfo(supergroupId)
       ]);
       
       if (companyData) {
@@ -362,11 +361,13 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
     }));
     
     try {
-      // Call DaData API via backend
-      const { data: response } = await API.post('/companies/lookup-vat', { vat: vatValue });
-      const data = response;
-
-      if (!data) {
+      const { data, error } = await supabase.functions.invoke('dadata-api-inn', {
+        body: {
+          vat: vatValue
+        }
+      });
+      
+      if (error) {
         toast({
           title: "Ошибка поиска",
           description: "Не удалось выполнить поиск по ИНН. Попробуйте позже.",
@@ -490,35 +491,34 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
       
       // Если компании нет (companyId === 0 или undefined), создаем новую
       if (!companyId) {
-        // Проверяем текущего пользователя
-        if (!user) {
-          logger.error('Authentication error in company creation', null, { component: 'EditCompanyGroupModal' });
+        // Получаем текущего пользователя
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        
+        if (authError || !user) {
+          logger.error('Authentication error in company creation', authError, { component: 'EditCompanyGroupModal' });
           throw new Error('Необходимо войти в систему для создания компании');
         }
-
+        
         // Проверяем существование компании
-        let existingCompany = null;
-        try {
-          if (companyFormData.vat) {
-            existingCompany = await companyApi.getCompanyByVat(companyFormData.vat);
-          }
-          if (!existingCompany && companyFormData.company_name) {
-            const searchResults = await companyApi.searchCompanies(companyFormData.company_name, 1);
-            if (searchResults.length > 0 && searchResults[0].name === companyFormData.company_name) {
-              existingCompany = searchResults[0];
-            }
-          }
-        } catch (e) {
-          // Company doesn't exist, which is what we want
-        }
-
-        if (existingCompany) {
+        const companyExists = await CompanyService.checkCompanyExists(
+          companyFormData.vat,
+          companyFormData.company_name
+        );
+        
+        if (companyExists) {
+          // Находим существующую компанию
+          const { data: existingCompany } = await supabase
+            .from('companies')
+            .select('*')
+            .or(`vat.eq.${companyFormData.vat},name.eq.${companyFormData.company_name}`)
+            .single();
+          
           setDuplicateCompanyData(existingCompany);
           setShowDuplicateDialog(true);
           return;
         } else {
           // Создаем новую компанию
-          const newCompany = await companyApi.createCompany({
+          const newCompany = await CompanyService.createCompany({
             name: companyFormData.company_name,
             company_type: isProject ? 'project' : 'company',
             vat: isProject ? null : companyFormData.vat,
@@ -553,7 +553,7 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
           company_type: isProject ? 'project' : 'company',
           logo_url: companyFormData.logo_url
         };
-        await companyApi.updateCompany(companyId, companyUpdates);
+        await CompanyService.updateCompany(companyId, companyUpdates);
       }
       
       // Обновляем супергруппу одним вызовом с company_id
@@ -569,7 +569,7 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
         supergroupUpdates.group_type = supergroupFormData.group_type;
       }
       
-      const updatedSupergroup = await telegramApi.updateSupergroup(supergroupId, supergroupUpdates);
+      const updatedSupergroup = await TelegramChatService.updateSupergroup(supergroupId, supergroupUpdates);
       // Обновляем исходные данные после успешного сохранения
       setOriginalCompanyData({ ...companyFormData });
       setOriginalSupergroupData({ ...supergroupFormData });
@@ -626,7 +626,7 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
     
     try {
       // Привязываем супергруппу к существующей компании
-      await telegramApi.updateSupergroup(supergroupId, {
+      await TelegramChatService.updateSupergroup(supergroupId, {
         company_id: existingCompanyData.id
       });
       
@@ -642,7 +642,7 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
       if (supergroupFormData.group_type) {
         supergroupUpdates.group_type = supergroupFormData.group_type;
       }
-      await telegramApi.updateSupergroup(supergroupId, supergroupUpdates);
+      await TelegramChatService.updateSupergroup(supergroupId, supergroupUpdates);
       
       toast({
         title: "Успешно",
@@ -670,15 +670,17 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
   const handleCancelLinkExisting = async () => {
     setShowConfirmDialog(false);
     setIsSaving(true);
-
+    
     try {
-      // Проверяем текущего пользователя
-      if (!user) {
+      // Получаем текущего пользователя
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !user) {
         throw new Error('Необходимо войти в систему для создания компании');
       }
-
+      
       // Создаем новую компанию принудительно
-      const newCompany = await companyApi.createCompany({
+      const newCompany = await CompanyService.createCompany({
         name: companyFormData.company_name,
         company_type: isProject ? 'project' : 'company',
         vat: isProject ? null : companyFormData.vat,
@@ -690,10 +692,10 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
         street: isProject ? null : companyFormData.street,
         city: isProject ? null : companyFormData.city,
         postal_code: isProject ? null : companyFormData.postal_code
-      });
+      }, user.id);
       
       // Привязываем супергруппу к новой компании
-      await telegramApi.updateSupergroup(supergroupId, {
+      await TelegramChatService.updateSupergroup(supergroupId, {
         company_id: newCompany.id
       });
       
@@ -709,7 +711,7 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
       if (supergroupFormData.group_type) {
         supergroupUpdates.group_type = supergroupFormData.group_type;
       }
-      await telegramApi.updateSupergroup(supergroupId, supergroupUpdates);
+      await TelegramChatService.updateSupergroup(supergroupId, supergroupUpdates);
       
       toast({
         title: "Успешно",
@@ -933,7 +935,7 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
           setIsSaving(true);
           try {
             // Привязываем супергруппу к существующей компании
-            await telegramApi.updateSupergroup(supergroupId, {
+            await TelegramChatService.updateSupergroup(supergroupId, {
               company_id: duplicateCompanyData.id
             });
             
@@ -950,7 +952,7 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
             if (supergroupFormData.group_type) {
               supergroupUpdates.group_type = supergroupFormData.group_type;
             }
-            await telegramApi.updateSupergroup(supergroupId, supergroupUpdates);
+            await TelegramChatService.updateSupergroup(supergroupId, supergroupUpdates);
             
             toast({
               title: "Успешно",

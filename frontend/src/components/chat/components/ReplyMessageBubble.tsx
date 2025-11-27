@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Reply, Image as ImageIcon, File, Mic, Loader2 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 import { useRealtimeChatContext } from '@/contexts/RealtimeChatContext';
-import * as chatApi from '@/api/chat';
 import type { Message } from '@/types/realtime-chat';
 
 interface ReplyMessageBubbleProps {
@@ -52,35 +52,47 @@ export const ReplyMessageBubble: React.FC<ReplyMessageBubbleProps> = ({
         return;
       }
 
-      // Если не нашли в контексте, запрашиваем из API
+      // Если не нашли в контексте, запрашиваем из Supabase
       try {
         setIsLoading(true);
-        // Fetch single message via chat API - messages are fetched via getMessages
-        // For single message lookup, we use the messages API with the specific chat
-        const apiMessages = await chatApi.getMessages(replyMessage.chat_id, {
-          limit: 1,
-          before_id: replyMessage.id,
-          after_id: replyMessage.id
-        });
+        const { data, error } = await supabase
+          .from('messages')
+          .select(`
+            id,
+            content,
+            message_type,
+            file_name,
+            file_url,
+            voice_duration,
+            sender_id,
+            telegram_user_data
+          `)
+          .eq('id', replyMessage.id)
+          .maybeSingle();
 
-        // Find the specific message
-        const data = apiMessages.find(m => m.id === replyMessage.id);
+        if (error) throw error;
 
         if (data) {
+          // Дополнительно получаем профиль отправителя если есть sender_id
+          let senderProfile = null;
+          if (data.sender_id) {
+            const { data: profileData } = await supabase
+              .from('profiles')
+              .select('first_name, last_name, avatar_url, type')
+              .eq('user_id', data.sender_id)
+              .maybeSingle();
+            senderProfile = profileData;
+          }
+
           setResolvedMessage({
             ...replyMessage,
             content: data.content,
             message_type: (data.message_type as Message['message_type']) || 'text',
-            file_name: data.file_name || null,
-            file_url: data.file_url || null,
-            voice_duration: data.voice_duration || null,
-            sender_profile: data.sender_name ? {
-              first_name: data.sender_name.split(' ')[0] || '',
-              last_name: data.sender_name.split(' ').slice(1).join(' ') || '',
-              avatar_url: data.sender_avatar_url || null,
-              type: null
-            } : null,
-            telegram_user_data: null // API doesn't return telegram_user_data yet
+            file_name: data.file_name,
+            file_url: data.file_url,
+            voice_duration: data.voice_duration,
+            sender_profile: senderProfile,
+            telegram_user_data: data.telegram_user_data as Message['telegram_user_data']
           });
         } else {
           // Сообщение действительно удалено

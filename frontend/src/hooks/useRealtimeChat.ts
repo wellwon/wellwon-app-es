@@ -1,10 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { realtimeChatService } from '@/services/RealtimeChatService';
+import { supabase } from '@/integrations/supabase/client';
 import { logger } from '@/utils/logger';
-import * as companyApi from '@/api/company';
-import * as chatApi from '@/api/chat';
-import * as userApi from '@/api/user_account';
 import type { Chat, Message, TypingIndicator, RealtimeChatContextType, Company, MessageFilter } from '@/types/realtime-chat';
 import { useNotificationSound } from '@/hooks/useNotificationSound';
 import { useToast } from '@/hooks/use-toast';
@@ -458,17 +456,19 @@ export function useRealtimeChat(): RealtimeChatContextType {
     }
 
     try {
-      // Get chat details to find company_id
-      const chatDetail = await chatApi.getChatById(chatId);
-      if (!chatDetail || !chatDetail.company_id) {
+      const { data, error } = await supabase.rpc('get_client_company_from_chat', {
+        chat_uuid: chatId
+      });
+      
+        if (error) {
+        logger.error('Error loading company for chat', error, { component: 'useRealtimeChat', chatId });
         setCompaniesCache(prev => new Map(prev.set(chatId, null)));
         return null;
       }
-
-      // Get company details
-      const company = await companyApi.getCompanyById(chatDetail.company_id);
+      
+      const company = data && data.length > 0 ? data[0] : null;
       setCompaniesCache(prev => new Map(prev.set(chatId, company)));
-
+      
       return company;
     } catch (error) {
       logger.error('Error in loadCompanyForChat', error, { component: 'useRealtimeChat', chatId });
@@ -594,54 +594,57 @@ export function useRealtimeChat(): RealtimeChatContextType {
                 reply_to: replyMessage
               };
             } else {
-              // Если сообщения нет в текущих сообщениях, попробуем загрузить из API
-              try {
-                const chatMessages = await chatApi.getMessages(processedMessage.chat_id, {
-                  limit: 1,
-                  before_id: processedMessage.reply_to_id,
-                  after_id: processedMessage.reply_to_id
-                });
-                const replyData = chatMessages.find(m => m.id === processedMessage.reply_to_id);
-
-                if (replyData) {
-                  const hydratedReply: Message = {
-                    id: replyData.id,
-                    chat_id: replyData.chat_id,
-                    sender_id: replyData.sender_id,
-                    content: replyData.content,
-                    message_type: replyData.message_type as 'text' | 'file' | 'voice' | 'image' | 'system' | 'interactive',
-                    reply_to_id: replyData.reply_to_id,
-                    file_url: replyData.file_url,
-                    file_name: replyData.file_name,
-                    file_size: replyData.file_size,
-                    file_type: replyData.file_type,
-                    voice_duration: replyData.voice_duration,
-                    created_at: replyData.created_at,
-                    updated_at: replyData.updated_at || replyData.created_at,
-                    is_edited: replyData.is_edited,
-                    is_deleted: replyData.is_deleted,
-                    metadata: {},
-                    sender_profile: replyData.sender_name ? {
-                      first_name: replyData.sender_name.split(' ')[0] || '',
-                      last_name: replyData.sender_name.split(' ').slice(1).join(' ') || '',
-                      avatar_url: replyData.sender_avatar_url || null,
-                      type: 'client'
-                    } : undefined,
-                    telegram_user_data: null,
-                    telegram_user_id: null,
-                    telegram_message_id: replyData.telegram_message_id,
-                    telegram_topic_id: null,
-                    telegram_forward_data: null,
-                    sync_direction: 'bidirectional'
-                  };
-
-                  processedMessage = {
-                    ...processedMessage,
-                    reply_to: hydratedReply
-                  };
-                }
-              } catch (err) {
-                logger.warn('Failed to fetch reply message from API', err);
+              // Если сообщения нет в текущих сообщениях, попробуем загрузить из БД
+              const { data: replyData } = await supabase
+                .from('messages')
+                .select(`
+                  *,
+                  sender_profile:profiles!messages_sender_id_fkey(
+                    first_name,
+                    last_name,
+                    avatar_url,
+                    type
+                  )
+                `)
+                .eq('id', processedMessage.reply_to_id)
+                .single();
+              
+              if (replyData) {
+                const hydratedReply: Message = {
+                  id: replyData.id,
+                  chat_id: replyData.chat_id,
+                  sender_id: replyData.sender_id,
+                  content: replyData.content,
+                  message_type: replyData.message_type as 'text' | 'file' | 'voice' | 'image' | 'system' | 'interactive',
+                  reply_to_id: replyData.reply_to_id,
+                  file_url: replyData.file_url,
+                  file_name: replyData.file_name,
+                  file_size: replyData.file_size,
+                  file_type: replyData.file_type,
+                  voice_duration: replyData.voice_duration,
+                  created_at: replyData.created_at,
+                  updated_at: replyData.updated_at,
+                  is_edited: replyData.is_edited,
+                  is_deleted: replyData.is_deleted,
+                  metadata: (replyData.metadata as Record<string, any>) || {},
+                  sender_profile: replyData.sender_profile ? {
+                    first_name: (replyData.sender_profile as any).first_name || '',
+                    last_name: (replyData.sender_profile as any).last_name || '',
+                    avatar_url: (replyData.sender_profile as any).avatar_url || null,
+                    type: (replyData.sender_profile as any).type || 'client'
+                  } : undefined,
+                  telegram_user_data: replyData.telegram_user_data as any,
+                  telegram_user_id: replyData.telegram_user_id,
+                  telegram_message_id: replyData.telegram_message_id,
+                  telegram_topic_id: replyData.telegram_topic_id,
+                  telegram_forward_data: replyData.telegram_forward_data as Record<string, unknown>,
+                  sync_direction: replyData.sync_direction as 'telegram_to_web' | 'web_to_telegram' | 'bidirectional'
+                };
+                
+                processedMessage = {
+                  ...processedMessage,
+                  reply_to: hydratedReply
+                };
               }
             }
           } catch (error) {
@@ -816,9 +819,30 @@ export function useRealtimeChat(): RealtimeChatContextType {
     });
     
     try {
-      // User profile is now managed via /auth/me endpoint and event sourcing
-      // No need to check/create profile here - authentication handles it
-      logger.info('Creating chat (profile managed via auth)', { userId: user.id, component: 'useRealtimeChat' });
+      // Ensure user profile exists before creating chat
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (!profile) {
+        logger.info('Creating user profile', { userId: user.id, component: 'useRealtimeChat' });
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .insert({
+            user_id: user.id,
+            first_name: user.user_metadata?.first_name || 'User',
+            last_name: user.user_metadata?.last_name || '',
+            active: true,
+            type: user.user_metadata?.user_type || 'ww_manager'
+          });
+
+        if (profileError) {
+          throw new Error('Не удалось создать профиль пользователя');
+        }
+        logger.info('User profile created successfully', { userId: user.id, component: 'useRealtimeChat' });
+      }
 
       const newChat = await realtimeChatService.createChat(name, type, user.id, participantIds, chatScope.companyId || undefined);
       logger.info('Chat created successfully', { chatId: newChat.id, name, component: 'useRealtimeChat' });

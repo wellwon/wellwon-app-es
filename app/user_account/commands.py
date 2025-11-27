@@ -109,19 +109,6 @@ class UpdateUserProfileCommand(Command):
 
     # saga_id inherited from Command base class
 
-# -----------------------------------------------------------------------------
-# Admin Commands
-# -----------------------------------------------------------------------------
-class UpdateUserAdminStatusCommand(Command):
-    """Command for admin to update user status (active, developer flags)."""
-    user_id: uuid.UUID
-    admin_user_id: uuid.UUID  # The admin performing the action
-    is_active: Optional[bool] = None
-    is_developer: Optional[bool] = None
-
-    # saga_id inherited from Command base class
-
-
 # =============================================================================
 # EOF
 # =============================================================================

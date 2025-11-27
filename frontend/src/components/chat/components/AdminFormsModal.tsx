@@ -8,19 +8,18 @@ import { AddressFields } from './forms/AddressFields';
 import { ContactInfoFields } from './forms/ContactInfoFields';
 import { FormActions } from './forms/FormActions';
 import { TelegramGroupFields } from './forms/TelegramGroupFields';
+import { supabase } from '@/integrations/supabase/client';
 import { Switch } from '@/components/ui/switch';
-import { API } from '@/api/core';
 import { Label } from '@/components/ui/label';
 import { FormSection } from '@/components/design-system/FormSection';
 import { GlassCard, GlassButton } from '@/components/design-system';
-import * as companyApi from '@/api/company';
+import { CompanyService } from '@/services/CompanyService';
 import { useRealtimeChatContext } from '@/contexts/RealtimeChatContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { logger } from '@/utils/logger';
 
 // Константа URL логотипа для Telegram групп
-// TODO: Move this to backend config or environment variable
-const TELEGRAM_GROUP_LOGO_URL = '/api/static/telegram-group-logo.png';
+const TELEGRAM_GROUP_LOGO_URL = 'https://qqhuwvveovmfyihjnanx.supabase.co/storage/v1/object/sign/App%20Files/Group%20Logo.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV8zZmYxMTc1NS1iNWJhLTRlMzEtODBlYS1lMDFjZTU4ZTAyNTQiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJBcHAgRmlsZXMvR3JvdXAgTG9nby5wbmciLCJpYXQiOjE3NTUxNzkzNTQsImV4cCI6NDg3NzI0MzM1NH0.RXCeye2yyXWu7ZLPYAosPh0v5kCjphelOHU4Aygbgxg';
 
 interface AdminFormsModalProps {
   isOpen: boolean;
@@ -179,13 +178,17 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
       vat: ''
     }));
     try {
-      // Call DaData API via backend
-      const { data: response } = await API.post('/companies/lookup-vat', { vat: vatValue });
-      const data = response;
-
-      if (!data) {
-        return;
-      }
+      const {
+        data,
+        error
+      } = await supabase.functions.invoke('dadata-api-inn', {
+        body: {
+          vat: vatValue
+        }
+      });
+        if (error) {
+          return;
+        }
       if (!data.suggestions || data.suggestions.length === 0) {
         setErrors(prev => ({
           ...prev,
@@ -287,7 +290,7 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
         isProject
       });
 
-      // Проверяем дубликаты используя companyApi
+      // Проверяем дубликаты используя CompanyService
       const vatValue = companyFormData.vat;
       const companyName = companyFormData.company_name;
       
@@ -298,22 +301,10 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
         component: 'AdminFormsModal'
       });
       
-      // Check for duplicates by VAT or name
-      let isDuplicate = false;
-      try {
-        if (!isProject && vatValue) {
-          const byVat = await companyApi.getCompanyByVat(vatValue);
-          if (byVat) isDuplicate = true;
-        }
-        if (!isDuplicate && companyName) {
-          const searchResults = await companyApi.searchCompanies(companyName, 1);
-          if (searchResults.length > 0 && searchResults[0].name === companyName) {
-            isDuplicate = true;
-          }
-        }
-      } catch (e) {
-        // Company doesn't exist, which is what we want
-      }
+      const isDuplicate = await CompanyService.checkCompanyExists(
+        isProject ? undefined : vatValue, // Для проектов не проверяем ИНН
+        companyName
+      );
       
       if (isDuplicate) {
         logger.warn('Company already exists', {
@@ -335,7 +326,7 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
 
       // Шаг 2: Создание компании
       updateStepStatus(1, 'loading');
-      logger.info('Creating company via companyApi');
+      logger.info('Creating company via CompanyService');
       
       // Логируем данные формы перед созданием компании
       logger.debug('Form data before company creation', {
@@ -364,8 +355,7 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
         companyData,
         component: 'AdminFormsModal'
       });
-      const createResponse = await companyApi.createCompany(companyData);
-      const newCompany = { id: createResponse.id, ...companyData };
+      const newCompany = await CompanyService.createCompany(companyData, user!.id, user!.id);
       updateStepStatus(1, 'success');
 
       // Шаг 3: Создание Telegram группы
@@ -374,23 +364,22 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
         companyId: newCompany.id,
         photoUrl: TELEGRAM_GROUP_LOGO_URL
       });
-
-      // Create telegram group via backend API
-      let telegramData;
-      try {
-        const { data: response } = await API.post('/telegram/group/create', {
+      const telegramResponse = await supabase.functions.invoke('telegram-group-create', {
+        body: {
           title: telegramGroupData.title || `${companyFormData.company_name} - Группа`,
           description: telegramGroupData.description || `Рабочая группа для ${companyFormData.company_name}`,
           photo_url: TELEGRAM_GROUP_LOGO_URL,
           company_id: newCompany.id
-        });
-        telegramData = response;
-      } catch (err) {
-        logger.error('Failed to create Telegram group', err);
+        }
+      });
+      if (telegramResponse.error) {
+        logger.error('Failed to create Telegram group', telegramResponse.error);
         updateStepStatus(2, 'error');
         setProcessError('Не удалось создать Telegram группу');
         return;
       }
+      
+      const telegramData = telegramResponse.data;
       
       // Check if the response indicates failure
       if (!telegramData || !telegramData.success) {
@@ -416,10 +405,13 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
           companyId: newCompany.id
         });
 
-        // Связываем чат с компанией через API
-        try {
-          await API.patch(`/chats/${activeChat.id}`, { company_id: newCompany.id });
-        } catch (linkError) {
+        // Связываем чат с компанией через обновление чата
+        const {
+          error: linkError
+        } = await supabase.from('chats').update({
+          company_id: newCompany.id
+        }).eq('id', activeChat.id);
+        if (linkError) {
           logger.error('Failed to link chat to company', linkError);
           updateStepStatus(3, 'error');
           setProcessError('Не удалось связать чат с компанией');

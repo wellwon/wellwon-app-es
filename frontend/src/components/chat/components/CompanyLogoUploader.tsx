@@ -1,7 +1,8 @@
+
 import React, { useCallback, useState, useRef } from 'react';
 import { Image, ClipboardPaste, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { validateImage, processImage, getImageFromClipboard } from '@/utils/logoUtils';
+import { CompanyLogoService } from '@/services/CompanyLogoService';
 import { useToast } from '@/hooks/use-toast';
 
 
@@ -44,7 +45,7 @@ export const CompanyLogoUploader: React.FC<CompanyLogoUploaderProps> = ({
   const handleFileUpload = useCallback(async (file: File) => {
     if (disabled) return;
 
-    const validation = validateImage(file);
+    const validation = CompanyLogoService.validateImage(file);
     if (!validation.valid) {
       toast({
         title: "Неверный файл",
@@ -56,12 +57,9 @@ export const CompanyLogoUploader: React.FC<CompanyLogoUploaderProps> = ({
 
     try {
       setIsLoading(true);
-      // Process image (resize + convert to WebP)
-      const processedFile = await processImage(file);
-      // Create object URL for preview (actual upload handled by parent via onChange)
-      const objectUrl = URL.createObjectURL(processedFile);
-      onChange(objectUrl);
-
+      const publicUrl = await CompanyLogoService.processAndUpload(file);
+      onChange(publicUrl);
+      
       toast({
         title: "Логотип загружен",
         variant: "success"
@@ -122,9 +120,9 @@ export const CompanyLogoUploader: React.FC<CompanyLogoUploaderProps> = ({
 
     try {
       setIsLoading(true);
-      const file = await getImageFromClipboard();
-
-      if (!file) {
+      const blob = await CompanyLogoService.getImageFromClipboard();
+      
+      if (!blob) {
         toast({
           title: "Нет изображения в буфере",
           description: 'В буфере обмена нет изображения',
@@ -133,11 +131,9 @@ export const CompanyLogoUploader: React.FC<CompanyLogoUploaderProps> = ({
         return;
       }
 
-      // Process and create preview
-      const processedFile = await processImage(file);
-      const objectUrl = URL.createObjectURL(processedFile);
-      onChange(objectUrl);
-
+      const publicUrl = await CompanyLogoService.processAndUpload(blob);
+      onChange(publicUrl);
+      
       toast({
         title: "Логотип загружен",
         variant: "success"
@@ -153,21 +149,23 @@ export const CompanyLogoUploader: React.FC<CompanyLogoUploaderProps> = ({
     }
   }, [disabled, onChange, toast]);
 
-  const handleRemove = useCallback(() => {
+  const handleRemove = useCallback(async () => {
     if (disabled || !value) return;
 
-    // Revoke object URL if it's a blob URL
-    if (value.startsWith('blob:')) {
-      URL.revokeObjectURL(value);
+    try {
+      await CompanyLogoService.deleteByUrl(value);
+      onChange(undefined);
+      onRemove?.();
+      
+      toast({
+        title: "Логотип удален",
+        variant: "success"
+      });
+    } catch (error) {
+      console.warn('Failed to delete logo from storage:', error);
+      onChange(undefined);
+      onRemove?.();
     }
-
-    onChange(undefined);
-    onRemove?.();
-
-    toast({
-      title: "Логотип удален",
-      variant: "success"
-    });
   }, [disabled, value, onChange, onRemove, toast]);
 
   return (
