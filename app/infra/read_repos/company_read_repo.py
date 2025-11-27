@@ -590,3 +590,69 @@ class CompanyReadRepo:
         )
 
         return [BalanceTransactionReadModel(**dict(row)) for row in rows]
+
+    # =========================================================================
+    # Telegram Supergroup Global Operations
+    # =========================================================================
+
+    @staticmethod
+    async def get_all_telegram_supergroups(
+        active_only: bool = True,
+    ) -> List[TelegramSupergroupReadModel]:
+        """Get all Telegram supergroups"""
+        active_filter = "WHERE is_active = true" if active_only else ""
+
+        rows = await pg_client.fetch(
+            f"""
+            SELECT * FROM telegram_supergroups
+            {active_filter}
+            ORDER BY title
+            """
+        )
+
+        return [TelegramSupergroupReadModel(**dict(row)) for row in rows]
+
+    @staticmethod
+    async def get_telegram_supergroups_with_chat_counts() -> List[Dict[str, Any]]:
+        """Get all supergroups with their chat counts"""
+        rows = await pg_client.fetch(
+            """
+            SELECT
+                ts.id,
+                ts.company_id,
+                ts.title,
+                ts.username,
+                ts.description,
+                ts.invite_link,
+                ts.member_count,
+                ts.is_forum,
+                ts.is_active,
+                ts.created_at,
+                COALESCE(c.name, '') as company_name,
+                COUNT(DISTINCT ch.id) as chat_count
+            FROM telegram_supergroups ts
+            LEFT JOIN companies c ON ts.company_id = c.id
+            LEFT JOIN chats ch ON ch.telegram_supergroup_id = ts.id AND ch.is_active = true
+            WHERE ts.is_active = true
+            GROUP BY ts.id, c.name
+            ORDER BY ts.title
+            """
+        )
+
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    async def get_telegram_supergroup_by_id(
+        telegram_group_id: int,
+    ) -> Optional[TelegramSupergroupReadModel]:
+        """Get Telegram supergroup by Telegram group ID"""
+        row = await pg_client.fetchrow(
+            """
+            SELECT * FROM telegram_supergroups
+            WHERE id = $1
+            """,
+            telegram_group_id
+        )
+        if not row:
+            return None
+        return TelegramSupergroupReadModel(**dict(row))

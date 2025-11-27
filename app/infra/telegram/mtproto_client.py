@@ -26,7 +26,9 @@ try:
         EditPhotoRequest,
         EditBannedRequest,
         ToggleForumRequest,
+        GetParticipantsRequest,
     )
+    from telethon.tl.types import ChannelParticipantsSearch
     from telethon.tl.functions.messages import (
         ExportChatInviteRequest,
         EditChatDefaultBannedRightsRequest,
@@ -129,6 +131,17 @@ class OperationResult:
     success: bool
     data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+
+
+@dataclass
+class MemberInfo:
+    """Information about a group member"""
+    user_id: int
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    is_bot: bool = False
+    status: str = "member"  # creator, administrator, member, restricted, left, kicked
 
 
 class TelegramMTProtoClient:
@@ -715,6 +728,130 @@ class TelegramMTProtoClient:
             return True
         except Exception as e:
             log.error(f"Failed to remove user: {e}", exc_info=True)
+            return False
+
+    async def get_group_members(self, group_id: int, limit: int = 200) -> List['MemberInfo']:
+        """Get all members of a group"""
+        if not await self._ensure_connected():
+            return []
+
+        try:
+            group = await self._client.get_entity(group_id)
+            result = await self._client(GetParticipantsRequest(
+                channel=group,
+                filter=ChannelParticipantsSearch(''),
+                offset=0,
+                limit=limit,
+                hash=0
+            ))
+
+            members = []
+            for participant in result.users:
+                # Determine status from participant type
+                status = "member"
+                for p in result.participants:
+                    if hasattr(p, 'user_id') and p.user_id == participant.id:
+                        class_name = type(p).__name__
+                        if 'Creator' in class_name:
+                            status = "creator"
+                        elif 'Admin' in class_name:
+                            status = "administrator"
+                        elif 'Banned' in class_name:
+                            status = "restricted"
+                        elif 'Left' in class_name:
+                            status = "left"
+                        break
+
+                members.append(MemberInfo(
+                    user_id=participant.id,
+                    username=participant.username,
+                    first_name=participant.first_name,
+                    last_name=participant.last_name,
+                    is_bot=participant.bot if hasattr(participant, 'bot') else False,
+                    status=status,
+                ))
+
+            log.info(f"Retrieved {len(members)} members from group {group_id}")
+            return members
+
+        except Exception as e:
+            log.error(f"Failed to get group members: {e}", exc_info=True)
+            return []
+
+    async def promote_user(self, group_id: int, user_id: int, admin: bool = True) -> bool:
+        """Promote or demote a user in the group"""
+        if not await self._ensure_connected():
+            return False
+
+        try:
+            group = await self._client.get_entity(group_id)
+            user = await self._client.get_entity(user_id)
+
+            if admin:
+                # Promote to administrator
+                admin_rights = ChatAdminRights(
+                    change_info=True,
+                    post_messages=True,
+                    edit_messages=True,
+                    delete_messages=True,
+                    ban_users=True,
+                    invite_users=True,
+                    pin_messages=True,
+                    manage_topics=True,
+                )
+            else:
+                # Demote to regular member (remove admin rights)
+                admin_rights = ChatAdminRights()
+
+            await self._client(EditAdminRequest(
+                channel=group,
+                user_id=user,
+                admin_rights=admin_rights,
+                rank="Admin" if admin else ""
+            ))
+
+            log.info(f"User {user_id} {'promoted' if admin else 'demoted'} in group {group_id}")
+            return True
+
+        except Exception as e:
+            log.error(f"Failed to update user role: {e}", exc_info=True)
+            return False
+
+    async def restrict_user(self, group_id: int, user_id: int, restricted: bool = True) -> bool:
+        """Restrict or unrestrict a user in the group"""
+        if not await self._ensure_connected():
+            return False
+
+        try:
+            group = await self._client.get_entity(group_id)
+            user = await self._client.get_entity(user_id)
+
+            if restricted:
+                # Restrict user (can view but not send)
+                banned_rights = ChatBannedRights(
+                    until_date=None,
+                    send_messages=True,
+                    send_media=True,
+                    send_stickers=True,
+                    send_gifs=True,
+                    send_games=True,
+                    send_inline=True,
+                )
+            else:
+                # Remove restrictions
+                banned_rights = ChatBannedRights()
+
+            await self._client(EditBannedRequest(
+                channel=group,
+                participant=user,
+                banned_rights=banned_rights
+            ))
+
+            log.info(f"User {user_id} {'restricted' if restricted else 'unrestricted'} in group {group_id}")
+            return True
+
+        except Exception as e:
+            log.error(f"Failed to update user restrictions: {e}", exc_info=True)
             return False
 
     # =========================================================================

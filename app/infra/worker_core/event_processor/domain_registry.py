@@ -16,6 +16,8 @@ log = logging.getLogger("wellwon.worker.domain_registry")
 
 # Topic constants
 USER_ACCOUNT_EVENTS_TOPIC = "transport.user-account-events"
+COMPANY_EVENTS_TOPIC = "transport.company-events"
+CHAT_EVENTS_TOPIC = "transport.chat-events"
 
 
 # =============================================================================
@@ -128,6 +130,130 @@ def create_user_account_domain() -> DomainRegistration:
 
 
 # =============================================================================
+# COMPANY DOMAIN CONFIGURATION
+# =============================================================================
+
+def create_company_domain() -> DomainRegistration:
+    """Factory function for company domain configuration"""
+
+    # Import projector module to trigger decorator registration
+    import app.company.projectors
+
+    from app.company.events import (
+        CompanyCreated,
+        CompanyUpdated,
+        CompanyArchived,
+        CompanyRestored,
+        CompanyDeleted,
+        UserAddedToCompany,
+        UserRemovedFromCompany,
+        UserCompanyRoleChanged,
+        TelegramSupergroupCreated,
+        TelegramSupergroupLinked,
+        TelegramSupergroupUnlinked,
+        TelegramSupergroupUpdated,
+        CompanyBalanceUpdated,
+    )
+
+    def company_projector_factory():
+        from app.company.projectors import CompanyProjector
+        return CompanyProjector()
+
+    return DomainRegistration(
+        name="company",
+        topics=[COMPANY_EVENTS_TOPIC],
+        projector_factory=company_projector_factory,
+        event_models={
+            "CompanyCreated": CompanyCreated,
+            "CompanyUpdated": CompanyUpdated,
+            "CompanyArchived": CompanyArchived,
+            "CompanyRestored": CompanyRestored,
+            "CompanyDeleted": CompanyDeleted,
+            "UserAddedToCompany": UserAddedToCompany,
+            "UserRemovedFromCompany": UserRemovedFromCompany,
+            "UserCompanyRoleChanged": UserCompanyRoleChanged,
+            "TelegramSupergroupCreated": TelegramSupergroupCreated,
+            "TelegramSupergroupLinked": TelegramSupergroupLinked,
+            "TelegramSupergroupUnlinked": TelegramSupergroupUnlinked,
+            "TelegramSupergroupUpdated": TelegramSupergroupUpdated,
+            "CompanyBalanceUpdated": CompanyBalanceUpdated,
+        },
+        projection_config={
+            "aggregate_type": "Company",
+            "transport_topic": COMPANY_EVENTS_TOPIC
+        },
+        enable_sequence_tracking=True
+    )
+
+
+# =============================================================================
+# CHAT DOMAIN CONFIGURATION
+# =============================================================================
+
+def create_chat_domain() -> DomainRegistration:
+    """Factory function for chat domain configuration"""
+
+    # Import projector module to trigger decorator registration
+    import app.chat.projectors
+
+    from app.chat.events import (
+        ChatCreated,
+        ChatUpdated,
+        ChatArchived,
+        ChatRestored,
+        ParticipantAdded,
+        ParticipantRemoved,
+        ParticipantRoleChanged,
+        ParticipantLeft,
+        MessageSent,
+        MessageEdited,
+        MessageDeleted,
+        MessageReadStatusUpdated,
+        MessagesMarkedAsRead,
+        TypingStarted,
+        TypingStopped,
+        TelegramChatLinked,
+        TelegramChatUnlinked,
+        TelegramMessageReceived,
+    )
+
+    def chat_projector_factory():
+        from app.chat.projectors import ChatProjector
+        return ChatProjector()
+
+    return DomainRegistration(
+        name="chat",
+        topics=[CHAT_EVENTS_TOPIC],
+        projector_factory=chat_projector_factory,
+        event_models={
+            "ChatCreated": ChatCreated,
+            "ChatUpdated": ChatUpdated,
+            "ChatArchived": ChatArchived,
+            "ChatRestored": ChatRestored,
+            "ParticipantAdded": ParticipantAdded,
+            "ParticipantRemoved": ParticipantRemoved,
+            "ParticipantRoleChanged": ParticipantRoleChanged,
+            "ParticipantLeft": ParticipantLeft,
+            "MessageSent": MessageSent,
+            "MessageEdited": MessageEdited,
+            "MessageDeleted": MessageDeleted,
+            "MessageReadStatusUpdated": MessageReadStatusUpdated,
+            "MessagesMarkedAsRead": MessagesMarkedAsRead,
+            "TypingStarted": TypingStarted,
+            "TypingStopped": TypingStopped,
+            "TelegramChatLinked": TelegramChatLinked,
+            "TelegramChatUnlinked": TelegramChatUnlinked,
+            "TelegramMessageReceived": TelegramMessageReceived,
+        },
+        projection_config={
+            "aggregate_type": "Chat",
+            "transport_topic": CHAT_EVENTS_TOPIC
+        },
+        enable_sequence_tracking=True
+    )
+
+
+# =============================================================================
 # DOMAIN REGISTRY CLASS
 # =============================================================================
 
@@ -227,10 +353,8 @@ def create_domain_registry() -> DomainRegistry:
 
         # Register WellWon domains
         registry.register(create_user_account_domain())
-
-        # TODO: Add more domains as they're created
-        # registry.register(create_company_domain())
-        # registry.register(create_shipment_domain())
+        registry.register(create_company_domain())
+        registry.register(create_chat_domain())
 
         log.info(f"Domain registry created with {len(registry._domains)} domains")
         _domain_registry = registry

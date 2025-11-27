@@ -302,3 +302,31 @@ export function isTokenExpired(): boolean {
   // Add a small buffer (5 seconds) to account for clock differences
   return Date.now() > (auth.expires_at - 5000);
 }
+
+// -----------------------------------------------------------------------------
+// Profile List API (for mentions and user lists)
+// -----------------------------------------------------------------------------
+
+export interface ProfileListItem {
+  user_id: string;
+  first_name: string | null;
+  last_name: string | null;
+  avatar_url: string | null;
+  role_label: string | null;
+  telegram_user_id: number | null;
+}
+
+/**
+ * Get list of active profiles with telegram_user_id for mentions
+ * TODO: Implement backend endpoint /user/profiles/with-telegram
+ */
+export async function getProfilesWithTelegram(): Promise<ProfileListItem[]> {
+  try {
+    const { data } = await API.get<ProfileListItem[]>("/user/profiles/with-telegram");
+    return data;
+  } catch (error) {
+    // API endpoint not yet implemented - return empty array
+    console.warn('[API] getProfilesWithTelegram endpoint not available yet');
+    return [];
+  }
+}

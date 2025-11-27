@@ -23,3 +23,6 @@ dist/
 CLAUDE.md
 CLAUDE_TASKS.md
 .claude/
+
+# Local storage (uploaded files)
+storage/

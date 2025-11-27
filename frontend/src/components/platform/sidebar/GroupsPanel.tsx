@@ -1,9 +1,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { TelegramChatService } from '@/services/TelegramChatService';
-import { CompanyService } from '@/services/CompanyService';
+import * as telegramApi from '@/api/telegram';
+import * as companyApi from '@/api/company';
 import { useRealtimeChatContext } from '@/contexts/RealtimeChatContext';
-import { supabase } from '@/integrations/supabase/client';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -43,7 +42,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [chatCounts, setChatCounts] = useState<Record<number, number>>({});
-  const [companyBalances, setCompanyBalances] = useState<Record<number, number>>({});
+  const [companyBalances, setCompanyBalances] = useState<Record<string, number>>({});
   const [isCreateCompanyModalOpen, setIsCreateCompanyModalOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -64,9 +63,9 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
         
         // Загружаем активные и архивные супергруппы параллельно
         const [activeSupergroupsData, archivedSupergroupsData, chatCountsData] = await Promise.all([
-          TelegramChatService.getAllSupergroups(true),  // active
-          TelegramChatService.getAllSupergroups(false), // archived
-          TelegramChatService.getSupergroupChatCounts()
+          telegramApi.getAllSupergroups(true),  // active
+          telegramApi.getAllSupergroups(false), // archived
+          telegramApi.getSupergroupChatCounts()
         ]);
         
         setActiveSupergroups(activeSupergroupsData);
@@ -78,21 +77,16 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
         const companyIds = allSupergroups
           .filter(group => group.company_id)
           .map(group => group.company_id!);
-        
+
         if (companyIds.length > 0) {
           try {
-            const balances: Record<number, number> = {};
+            const balances: Record<string, number> = {};
             await Promise.all(
               companyIds.map(async (companyId) => {
                 try {
-                  // Since there's no getCompany method, we'll create a SQL query to get company balance
-                  const { data: company } = await supabase
-                    .from('companies')
-                    .select('balance')
-                    .eq('id', companyId)
-                    .single();
-                  if (company) {
-                    balances[companyId] = company.balance || 0;
+                  const balance = await companyApi.getCompanyBalance(companyId);
+                  if (balance) {
+                    balances[companyId] = parseFloat(balance.balance) || 0;
                   }
                 } catch (err) {
                   logger.warn('Failed to load company balance', { companyId, error: err });
@@ -127,9 +121,9 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
     const loadSupergroups = async () => {
       try {
         const [activeSupergroupsData, archivedSupergroupsData, chatCountsData] = await Promise.all([
-          TelegramChatService.getAllSupergroups(true),
-          TelegramChatService.getAllSupergroups(false),
-          TelegramChatService.getSupergroupChatCounts()
+          telegramApi.getAllSupergroups(true),
+          telegramApi.getAllSupergroups(false),
+          telegramApi.getSupergroupChatCounts()
         ]);
         
         setActiveSupergroups(activeSupergroupsData);
@@ -141,21 +135,16 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
         const companyIds = allSupergroups
           .filter(group => group.company_id)
           .map(group => group.company_id!);
-        
+
         if (companyIds.length > 0) {
           try {
-            const balances: Record<number, number> = {};
+            const balances: Record<string, number> = {};
             await Promise.all(
               companyIds.map(async (companyId) => {
                 try {
-                  // Since there's no getCompany method, we'll create a SQL query to get company balance
-                  const { data: company } = await supabase
-                    .from('companies')
-                    .select('balance')
-                    .eq('id', companyId)
-                    .single();
-                  if (company) {
-                    balances[companyId] = company.balance || 0;
+                  const balance = await companyApi.getCompanyBalance(companyId);
+                  if (balance) {
+                    balances[companyId] = parseFloat(balance.balance) || 0;
                   }
                 } catch (err) {
                   balances[companyId] = 0;
@@ -184,7 +173,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
   const handleEditGroup = async (supergroupId: number, companyId?: number) => {
     try {
       // Всегда загружаем данные супергруппы
-      const supergroupData = await TelegramChatService.getSupergroupInfo(supergroupId);
+      const supergroupData = await telegramApi.getGroupInfo(supergroupId);
       
       if (!supergroupData) {
         logger.error('Failed to load supergroup data', { supergroupId });
@@ -206,7 +195,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
 
       // Если есть companyId, загружаем данные компании
       if (companyId) {
-        const companyData = await CompanyService.getCompanyById(companyId);
+        const companyData = await companyApi.getCompanyById(String(companyId));
         
         if (companyData) {
           setPreloadedCompanyData({
@@ -292,7 +281,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
     try {
       const newIsActive = !currentIsActive;
       
-      await TelegramChatService.updateSupergroup(supergroupId, {
+      await telegramApi.updateSupergroup(supergroupId, {
         is_active: newIsActive
       });
 

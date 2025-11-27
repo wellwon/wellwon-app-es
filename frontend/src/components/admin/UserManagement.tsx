@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { API } from '@/api/core';
 import { GlassCard } from '@/components/design-system/GlassCard';
 import { GlassButton } from '@/components/design-system/GlassButton';
 import { useToast } from '@/hooks/use-toast';
 import { Users, Shield, UserX, UserCheck } from 'lucide-react';
+import { logger } from '@/utils/logger';
 
 interface User {
   id: string;
@@ -22,8 +23,8 @@ const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Только WW менеджеры и разработчики могут управлять пользователями
-  const canManageUsers = true; // Все пользователи теперь менеджеры/админы
+  // Only WW managers and developers can manage users
+  const canManageUsers = true; // All users are now managers/admins
 
   useEffect(() => {
     if (canManageUsers) {
@@ -35,19 +36,14 @@ const UserManagement: React.FC = () => {
 
   const fetchUsers = async () => {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
+      const { data } = await API.get<User[]>('/admin/users');
       // Filter users to only include developer types
-      const filteredUsers = (data || []).filter(user => 
+      const filteredUsers = (data || []).filter(user =>
         user.developer === true
       );
-      setUsers(filteredUsers as User[]);
+      setUsers(filteredUsers);
     } catch (error) {
-      
+      logger.warn('[UserManagement] Admin users endpoint not available');
       toast({
         title: 'Ошибка',
         description: 'Не удалось загрузить список пользователей',
@@ -60,14 +56,9 @@ const UserManagement: React.FC = () => {
 
   const updateUserStatus = async (userId: string, active: boolean) => {
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ active })
-        .eq('user_id', userId);
+      await API.patch(`/admin/users/${userId}`, { active });
 
-      if (error) throw error;
-
-      setUsers(prev => prev.map(user => 
+      setUsers(prev => prev.map(user =>
         user.user_id === userId ? { ...user, active } : user
       ));
 
@@ -77,7 +68,7 @@ const UserManagement: React.FC = () => {
         variant: 'success',
       });
     } catch (error) {
-      
+      logger.error('[UserManagement] Failed to update user status', error);
       toast({
         title: 'Ошибка',
         description: 'Не удалось обновить статус пользователя',
@@ -88,14 +79,9 @@ const UserManagement: React.FC = () => {
 
   const updateUserType = async (userId: string, isDeveloper: boolean) => {
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ developer: isDeveloper })
-        .eq('user_id', userId);
+      await API.patch(`/admin/users/${userId}`, { developer: isDeveloper });
 
-      if (error) throw error;
-
-      setUsers(prev => prev.map(user => 
+      setUsers(prev => prev.map(user =>
         user.user_id === userId ? { ...user, developer: isDeveloper } : user
       ));
 
@@ -105,7 +91,7 @@ const UserManagement: React.FC = () => {
         variant: 'success',
       });
     } catch (error) {
-      
+      logger.error('[UserManagement] Failed to update user type', error);
       toast({
         title: 'Ошибка',
         description: 'Не удалось обновить тип пользователя',
@@ -159,14 +145,14 @@ const UserManagement: React.FC = () => {
                     {`${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Без имени'}
                   </h3>
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                    user.active 
-                      ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
+                    user.active
+                      ? 'bg-green-500/20 text-green-400 border border-green-500/30'
                       : 'bg-red-500/20 text-red-400 border border-red-500/30'
                   }`}>
                     {user.active ? 'Активный' : 'Неактивный'}
                   </span>
                 </div>
-                
+
                 <div className="flex items-center gap-4 text-sm text-gray-400">
                   <span>Тип: {getTypeLabel(user.developer)}</span>
                   <span>Создан: {new Date(user.created_at).toLocaleDateString()}</span>
@@ -188,8 +174,8 @@ const UserManagement: React.FC = () => {
                   size="sm"
                   onClick={() => updateUserStatus(user.user_id, !user.active)}
                   className={`inline-flex items-center gap-2 ${
-                    user.active 
-                      ? 'text-red-400 border-red-400/30 hover:bg-red-400/10' 
+                    user.active
+                      ? 'text-red-400 border-red-400/30 hover:bg-red-400/10'
                       : 'text-green-400 border-green-400/30 hover:bg-green-400/10'
                   }`}
                 >

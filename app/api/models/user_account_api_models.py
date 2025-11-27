@@ -362,3 +362,21 @@ class TokenValidationResponse(BaseModel):
     scope: Optional[str] = None
     session_id: Optional[str] = None
     fingerprint_valid: bool = False
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  TELEGRAM INTEGRATION
+# ──────────────────────────────────────────────────────────────────────────────
+class ProfileWithTelegramResponse(BaseModel):
+    """User profile with telegram_user_id for mentions feature."""
+    user_id: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    role_label: Optional[str] = None
+    telegram_user_id: Optional[int] = None
+
+
+class LinkTelegramRequest(BaseModel):
+    """Request to link Telegram user ID to WellWon account."""
+    telegram_user_id: int = Field(..., description="Telegram user ID (bigint)")

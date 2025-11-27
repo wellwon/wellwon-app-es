@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS user_accounts (
     is_developer BOOLEAN DEFAULT FALSE,
     user_type user_type_enum DEFAULT 'client' NOT NULL,
     user_number INTEGER,
+    telegram_user_id BIGINT,  -- Link to tg_users.id for mentions
 
     -- Event sourcing support
     aggregate_version INTEGER DEFAULT 1,

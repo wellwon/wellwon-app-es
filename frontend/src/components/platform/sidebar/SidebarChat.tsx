@@ -15,7 +15,7 @@ import ChatDialog from '@/components/chat/core/ChatDialog';
 import CompanyBadge from './CompanyBadge';
 
 import { OptimizedChatListForSidebar } from '@/components/chat/components/OptimizedChatListForSidebar';
-import { supabase } from '@/integrations/supabase/client';
+import * as telegramApi from '@/api/telegram';
 
 import { logger } from '@/utils/logger';
 import { SupergroupsList } from './SupergroupsList';
@@ -422,18 +422,13 @@ const SidebarChat: React.FC = () => {
 
     setIsVerifying(true);
     try {
-      const { data, error } = await supabase.functions.invoke('telegram-verify-topics', {
-        body: { 
-          supergroupId: selectedSupergroupId, 
-          dryRun 
-        }
-      });
+      const result = await telegramApi.verifyTopics(selectedSupergroupId, dryRun);
 
-      if (error) {
-        logger.error('Topic verification failed', error, { 
+      if (!result) {
+        logger.error('Topic verification failed', null, {
           supergroupId: selectedSupergroupId,
           dryRun,
-          component: 'SidebarChat' 
+          component: 'SidebarChat'
         });
         toast({
           title: "Ошибка синхронизации",
@@ -443,7 +438,7 @@ const SidebarChat: React.FC = () => {
         return;
       }
 
-      const { verificationResults, summary, duplicatesMerged } = data;
+      const { verificationResults, summary, duplicatesMerged } = result;
       const { existingTopics, deletedTopics, messagesMoved, generalDuplicatesMerged } = summary;
 
       logger.info('Topic verification completed', { 
@@ -624,7 +619,7 @@ const SidebarChat: React.FC = () => {
   };
 
   return (
-    <div className="h-screen flex">
+    <div className="h-full flex overflow-hidden">
       {/* Левая панель групп - показываем только в режиме супергрупп */}
       {activeMode === 'supergroups' && (
         <GroupsPanel
@@ -639,11 +634,10 @@ const SidebarChat: React.FC = () => {
       )}
 
       {/* Основная панель чатов */}
-      <div 
-        className="h-screen border-r border-white/10 flex flex-col" 
+      <div
+        className="h-full flex-1 min-w-0 border-r border-white/10 flex flex-col overflow-hidden"
         style={{
-          backgroundColor: '#232328',
-          width: '320px'
+          backgroundColor: '#232328'
         }}
       >
         {/* Заголовок с кнопкой создания */}

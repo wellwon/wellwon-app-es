@@ -42,6 +42,44 @@ class DeliveryGuarantee(Enum):
     EXACTLY_ONCE = "exactly_once"
 
 
+class MessageCategory(Enum):
+    """
+    Message category for WSE Protocol v2.
+
+    Categories:
+        S (Snapshot): Full state dump for initial sync or reconnect
+        U (Update): Incremental delta updates (default)
+        WSE (System): Protocol/system messages (ping, pong, errors, etc.)
+    """
+    SNAPSHOT = "S"
+    UPDATE = "U"
+    SYSTEM = "WSE"
+
+
+# System event types that belong to WSE category
+WSE_SYSTEM_EVENT_TYPES = frozenset({
+    'server_ready',
+    'snapshot_complete',
+    'client_hello',
+    'client_hello_ack',
+    'server_hello',
+    'connection_state_change',
+    'error',
+    'pong',
+    'PONG',
+    'ping',
+    'PING',
+    'heartbeat',
+    'subscription_update',
+    'health_check_response',
+    'metrics_response',
+    'config_update',
+    'rate_limit_warning',
+    'connection_stats',
+    'connection_quality',
+})
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Protocols
 # ─────────────────────────────────────────────────────────────────────────────

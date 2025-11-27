@@ -11,20 +11,32 @@ Transforms internal domain events to WebSocket-compatible format.
 Architecture:
     Internal Domain Event -> EventTransformer -> WebSocket Event (v2)
 
-WebSocket Event Format (v2):
+WebSocket Message Format (Protocol v2):
+
+    Wire format: {category}{json}
+    Example: U{"t":"user_profile_updated","p":{...},"id":"evt_123",...,"v":2}
+
+    JSON structure:
     {
-        "v": 2,                          # Protocol version
-        "id": "evt_123",                 # Event ID
         "t": "user_profile_updated",     # Event type (mapped from internal)
+        "p": {...},                      # Payload (transformed)
+        "id": "evt_123",                 # Event ID
         "ts": "2025-01-13T...",          # Timestamp (ISO 8601)
         "seq": 1234,                     # Sequence number
-        "p": {...},                      # Payload (transformed)
         "cid": "cor_123",                # Correlation ID (optional)
         "pri": 5,                        # Priority (optional)
         "event_version": 1,              # Schema version (optional)
         "trace_id": "trace_123",         # Distributed tracing (optional)
-        "latency_ms": 15                 # Processing latency (optional)
+        "latency_ms": 15,                # Processing latency (optional)
+        "v": 2                           # Protocol version (always last)
     }
+
+    Note: "_msg_cat" is used internally and extracted as prefix during serialization.
+
+Message Categories (prefix):
+    S (Snapshot): Full state dump for initial sync or reconnect
+    U (Update): Incremental delta updates (default)
+    WSE (System): Protocol/system messages (ping, pong, errors, etc.)
 
 Transformation Pipeline:
     1. Decode bytes to strings (safe multi-encoding)
@@ -51,12 +63,42 @@ from enum import Enum
 from typing import Any, Dict, Union
 
 from app.wse.core.event_mappings import INTERNAL_TO_WS_EVENT_TYPE_MAP
+from app.wse.core.types import MessageCategory, WSE_SYSTEM_EVENT_TYPES
 
 log = logging.getLogger("wellwon.wse.transformer")
 
 
 class EventTransformer:
     """Transform events between internal and WebSocket formats"""
+
+    @staticmethod
+    def determine_message_category(event_type: str) -> str:
+        """
+        Determine message category based on event type.
+
+        Categories (Protocol v2):
+            S (Snapshot): Full state dump for initial sync
+            U (Update): Incremental delta updates (default)
+            WSE (System): Protocol/system messages
+
+        Args:
+            event_type: The WebSocket event type
+
+        Returns:
+            Category string: "S", "U", or "WSE"
+        """
+        event_type_lower = event_type.lower()
+
+        # Snapshot - full state dump
+        if 'snapshot' in event_type_lower:
+            return MessageCategory.SNAPSHOT.value
+
+        # System - WSE protocol messages
+        if event_type in WSE_SYSTEM_EVENT_TYPES or event_type_lower in WSE_SYSTEM_EVENT_TYPES:
+            return MessageCategory.SYSTEM.value
+
+        # Default - incremental update
+        return MessageCategory.UPDATE.value
 
     @staticmethod
     def safe_decode_bytes(value: Union[bytes, str, Any]) -> str:
@@ -155,24 +197,16 @@ class EventTransformer:
             except Exception as e:
                 log.debug(f"Could not calculate event latency: {e}")
 
-        # Build WebSocket-compatible event
+        # Build WebSocket-compatible event (Protocol v2 order: t, p, id, ts, seq, _msg_cat, ..., v)
         ws_event = {
-            'v': 2,  # Protocol version
-            'id': ensure_str(metadata.get('event_id') or event.get('event_id') or str(uuid_module.uuid4())),
             't': ws_event_type,
+            'p': convert_to_serializable(EventTransformer._transform_payload(ws_event_type, event)),
+            'id': ensure_str(metadata.get('event_id') or event.get('event_id') or str(uuid_module.uuid4())),
             'ts': ensure_str(
                 metadata.get('timestamp') or event.get('timestamp') or datetime.now(timezone.utc).isoformat()),
             'seq': sequence,
-            'p': convert_to_serializable(EventTransformer._transform_payload(ws_event_type, event)),
+            '_msg_cat': EventTransformer.determine_message_category(ws_event_type),
         }
-
-        # Preserve original event type for specific handlers
-        if event_type != ws_event_type:
-            ws_event['original_event_type'] = event_type
-
-        # Add latency metadata for monitoring
-        if event_latency_ms is not None:
-            ws_event['latency_ms'] = event_latency_ms
 
         # Add optional fields if present
         if 'correlation_id' in metadata or 'correlation_id' in event:
@@ -190,22 +224,46 @@ class EventTransformer:
         trace_id = metadata.get('trace_id') or event.get('trace_id')
         if trace_id:
             ws_event['trace_id'] = ensure_str(trace_id)
-            # Log with trace_id for traceability
             log.debug(f"Event {event_type} with trace_id: {trace_id}")
+
+        # Add latency metadata for monitoring
+        if event_latency_ms is not None:
+            ws_event['latency_ms'] = event_latency_ms
+
+        # Protocol version at the end (v2)
+        ws_event['v'] = 2
 
         return ws_event
 
     @staticmethod
     def _transform_payload(ws_event_type: str, event: Dict[str, Any]) -> Dict[str, Any]:
         """Transform event payload to WebSocket format"""
-        # Call the appropriate transformation method
-        if ws_event_type == 'user_account_update' or ws_event_type == 'user_profile_updated':
+        # User domain events
+        if ws_event_type in ('user_account_update', 'user_profile_updated', 'user_admin_status_updated'):
             return EventTransformer._transform_user_account(event)
-        elif ws_event_type == 'system_announcement':
+
+        # Company domain events
+        if ws_event_type.startswith('company_'):
+            return EventTransformer._transform_company_event(event)
+
+        # Chat domain events
+        if ws_event_type in ('chat_created', 'chat_updated', 'chat_archived', 'chat_deleted'):
+            return EventTransformer._transform_chat_event(event)
+
+        # Message events
+        if ws_event_type in ('message_created', 'message_updated', 'message_deleted'):
+            return EventTransformer._transform_message_event(event)
+
+        # Participant events
+        if ws_event_type in ('participant_joined', 'participant_left', 'participant_role_changed'):
+            return EventTransformer._transform_participant_event(event)
+
+        # System events
+        if ws_event_type == 'system_announcement':
             return EventTransformer._transform_system_announcement(event)
-        else:
-            # Default transformation - extract payload
-            return EventTransformer._extract_payload(event)
+
+        # Default transformation - extract payload
+        return EventTransformer._extract_payload(event)
 
     @staticmethod
     def _transform_user_account(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -226,6 +284,79 @@ class EventTransformer:
             'created_at': event.get('created_at'),
             'updated_at': event.get('updated_at'),
             'metadata': event.get('metadata'),
+        }
+
+    @staticmethod
+    def _transform_company_event(event: Dict[str, Any]) -> Dict[str, Any]:
+        """Transform company domain event"""
+        return {
+            'company_id': str(event.get('company_id', event.get('aggregate_id', ''))),
+            'name': event.get('name'),
+            'description': event.get('description'),
+            'owner_id': str(event.get('owner_id', '')) if event.get('owner_id') else None,
+            'telegram_chat_id': event.get('telegram_chat_id'),
+            'telegram_topic_id': event.get('telegram_topic_id'),
+            'is_active': event.get('is_active', True),
+            'balance': event.get('balance'),
+            'currency': event.get('currency'),
+            'user_id': str(event.get('user_id', '')) if event.get('user_id') else None,
+            'role': event.get('role'),
+            'created_at': event.get('created_at'),
+            'updated_at': event.get('updated_at'),
+        }
+
+    @staticmethod
+    def _transform_chat_event(event: Dict[str, Any]) -> Dict[str, Any]:
+        """Transform chat domain event"""
+        return {
+            'chat_id': str(event.get('chat_id', event.get('aggregate_id', ''))),
+            'name': event.get('name'),
+            'chat_type': event.get('chat_type'),
+            'company_id': str(event.get('company_id', '')) if event.get('company_id') else None,
+            'created_by': str(event.get('created_by', '')) if event.get('created_by') else None,
+            'participant_count': event.get('participant_count'),
+            'is_active': event.get('is_active', True),
+            'telegram_chat_id': event.get('telegram_chat_id'),
+            'telegram_topic_id': event.get('telegram_topic_id'),
+            'last_message_at': event.get('last_message_at'),
+            'created_at': event.get('created_at'),
+            'updated_at': event.get('updated_at'),
+        }
+
+    @staticmethod
+    def _transform_message_event(event: Dict[str, Any]) -> Dict[str, Any]:
+        """Transform message event"""
+        return {
+            'message_id': str(event.get('message_id', event.get('aggregate_id', ''))),
+            'chat_id': str(event.get('chat_id', '')) if event.get('chat_id') else None,
+            'sender_id': str(event.get('sender_id', '')) if event.get('sender_id') else None,
+            'sender_name': event.get('sender_name'),
+            'content': event.get('content'),
+            'message_type': event.get('message_type', 'text'),
+            'reply_to_id': str(event.get('reply_to_id', '')) if event.get('reply_to_id') else None,
+            'file_url': event.get('file_url'),
+            'file_name': event.get('file_name'),
+            'file_size': event.get('file_size'),
+            'file_type': event.get('file_type'),
+            'source': event.get('source', 'web'),
+            'telegram_message_id': event.get('telegram_message_id'),
+            'is_edited': event.get('is_edited', False),
+            'is_deleted': event.get('is_deleted', False),
+            'created_at': event.get('created_at'),
+            'updated_at': event.get('updated_at'),
+        }
+
+    @staticmethod
+    def _transform_participant_event(event: Dict[str, Any]) -> Dict[str, Any]:
+        """Transform participant event"""
+        return {
+            'chat_id': str(event.get('chat_id', '')) if event.get('chat_id') else None,
+            'user_id': str(event.get('user_id', '')) if event.get('user_id') else None,
+            'user_name': event.get('user_name'),
+            'role': event.get('role', 'member'),
+            'is_active': event.get('is_active', True),
+            'joined_at': event.get('joined_at'),
+            'left_at': event.get('left_at'),
         }
 
     @staticmethod

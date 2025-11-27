@@ -3,7 +3,6 @@ import { MessageCircle, Users, Hash } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { TelegramChatService } from '@/services/TelegramChatService';
 
 interface TelegramIndicatorProps {
   chat: any;
@@ -11,18 +10,28 @@ interface TelegramIndicatorProps {
   className?: string;
 }
 
-const TelegramIndicator: React.FC<TelegramIndicatorProps> = ({ 
-  chat, 
+// Helper to check if chat is a Telegram chat
+function isTelegramChat(chat: any): boolean {
+  return !!chat?.telegram_chat_id || !!chat?.telegram_supergroup_id;
+}
+
+// Format chat info for display
+function formatChatInfo(chat: any): { displayName: string; subtitle: string | null } {
+  const displayName = chat?.telegram_title || chat?.name || 'Telegram Chat';
+  const subtitle = chat?.telegram_username ? `@${chat.telegram_username}` : null;
+  return { displayName, subtitle };
+}
+
+const TelegramIndicator: React.FC<TelegramIndicatorProps> = ({
+  chat,
   showDetails = false,
   className = ''
 }) => {
-  const isTelegram = TelegramChatService.isTelegramChat(chat);
-
-  if (!isTelegram) {
+  if (!isTelegramChat(chat)) {
     return null;
   }
 
-  const { displayName, subtitle } = TelegramChatService.formatChatInfo(chat);
+  const { displayName, subtitle } = formatChatInfo(chat);
 
   const TelegramIcon = () => (
     <MessageCircle 

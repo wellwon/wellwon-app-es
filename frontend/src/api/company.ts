@@ -383,3 +383,47 @@ export async function updateCompanyBalance(
   const { data } = await API.post<CommandResponse>(`/companies/${companyId}/balance`, request);
   return data;
 }
+
+// -----------------------------------------------------------------------------
+// Logo Operations
+// -----------------------------------------------------------------------------
+
+export interface LogoUploadResponse {
+  success: boolean;
+  logo_url?: string;
+  error?: string;
+}
+
+export interface LogoDeleteResponse {
+  success: boolean;
+  error?: string;
+}
+
+export async function uploadCompanyLogo(
+  companyId: string,
+  file: File
+): Promise<LogoUploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const { data } = await API.post<LogoUploadResponse>(
+    `/companies/${companyId}/logo`,
+    formData,
+    {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    }
+  );
+  return data;
+}
+
+export async function deleteCompanyLogo(
+  companyId: string,
+  logoUrl: string
+): Promise<LogoDeleteResponse> {
+  const { data } = await API.delete<LogoDeleteResponse>(`/companies/${companyId}/logo`, {
+    params: { logo_url: logoUrl },
+  });
+  return data;
+}

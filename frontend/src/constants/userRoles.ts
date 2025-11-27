@@ -1,7 +1,20 @@
-import type { Database } from '@/integrations/supabase/types';
+// Chat and Telegram role types (migrated from Supabase Database types)
 
-export type ChatBusinessRole = Database['public']['Enums']['chat_business_role'];
-export type TelegramGroupType = Database['public']['Enums']['telegram_group_type'];
+export type ChatBusinessRole =
+  | 'client'
+  | 'payment_agent'
+  | 'logistician'
+  | 'purchasers'
+  | 'unassigned'
+  | 'manager';
+
+export type TelegramGroupType =
+  | 'client'
+  | 'payments'
+  | 'logistics'
+  | 'buyers'
+  | 'others'
+  | 'wellwon';
 
 export interface RoleOption {
   value: ChatBusinessRole;

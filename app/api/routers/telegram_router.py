@@ -380,3 +380,277 @@ async def send_message(
         success=True,
         message_id=result.message_id,
     )
+
+
+# =============================================================================
+# Supergroups Endpoints (for Frontend)
+# =============================================================================
+
+from typing import List, Annotated
+from pydantic import BaseModel
+from datetime import datetime
+from app.security.jwt_auth import get_current_user
+from app.infra.read_repos.company_read_repo import CompanyReadRepo
+
+
+class SupergroupResponse(BaseModel):
+    """Telegram supergroup info"""
+    id: int
+    company_id: Optional[int] = None
+    title: str
+    username: Optional[str] = None
+    description: Optional[str] = None
+    invite_link: Optional[str] = None
+    member_count: int = 0
+    is_forum: bool = False
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+
+
+class SupergroupWithChatCountResponse(BaseModel):
+    """Telegram supergroup with chat count"""
+    id: int
+    company_id: Optional[int] = None
+    company_name: str = ""
+    title: str
+    username: Optional[str] = None
+    description: Optional[str] = None
+    invite_link: Optional[str] = None
+    member_count: int = 0
+    is_forum: bool = False
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+    chat_count: int = 0
+
+
+class VerifyTopicsResponse(BaseModel):
+    """Response from topic verification"""
+    success: bool
+    verified_count: int = 0
+    created_count: int = 0
+    errors: List[str] = []
+    dry_run: bool = False
+
+
+@router.get("/supergroups", response_model=List[SupergroupResponse])
+async def get_all_supergroups(
+    current_user: Annotated[dict, Depends(get_current_user)],
+    active_only: bool = True,
+) -> List[SupergroupResponse]:
+    """
+    Get all Telegram supergroups.
+
+    Returns list of all supergroups from the database.
+    """
+    try:
+        supergroups = await CompanyReadRepo.get_all_telegram_supergroups(active_only=active_only)
+
+        return [
+            SupergroupResponse(
+                id=sg.id if hasattr(sg, 'id') else sg.telegram_group_id,
+                company_id=sg.company_id,
+                title=sg.title,
+                username=sg.username,
+                description=sg.description,
+                invite_link=sg.invite_link,
+                member_count=sg.member_count if hasattr(sg, 'member_count') else 0,
+                is_forum=sg.is_forum if hasattr(sg, 'is_forum') else False,
+                is_active=sg.is_active if hasattr(sg, 'is_active') else True,
+                created_at=sg.created_at if hasattr(sg, 'created_at') else None,
+            )
+            for sg in supergroups
+        ]
+
+    except Exception as e:
+        log.error(f"Failed to get supergroups: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get supergroups")
+
+
+@router.get("/supergroups/chat-counts", response_model=List[SupergroupWithChatCountResponse])
+async def get_supergroup_chat_counts(
+    current_user: Annotated[dict, Depends(get_current_user)],
+) -> List[SupergroupWithChatCountResponse]:
+    """
+    Get all Telegram supergroups with their chat counts.
+
+    Returns list of supergroups with the number of active chats in each.
+    """
+    try:
+        results = await CompanyReadRepo.get_telegram_supergroups_with_chat_counts()
+
+        return [
+            SupergroupWithChatCountResponse(
+                id=row["id"],
+                company_id=row.get("company_id"),
+                company_name=row.get("company_name", ""),
+                title=row["title"],
+                username=row.get("username"),
+                description=row.get("description"),
+                invite_link=row.get("invite_link"),
+                member_count=row.get("member_count", 0),
+                is_forum=row.get("is_forum", False),
+                is_active=row.get("is_active", True),
+                created_at=row.get("created_at"),
+                chat_count=row.get("chat_count", 0),
+            )
+            for row in results
+        ]
+
+    except Exception as e:
+        log.error(f"Failed to get supergroups with chat counts: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get supergroups")
+
+
+# =============================================================================
+# Member Management Endpoints
+# =============================================================================
+
+
+class GroupMemberResponse(BaseModel):
+    """Telegram group member info"""
+    user_id: int
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    is_bot: bool = False
+    status: str = "member"  # creator, administrator, member, restricted, left, kicked
+
+
+class MembersListResponse(BaseModel):
+    """Response with list of group members"""
+    success: bool
+    members: List[GroupMemberResponse] = []
+    total_count: int = 0
+    error: Optional[str] = None
+
+
+class UpdateMemberRoleRequest(BaseModel):
+    """Request to update member role"""
+    role: str  # administrator, member, restricted
+
+
+class UpdateMemberRoleResponse(BaseModel):
+    """Response for role update"""
+    success: bool
+    error: Optional[str] = None
+
+
+@router.get("/groups/{group_id}/members", response_model=MembersListResponse)
+async def get_group_members(
+    group_id: int,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    adapter: TelegramAdapter = Depends(get_adapter),
+) -> MembersListResponse:
+    """
+    Get members of a Telegram group.
+
+    Returns list of members with their roles and status.
+    Uses MTProto client for full member list access.
+    """
+    try:
+        members = await adapter.get_group_members(group_id)
+
+        return MembersListResponse(
+            success=True,
+            members=[
+                GroupMemberResponse(
+                    user_id=m.user_id,
+                    username=m.username,
+                    first_name=m.first_name,
+                    last_name=m.last_name,
+                    is_bot=m.is_bot,
+                    status=m.status,
+                )
+                for m in members
+            ],
+            total_count=len(members),
+        )
+
+    except Exception as e:
+        log.error(f"Failed to get members for group {group_id}: {e}", exc_info=True)
+        return MembersListResponse(
+            success=False,
+            members=[],
+            total_count=0,
+            error=str(e),
+        )
+
+
+@router.patch("/groups/{group_id}/members/{user_id}/role", response_model=UpdateMemberRoleResponse)
+async def update_member_role(
+    group_id: int,
+    user_id: int,
+    request: UpdateMemberRoleRequest,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    adapter: TelegramAdapter = Depends(get_adapter),
+) -> UpdateMemberRoleResponse:
+    """
+    Update a member's role in a Telegram group.
+
+    Roles: administrator, member, restricted
+    """
+    try:
+        success = await adapter.update_member_role(group_id, user_id, request.role)
+
+        if success:
+            log.info(f"Updated role for user {user_id} in group {group_id} to {request.role}")
+            return UpdateMemberRoleResponse(success=True)
+        else:
+            return UpdateMemberRoleResponse(
+                success=False,
+                error="Failed to update member role"
+            )
+
+    except Exception as e:
+        log.error(f"Failed to update role for user {user_id} in group {group_id}: {e}", exc_info=True)
+        return UpdateMemberRoleResponse(
+            success=False,
+            error=str(e),
+        )
+
+
+@router.post("/groups/{group_id}/verify-topics", response_model=VerifyTopicsResponse)
+async def verify_group_topics(
+    group_id: int,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    adapter: TelegramAdapter = Depends(get_adapter),
+    dry_run: bool = False,
+) -> VerifyTopicsResponse:
+    """
+    Verify and sync topics for a Telegram supergroup.
+
+    Checks topics in Telegram and syncs them with the database.
+    If dry_run=True, only reports what would be done without making changes.
+    """
+    try:
+        # Get group info and topics from Telegram
+        topics = await adapter.get_group_topics(group_id)
+
+        if not topics:
+            return VerifyTopicsResponse(
+                success=True,
+                verified_count=0,
+                created_count=0,
+                errors=[],
+                dry_run=dry_run,
+            )
+
+        # For now, just return the count of topics found
+        # TODO: Implement full sync with database when needed
+        return VerifyTopicsResponse(
+            success=True,
+            verified_count=len(topics),
+            created_count=0,
+            errors=[],
+            dry_run=dry_run,
+        )
+
+    except Exception as e:
+        log.error(f"Failed to verify topics for group {group_id}: {e}", exc_info=True)
+        return VerifyTopicsResponse(
+            success=False,
+            verified_count=0,
+            created_count=0,
+            errors=[str(e)],
+            dry_run=dry_run,
+        )

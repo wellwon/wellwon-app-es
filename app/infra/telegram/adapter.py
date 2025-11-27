@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from app.infra.telegram.config import TelegramConfig, get_telegram_config
 from app.infra.telegram.bot_client import TelegramBotClient, TelegramMessage, SendMessageResult
-from app.infra.telegram.mtproto_client import TelegramMTProtoClient, GroupInfo, TopicInfo
+from app.infra.telegram.mtproto_client import TelegramMTProtoClient, GroupInfo, TopicInfo, MemberInfo
 
 log = logging.getLogger("wellwon.telegram.adapter")
 
@@ -423,6 +423,42 @@ class TelegramAdapter:
             return False
 
         return await self._mtproto_client.remove_user(group_id, username)
+
+    async def get_group_members(self, group_id: int) -> List[MemberInfo]:
+        """Get all members of a group"""
+        if not self._mtproto_client:
+            return []
+
+        return await self._mtproto_client.get_group_members(group_id)
+
+    async def update_member_role(self, group_id: int, user_id: int, role: str) -> bool:
+        """
+        Update a member's role in a group.
+
+        Args:
+            group_id: Telegram group ID
+            user_id: Telegram user ID
+            role: New role (administrator, member, restricted)
+
+        Returns:
+            True if successful
+        """
+        if not self._mtproto_client:
+            return False
+
+        if role == "administrator":
+            return await self._mtproto_client.promote_user(group_id, user_id, admin=True)
+        elif role == "member":
+            # First remove admin rights, then remove restrictions
+            await self._mtproto_client.promote_user(group_id, user_id, admin=False)
+            return await self._mtproto_client.restrict_user(group_id, user_id, restricted=False)
+        elif role == "restricted":
+            # Remove admin rights and add restrictions
+            await self._mtproto_client.promote_user(group_id, user_id, admin=False)
+            return await self._mtproto_client.restrict_user(group_id, user_id, restricted=True)
+        else:
+            log.warning(f"Unknown role: {role}")
+            return False
 
     # =========================================================================
     # UTILITY METHODS

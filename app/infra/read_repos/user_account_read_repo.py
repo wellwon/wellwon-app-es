@@ -594,6 +594,236 @@ class UserAccountReadRepo:
             )
         return None
 
+    @staticmethod
+    async def get_all_users_for_admin(
+            include_inactive: bool = True,
+            limit: int = 100,
+            offset: int = 0
+    ) -> List[UserAccountReadModel]:
+        """
+        Gets all users for admin management panel.
+
+        Args:
+            include_inactive: Whether to include inactive users
+            limit: Maximum number of users to return
+            offset: Number of users to skip
+
+        Returns:
+            List of UserAccountReadModel
+        """
+        from app.infra.persistence.pg_client import fetch as pg_fetch
+
+        where_clause = "" if include_inactive else "WHERE is_active = TRUE"
+
+        sql = f"""
+            SELECT
+                id,
+                username,
+                email,
+                role,
+                is_active,
+                email_verified,
+                last_login,
+                created_at,
+                updated_at,
+                mfa_enabled,
+                security_alerts_enabled,
+                last_password_change,
+                first_name,
+                last_name,
+                avatar_url,
+                bio,
+                phone,
+                is_developer,
+                user_number
+            FROM user_accounts
+            {where_clause}
+            ORDER BY created_at DESC
+            LIMIT $1 OFFSET $2
+        """
+
+        rows = await pg_fetch(sql, limit, offset)
+
+        return [
+            UserAccountReadModel(
+                id=row["id"],
+                user_id_str=str(row["id"]),
+                username=row["username"],
+                email=row["email"],
+                role=row["role"],
+                is_active=row["is_active"],
+                email_verified=row.get("email_verified", False),
+                last_login=row.get("last_login"),
+                created_at=row["created_at"],
+                updated_at=row.get("updated_at"),
+                mfa_enabled=row.get("mfa_enabled", False),
+                security_alerts_enabled=row.get("security_alerts_enabled", True),
+                last_password_change=row.get("last_password_change"),
+                first_name=row.get("first_name"),
+                last_name=row.get("last_name"),
+                avatar_url=row.get("avatar_url"),
+                bio=row.get("bio"),
+                phone=row.get("phone"),
+                is_developer=row.get("is_developer", False),
+                user_number=row.get("user_number")
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    async def update_user_admin_status(
+            user_id: UUID,
+            is_active: Optional[bool] = None,
+            is_developer: Optional[bool] = None
+    ) -> Optional[UserAccountReadModel]:
+        """
+        Updates user admin status (active, developer flags).
+        Called by projector on admin status change events.
+
+        Args:
+            user_id: The UUID of the user to update
+            is_active: New active status (optional)
+            is_developer: New developer status (optional)
+
+        Returns:
+            Updated UserAccountReadModel or None if not found
+        """
+        updates = {}
+        if is_active is not None:
+            updates['is_active'] = is_active
+        if is_developer is not None:
+            updates['is_developer'] = is_developer
+
+        if not updates:
+            return None
+
+        # Build SET clause
+        set_clauses = []
+        params = []
+        param_count = 1
+
+        for field, value in updates.items():
+            set_clauses.append(f"{field} = ${param_count}")
+            params.append(value)
+            param_count += 1
+
+        set_clauses.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(user_id)
+
+        sql = f"""
+            UPDATE user_accounts
+            SET {', '.join(set_clauses)}
+            WHERE id = ${param_count}
+            RETURNING
+                id,
+                username,
+                email,
+                role,
+                is_active,
+                email_verified,
+                last_login,
+                created_at,
+                updated_at,
+                first_name,
+                last_name,
+                is_developer
+        """
+
+        try:
+            row = await pg_fetchrow(sql, *params)
+
+            if not row:
+                log.warning(f"User not found for admin status update: {user_id}")
+                return None
+
+            log.info(f"Updated admin status for user {user_id}: {updates}")
+
+            return UserAccountReadModel(
+                id=row["id"],
+                user_id_str=str(row["id"]),
+                username=row["username"],
+                email=row["email"],
+                role=row["role"],
+                is_active=row["is_active"],
+                email_verified=row.get("email_verified", False),
+                last_login=row.get("last_login"),
+                created_at=row["created_at"],
+                updated_at=row.get("updated_at"),
+                first_name=row.get("first_name"),
+                last_name=row.get("last_name"),
+                is_developer=row.get("is_developer", False),
+            )
+
+        except Exception as e:
+            log.error(f"Failed to update admin status for user {user_id}: {e}")
+            raise
+
+    @staticmethod
+    async def get_profiles_with_telegram() -> List[Dict[str, Any]]:
+        """
+        Gets user profiles that have telegram_user_id linked.
+        Used for mentions feature in chat.
+
+        Returns:
+            List of dicts with user_id, first_name, last_name, avatar_url, role, telegram_user_id
+        """
+        sql = """
+            SELECT
+                id as user_id,
+                first_name,
+                last_name,
+                avatar_url,
+                role as role_label,
+                telegram_user_id
+            FROM user_accounts
+            WHERE is_active = TRUE
+            ORDER BY
+                CASE WHEN telegram_user_id IS NOT NULL THEN 0 ELSE 1 END,
+                first_name, last_name
+        """
+
+        from app.infra.persistence.pg_client import fetch as pg_fetch
+
+        rows = await pg_fetch(sql)
+        return [
+            {
+                "user_id": str(row["user_id"]),
+                "first_name": row["first_name"],
+                "last_name": row["last_name"],
+                "avatar_url": row["avatar_url"],
+                "role_label": row["role_label"],
+                "telegram_user_id": row["telegram_user_id"],
+            }
+            for row in rows
+        ]
+
+    @staticmethod
+    async def update_telegram_user_id(user_id: UUID, telegram_user_id: int) -> bool:
+        """
+        Links a WellWon user account to a Telegram user ID.
+
+        Args:
+            user_id: WellWon user UUID
+            telegram_user_id: Telegram user ID (bigint)
+
+        Returns:
+            True if updated, False otherwise
+        """
+        sql = """
+            UPDATE user_accounts
+            SET telegram_user_id = $1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $2
+        """
+
+        try:
+            await pg_execute(sql, telegram_user_id, user_id)
+            log.info(f"Linked user {user_id} to Telegram user {telegram_user_id}")
+            return True
+        except Exception as e:
+            log.error(f"Failed to link user {user_id} to Telegram: {e}")
+            return False
+
 
 # =============================================================================
 # Singleton instance for backward compatibility

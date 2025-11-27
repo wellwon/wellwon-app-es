@@ -566,8 +566,11 @@ class WSEConnection:
                 else:
                     log.warning(f"Failed to sign message type: {message_type}")
 
-            # Serialize to JSON
-            data = json.dumps(message, cls=DateTimeEncoder)
+            # Serialize to JSON with message category prefix (Protocol v2)
+            # Format: {category}{json} e.g., U{"t":"user_update",...}
+            msg_cat = message.pop('_msg_cat', 'U')  # Extract and remove from message
+            json_data = json.dumps(message, cls=DateTimeEncoder)
+            data = f"{msg_cat}{json_data}"
             data_bytes = data.encode('utf-8')
 
             # ENHANCED DEBUG LOGGING - Phase 6: Pre-send info

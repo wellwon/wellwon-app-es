@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useRef } from 'react';
-import { TelegramChatService } from '@/services/TelegramChatService';
-import { supabase } from '@/integrations/supabase/client';
+import * as telegramApi from '@/api/telegram';
+import { getProfilesWithTelegram } from '@/api/user_account';
 import { logger } from '@/utils/logger';
 
 interface MentionCandidate {
@@ -57,60 +57,40 @@ export function useMentions({ activeChat }: UseMentionsProps): UseMentionsReturn
 
     try {
       // 1. Получаем telegram пользователей супергруппы
-      const members = await TelegramChatService.getSupergroupMembers(activeChat.telegram_supergroup_id);
+      const members = await telegramApi.getGroupMembers(activeChat.telegram_supergroup_id);
       const nonBotMembers = members.filter(m => !m.is_bot && m.username);
 
-      if (nonBotMembers.length > 0) {
-        const tgUserIds = nonBotMembers.map(m => m.telegram_user_id);
-        const tgUsers = await TelegramChatService.getTgUsersByIds(tgUserIds);
+      nonBotMembers.forEach(member => {
+        if (member.username) {
+          const name = [member.first_name, member.last_name].filter(Boolean).join(' ') || 'Пользователь';
 
-        nonBotMembers.forEach(member => {
-          if (member.username) {
-            const userData = tgUsers.find(user => user.id === member.telegram_user_id);
-            const name = [member.first_name, member.last_name].filter(Boolean).join(' ') || 'Пользователь';
-            
+          candidates.push({
+            id: `tg-${member.telegram_user_id}`,
+            name,
+            username: member.username,
+            group: 'telegram'
+          });
+        }
+      });
+
+      // 2. Получаем менеджеров компании с telegram username
+      const profiles = await getProfilesWithTelegram();
+
+      if (profiles && profiles.length > 0) {
+        profiles.forEach(profile => {
+          if (profile.telegram_username) {
+            const name = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'Менеджер';
+
             candidates.push({
-              id: `tg-${member.telegram_user_id}`,
+              id: `mgr-${profile.user_id}`,
               name,
-              username: member.username,
-              roleLabel: userData?.role_label || undefined,
-              group: 'telegram'
+              username: profile.telegram_username,
+              roleLabel: profile.role_label || 'Менеджер',
+              avatarUrl: profile.avatar_url || undefined,
+              group: 'manager'
             });
           }
         });
-      }
-
-      // 2. Получаем менеджеров компании с telegram username
-      const { data: profiles, error: profilesError } = await supabase
-        .from('profiles')
-        .select('user_id, first_name, last_name, avatar_url, role_label, telegram_user_id')
-        .eq('active', true)
-        .not('telegram_user_id', 'is', null);
-
-      if (profilesError) {
-        logger.error('Failed to load profiles for mentions', profilesError, { component: 'useMentions' });
-      } else if (profiles && profiles.length > 0) {
-        const managerTgIds = profiles.map(p => p.telegram_user_id).filter(Boolean);
-        
-        if (managerTgIds.length > 0) {
-          const managerTgUsers = await TelegramChatService.getTgUsersByIds(managerTgIds);
-
-          profiles.forEach(profile => {
-            const tgUser = managerTgUsers.find(tg => tg.id === profile.telegram_user_id);
-            if (tgUser?.username) {
-              const name = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'Менеджер';
-              
-              candidates.push({
-                id: `mgr-${profile.user_id}`,
-                name,
-                username: tgUser.username,
-                roleLabel: profile.role_label || 'Менеджер',
-                avatarUrl: profile.avatar_url || undefined,
-                group: 'manager'
-              });
-            }
-          });
-        }
       }
 
       // Сортируем: сначала менеджеры, потом telegram пользователи

@@ -618,3 +618,60 @@ class ChatReadRepo:
             user_id
         )
         return result or 0
+
+    # =========================================================================
+    # Message Templates Operations (Read Model)
+    # =========================================================================
+
+    @staticmethod
+    async def get_all_templates(active_only: bool = True) -> List[Dict[str, Any]]:
+        """Get all message templates"""
+        sql = """
+            SELECT
+                id, name, description, category, template_data,
+                image_url, created_by, is_active, created_at, updated_at
+            FROM message_templates
+        """
+        if active_only:
+            sql += " WHERE is_active = TRUE"
+        sql += " ORDER BY category, name"
+
+        rows = await pg_client.fetch(sql)
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    async def get_template_by_id(template_id: uuid.UUID) -> Optional[Dict[str, Any]]:
+        """Get message template by ID"""
+        row = await pg_client.fetchrow(
+            """
+            SELECT
+                id, name, description, category, template_data,
+                image_url, created_by, is_active, created_at, updated_at
+            FROM message_templates
+            WHERE id = $1
+            """,
+            template_id
+        )
+        if not row:
+            return None
+        return dict(row)
+
+    @staticmethod
+    async def get_templates_by_category(
+        category: str,
+        active_only: bool = True
+    ) -> List[Dict[str, Any]]:
+        """Get message templates by category"""
+        sql = """
+            SELECT
+                id, name, description, category, template_data,
+                image_url, created_by, is_active, created_at, updated_at
+            FROM message_templates
+            WHERE category = $1
+        """
+        if active_only:
+            sql += " AND is_active = TRUE"
+        sql += " ORDER BY name"
+
+        rows = await pg_client.fetch(sql, category)
+        return [dict(row) for row in rows]
