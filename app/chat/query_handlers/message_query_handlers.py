@@ -64,7 +64,14 @@ class GetChatMessagesQueryHandler(BaseQueryHandler[GetChatMessagesQuery, List[Me
                 is_deleted=m.is_deleted,
                 read_by_count=getattr(m, 'read_by_count', 0),
                 source=m.source,
+                # Telegram fields
                 telegram_message_id=m.telegram_message_id,
+                telegram_user_id=getattr(m, 'telegram_user_id', None),
+                telegram_user_data=getattr(m, 'telegram_user_data', None),
+                telegram_forward_data=getattr(m, 'telegram_forward_data', None),
+                telegram_topic_id=getattr(m, 'telegram_topic_id', None),
+                sync_direction=getattr(m, 'sync_direction', None),
+                # Joined sender info
                 sender_name=getattr(m, 'sender_name', None),
                 sender_avatar_url=getattr(m, 'sender_avatar_url', None),
                 reply_to_content=getattr(m, 'reply_to_content', None),
@@ -106,7 +113,13 @@ class GetMessageByIdQueryHandler(BaseQueryHandler[GetMessageByIdQuery, Optional[
             is_edited=message.is_edited,
             is_deleted=message.is_deleted,
             source=message.source,
+            # Telegram fields
             telegram_message_id=message.telegram_message_id,
+            telegram_user_id=message.telegram_user_id,
+            telegram_user_data=message.telegram_user_data,
+            telegram_forward_data=message.telegram_forward_data,
+            telegram_topic_id=message.telegram_topic_id,
+            sync_direction=message.sync_direction,
         )
 
 
@@ -169,6 +182,14 @@ class SearchMessagesQueryHandler(BaseQueryHandler[SearchMessagesQuery, List[Mess
                 message_type=m.message_type,
                 created_at=m.created_at,
                 is_deleted=m.is_deleted,
+                source=m.source,
+                # Telegram fields
+                telegram_message_id=m.telegram_message_id,
+                telegram_user_id=m.telegram_user_id,
+                telegram_user_data=m.telegram_user_data,
+                telegram_forward_data=m.telegram_forward_data,
+                telegram_topic_id=m.telegram_topic_id,
+                sync_direction=m.sync_direction,
             )
             for m in messages
         ]

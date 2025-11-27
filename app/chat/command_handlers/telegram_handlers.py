@@ -15,7 +15,6 @@ from app.chat.commands import (
     ProcessTelegramMessageCommand,
 )
 from app.chat.aggregate import ChatAggregate
-from app.chat.events import TelegramMessageReceived
 from app.infra.cqrs.decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
 
@@ -93,8 +92,10 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
     Handle ProcessTelegramMessageCommand.
 
     This handler processes incoming messages from Telegram webhook.
-    It creates a MessageSent event (via aggregate) or TelegramMessageReceived
-    if the sender cannot be mapped to a WellWon user.
+    ALL messages go through the ChatAggregate to maintain DDD integrity.
+
+    For mapped WellWon users: uses send_message() (requires participant check)
+    For external Telegram users: uses receive_external_message() (no participant check)
     """
 
     def __init__(self, deps: 'HandlerDependencies'):
@@ -114,7 +115,7 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
         chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
 
         if command.sender_id:
-            # Mapped WellWon user - use regular message flow
+            # Mapped WellWon user - use regular message flow (requires participant)
             chat_aggregate.send_message(
                 message_id=command.message_id,
                 sender_id=command.sender_id,
@@ -122,37 +123,42 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
                 message_type=command.message_type,
                 file_url=command.file_url,
                 file_name=command.file_name,
+                file_size=command.file_size,
+                file_type=command.file_type,
+                voice_duration=command.voice_duration,
                 source="telegram",
                 telegram_message_id=command.telegram_message_id,
-            )
-
-            await self.publish_events(
-                aggregate=chat_aggregate,
-                aggregate_id=command.chat_id,
-                command=command
+                telegram_user_id=command.telegram_user_id,
+                telegram_user_data=command.telegram_user_data,
+                telegram_forward_data=command.telegram_forward_data,
+                telegram_topic_id=command.telegram_topic_id,
             )
         else:
-            # Unknown Telegram user - emit special event
-            event = TelegramMessageReceived(
+            # External Telegram user - use receive_external_message (no participant check)
+            # This is for new clients contacting via general topic
+            chat_aggregate.receive_external_message(
                 message_id=command.message_id,
-                chat_id=command.chat_id,
-                telegram_message_id=command.telegram_message_id,
-                telegram_user_id=command.telegram_user_id,
-                sender_id=None,
                 content=command.content,
                 message_type=command.message_type,
+                source="telegram",
+                telegram_message_id=command.telegram_message_id,
+                telegram_user_id=command.telegram_user_id,
+                telegram_user_data=command.telegram_user_data,
+                telegram_forward_data=command.telegram_forward_data,
+                telegram_topic_id=command.telegram_topic_id,
                 file_url=command.file_url,
                 file_name=command.file_name,
+                file_size=command.file_size,
+                file_type=command.file_type,
+                voice_duration=command.voice_duration,
             )
 
-            # Store event and publish
-            await self.event_store.append_events(
-                aggregate_id=command.chat_id,
-                aggregate_type="chat",
-                events=[event],
-                expected_version=chat_aggregate.version,
-            )
-            await self.event_bus.publish(event, topic=self.transport_topic)
+        # Both paths go through aggregate - publish events uniformly
+        await self.publish_events(
+            aggregate=chat_aggregate,
+            aggregate_id=command.chat_id,
+            command=command
+        )
 
         log.info(f"Telegram message processed: {command.message_id}")
         return command.message_id

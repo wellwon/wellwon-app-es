@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 import uuid
 from datetime import datetime
@@ -157,7 +157,7 @@ class MessageDetail(BaseModel):
     """Message details for API response"""
     id: uuid.UUID
     chat_id: uuid.UUID
-    sender_id: uuid.UUID
+    sender_id: Optional[uuid.UUID] = None  # None for external Telegram users
     content: str
     message_type: str = "text"
     reply_to_id: Optional[uuid.UUID] = None
@@ -173,8 +173,14 @@ class MessageDetail(BaseModel):
     read_by_count: int = 0
     # Source tracking
     source: str = "web"
+    # Telegram integration
     telegram_message_id: Optional[int] = None
-    # Sender info (joined)
+    telegram_user_id: Optional[int] = None  # Telegram user ID (for unmapped users)
+    telegram_user_data: Optional[Dict[str, Any]] = None  # {first_name, last_name, username, is_bot}
+    telegram_forward_data: Optional[Dict[str, Any]] = None  # Forward info if forwarded
+    telegram_topic_id: Optional[int] = None  # Forum topic ID
+    sync_direction: Optional[str] = None  # 'telegram_to_web' | 'web_to_telegram'
+    # Sender info (joined) - for WellWon users
     sender_name: Optional[str] = None
     sender_avatar_url: Optional[str] = None
     # Reply preview

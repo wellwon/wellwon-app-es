@@ -181,10 +181,17 @@ class ChatProjector:
 
         log.info(f"Projecting MessageSent: message_id={message_id}, chat_id={chat_id}")
 
+        # sender_id can be None for external Telegram users
+        sender_id = uuid.UUID(event_data['sender_id']) if event_data.get('sender_id') else None
+
+        # Determine sync_direction based on source
+        source = event_data.get('source', 'web')
+        sync_direction = 'telegram_to_web' if source == 'telegram' else None
+
         await self.chat_read_repo.insert_message(
             message_id=message_id,
             chat_id=uuid.UUID(event_data['chat_id']),
-            sender_id=uuid.UUID(event_data['sender_id']),
+            sender_id=sender_id,
             content=event_data['content'],
             message_type=event_data.get('message_type', 'text'),
             reply_to_id=uuid.UUID(event_data['reply_to_id']) if event_data.get('reply_to_id') else None,
@@ -193,8 +200,13 @@ class ChatProjector:
             file_size=event_data.get('file_size'),
             file_type=event_data.get('file_type'),
             voice_duration=event_data.get('voice_duration'),
-            source=event_data.get('source', 'web'),
+            source=source,
             telegram_message_id=event_data.get('telegram_message_id'),
+            telegram_user_id=event_data.get('telegram_user_id'),
+            telegram_user_data=event_data.get('telegram_user_data'),
+            telegram_forward_data=event_data.get('telegram_forward_data'),
+            telegram_topic_id=event_data.get('telegram_topic_id'),
+            sync_direction=sync_direction,
             created_at=envelope.timestamp,
         )
 
@@ -203,7 +215,7 @@ class ChatProjector:
             chat_id=uuid.UUID(event_data['chat_id']),
             last_message_at=envelope.timestamp,
             last_message_content=event_data['content'][:100],  # Truncate for preview
-            last_message_sender_id=uuid.UUID(event_data['sender_id']),
+            last_message_sender_id=sender_id,
         )
 
     @sync_projection("MessageEdited")
@@ -300,14 +312,19 @@ class ChatProjector:
 
     @sync_projection("TelegramMessageReceived")
     async def on_telegram_message_received(self, envelope: EventEnvelope) -> None:
-        """Project TelegramMessageReceived event (message from unmapped Telegram user)"""
+        """
+        Project TelegramMessageReceived event (DEPRECATED).
+
+        This handler exists for backward compatibility with old events.
+        New messages use unified MessageSent event with telegram_user_id field.
+        """
         event_data = envelope.event_data
         message_id = uuid.UUID(event_data['message_id'])
         chat_id = uuid.UUID(event_data['chat_id'])
 
-        log.info(f"Projecting TelegramMessageReceived: message={message_id}")
+        log.warning(f"Projecting legacy TelegramMessageReceived: message={message_id}")
 
-        # Insert message with telegram_user_id in metadata
+        # Insert message with telegram_user_id
         await self.chat_read_repo.insert_message(
             message_id=message_id,
             chat_id=chat_id,
@@ -316,9 +333,8 @@ class ChatProjector:
             message_type=event_data.get('message_type', 'text'),
             source='telegram',
             telegram_message_id=event_data['telegram_message_id'],
-            metadata={
-                'telegram_user_id': event_data['telegram_user_id'],
-            },
+            telegram_user_id=event_data.get('telegram_user_id'),
+            sync_direction='telegram_to_web',
             created_at=envelope.timestamp,
         )
 

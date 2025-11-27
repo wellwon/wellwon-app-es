@@ -377,7 +377,19 @@ export class EventHandlers {
   static handleMessageCreated(message: WSMessage): void {
     try {
       const msg = message.p;
-      logger.info('Message created:', msg);
+
+      // Log with source info for debugging Telegram integration
+      const source = msg.source || 'web';
+      const isTelegram = source === 'telegram' || !!msg.telegram_user_id;
+      logger.info('Message created:', {
+        message_id: msg.message_id,
+        chat_id: msg.chat_id,
+        source,
+        isTelegram,
+        sender_id: msg.sender_id,
+        telegram_user_id: msg.telegram_user_id,
+        has_telegram_user_data: !!msg.telegram_user_data
+      });
 
       // Invalidate messages for the chat
       queryClient.invalidateQueries({ queryKey: ['chat', msg.chat_id, 'messages'] });
@@ -386,7 +398,14 @@ export class EventHandlers {
       // Update unread count
       queryClient.invalidateQueries({ queryKey: ['unread-count'] });
 
-      window.dispatchEvent(new CustomEvent('messageCreated', { detail: msg }));
+      // Dispatch event with full Telegram data
+      window.dispatchEvent(new CustomEvent('messageCreated', {
+        detail: {
+          ...msg,
+          source,
+          isTelegram
+        }
+      }));
     } catch (error) {
       logger.error('Error handling message created:', error);
     }

@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic import Field, field_validator
 import uuid
 from datetime import datetime
@@ -211,5 +211,13 @@ class ProcessTelegramMessageCommand(Command):
     sender_id: Optional[uuid.UUID] = None  # Mapped WellWon user if exists
     content: str
     message_type: str = Field(default="text")
+    # File attachments
     file_url: Optional[str] = None
     file_name: Optional[str] = None
+    file_size: Optional[int] = None
+    file_type: Optional[str] = None
+    voice_duration: Optional[int] = None  # seconds
+    # Telegram-specific metadata
+    telegram_user_data: Optional[Dict[str, Any]] = None  # {first_name, last_name, username, is_bot}
+    telegram_forward_data: Optional[Dict[str, Any]] = None  # Forward info if forwarded message
+    telegram_topic_id: Optional[int] = None  # Forum topic ID

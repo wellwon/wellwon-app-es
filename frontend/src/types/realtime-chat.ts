@@ -39,7 +39,7 @@ export interface ChatParticipant {
 export interface Message {
   id: string;
   chat_id: string;
-  sender_id: string;
+  sender_id: string | null;  // null for external Telegram users
   content: string | null;
   message_type: 'text' | 'file' | 'voice' | 'image' | 'system' | 'interactive';
   reply_to_id: string | null;
@@ -59,18 +59,19 @@ export interface Message {
     last_name: string | null;
     avatar_url: string | null;
     type: string;
-  };
+  } | null;
   reply_to?: Message;
   read_by?: MessageRead[];
+  // Message source tracking
+  source?: 'web' | 'telegram' | 'api';
   // Telegram integration fields
   telegram_message_id?: number | null;
   telegram_user_id?: number | null;
   telegram_user_data?: {
-    id: number;
-    first_name: string;
+    first_name?: string;
     last_name?: string;
     username?: string;
-    is_bot: boolean;
+    is_bot?: boolean;
   } | null;
   telegram_topic_id?: number | null;
   telegram_forward_data?: Record<string, unknown> | null;

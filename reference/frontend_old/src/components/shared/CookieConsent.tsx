@@ -14,7 +14,7 @@ interface CookiePreferences {
   preferences: boolean;
 }
 
-const COOKIE_CONSENT_KEY = 'WellWon-cookie-consent';
+const COOKIE_CONSENT_KEY = 'wellwon-cookie-consent';
 
 // Dev функция для сброса cookie consent (только в development)
 const resetCookieConsent = () => {

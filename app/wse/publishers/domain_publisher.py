@@ -451,7 +451,20 @@ class WSEDomainPublisher:
         }
 
     def _transform_chat_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """Transform chat event to WSE format."""
+        """Transform chat event to WSE format with full Telegram support."""
+        # Extract telegram_user_data for external senders
+        telegram_user_data = event.get("telegram_user_data") or {}
+
+        # Build sender display name for Telegram users without WellWon account
+        sender_id = event.get("sender_id")
+        sender_name = event.get("sender_name")
+        if not sender_id and not sender_name and telegram_user_data:
+            # External Telegram user - build name from telegram_user_data
+            first = telegram_user_data.get("first_name", "")
+            last = telegram_user_data.get("last_name", "")
+            username = telegram_user_data.get("username", "")
+            sender_name = f"{first} {last}".strip() or (f"@{username}" if username else "Telegram User")
+
         return {
             "chat_id": event.get("aggregate_id") or event.get("chat_id"),
             "name": event.get("name"),
@@ -461,11 +474,15 @@ class WSEDomainPublisher:
             "message_id": event.get("message_id"),
             "content": event.get("content"),
             "message_type": event.get("message_type"),
-            "sender_id": event.get("sender_id"),
-            "sender_name": event.get("sender_name"),
+            "sender_id": sender_id,
+            "sender_name": sender_name,
             "reply_to_id": event.get("reply_to_id"),
             "file_url": event.get("file_url"),
             "file_name": event.get("file_name"),
+            "file_size": event.get("file_size"),
+            "file_type": event.get("file_type"),
+            "voice_duration": event.get("voice_duration"),
+            "source": event.get("source", "web"),
             # Participant fields
             "user_id": event.get("user_id"),
             "participant_role": event.get("role"),
@@ -475,10 +492,12 @@ class WSEDomainPublisher:
             # Read status
             "read_message_ids": event.get("message_ids"),
             "read_by": event.get("read_by"),
-            # Telegram integration
+            # Telegram integration (full support)
             "telegram_chat_id": event.get("telegram_chat_id"),
             "telegram_topic_id": event.get("telegram_topic_id"),
             "telegram_message_id": event.get("telegram_message_id"),
+            "telegram_user_id": event.get("telegram_user_id"),
+            "telegram_user_data": telegram_user_data if telegram_user_data else None,
             # Timestamps
             "created_at": event.get("created_at"),
             "updated_at": event.get("updated_at"),

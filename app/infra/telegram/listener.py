@@ -10,6 +10,7 @@ from typing import Optional, Protocol, Any
 from uuid import UUID
 
 from app.infra.telegram.adapter import TelegramAdapter, get_telegram_adapter
+from app.infra.read_repos.user_account_read_repo import UserAccountReadRepo
 
 log = logging.getLogger("wellwon.telegram.listener")
 
@@ -48,25 +49,95 @@ class TelegramEventListener:
     - Receives events from EventBus (RedPanda)
     - Looks up chat configuration from ChatReadRepository
     - Calls TelegramAdapter to perform Telegram operations
+
+    Pattern follows WSEDomainPublisher for consistency.
     """
 
     def __init__(
         self,
+        event_bus: Any,
         telegram_adapter: Optional[TelegramAdapter] = None,
         chat_repository: Optional[ChatReadRepository] = None
     ):
+        self._event_bus = event_bus
         self._telegram: Optional[TelegramAdapter] = telegram_adapter
         self._chat_repo: Optional[ChatReadRepository] = chat_repository
         self._initialized = False
+        self._running = False
+        self._subscriptions: dict = {}
 
-    async def initialize(self) -> None:
-        """Initialize the listener with dependencies"""
+    async def start(self) -> None:
+        """Start the Telegram Event Listener - subscribe to chat domain events"""
+        if self._running:
+            log.warning("TelegramEventListener already running")
+            return
+
+        log.info("Starting TelegramEventListener...")
+
+        # Initialize telegram adapter if not provided
         if self._telegram is None:
             self._telegram = await get_telegram_adapter()
 
-        # Chat repository will be injected when Chat domain is created
         self._initialized = True
-        log.info("TelegramEventListener initialized")
+        self._running = True
+
+        try:
+            await self._subscribe_to_chat_events()
+            log.info(
+                f"TelegramEventListener ready - "
+                f"{len(self._subscriptions)} subscriptions active"
+            )
+        except Exception as e:
+            log.error(f"Failed to start TelegramEventListener: {e}", exc_info=True)
+            self._running = False
+            raise
+
+    async def _subscribe_to_chat_events(self) -> None:
+        """Subscribe to chat domain events for Telegram forwarding"""
+        if not self._running:
+            return
+
+        import os
+        topic = "transport.chat-events"
+
+        try:
+            await self._event_bus.subscribe(
+                channel=topic,
+                handler=self._handle_chat_event,
+                group="telegram-event-listener",
+                consumer=f"telegram-listener-{os.getpid()}",
+            )
+            self._subscriptions[topic] = f"{topic}::telegram-event-listener"
+            log.info(f"Subscribed to {topic} for Telegram forwarding")
+        except Exception as e:
+            log.error(f"Failed to subscribe to {topic}: {e}")
+
+    async def _handle_chat_event(self, event: dict) -> None:
+        """Route chat domain events to appropriate handlers"""
+        event_type = event.get("event_type", "")
+
+        handler_map = {
+            "MessageSent": self.on_message_sent,
+            "ChatCreated": self.on_chat_created,
+            "ChatUpdated": self.on_chat_updated,
+            "ChatDeleted": self.on_chat_deleted,
+        }
+
+        handler = handler_map.get(event_type)
+        if handler:
+            await handler(event)
+        else:
+            log.debug(f"No Telegram handler for event type: {event_type}")
+
+    async def stop(self) -> None:
+        """Stop the Telegram Event Listener"""
+        if not self._running:
+            return
+
+        log.info("Stopping TelegramEventListener...")
+        self._running = False
+        self._subscriptions.clear()
+        log.info("TelegramEventListener stopped")
 
     def set_chat_repository(self, repository: ChatReadRepository) -> None:
         """Set chat repository (called during app startup)"""
@@ -85,10 +156,10 @@ class TelegramEventListener:
             "chat_id": UUID,
             "message_id": UUID,
             "sender_id": UUID,
-            "sender_name": str,
             "content": str,
             "message_type": str,  # text, photo, document, voice
             "file_url": Optional[str],
+            "source": str,  # web, telegram, api
             "metadata": dict
         }
         """
@@ -96,37 +167,52 @@ class TelegramEventListener:
             log.warning("Listener not initialized, skipping event")
             return
 
+        # Skip messages that came FROM Telegram (avoid echo)
+        source = event.get("source", "web")
+        if source == "telegram":
+            log.debug(f"Skipping message {event.get('message_id')} - already from Telegram")
+            return
+
         try:
             chat_id = event.get("chat_id")
             content = event.get("content", "")
             file_url = event.get("file_url")
             message_type = event.get("message_type", "text")
-            sender_name = event.get("sender_name", "Unknown")
+            sender_id = event.get("sender_id")
 
-            # Get chat configuration
-            if not self._chat_repo:
-                log.warning("Chat repository not available")
-                return
+            # Lookup sender name from WellWon user
+            sender_name = "Unknown"
+            if sender_id:
+                try:
+                    user = await UserAccountReadRepo.get_user_profile_by_user_id(
+                        UUID(sender_id) if isinstance(sender_id, str) else sender_id
+                    )
+                    if user:
+                        first = user.first_name or ""
+                        last = user.last_name or ""
+                        sender_name = f"{first} {last}".strip() or user.username or "Unknown"
+                except Exception as e:
+                    log.warning(f"Failed to lookup sender {sender_id}: {e}")
 
-            chat = await self._chat_repo.get_by_id(UUID(chat_id) if isinstance(chat_id, str) else chat_id)
+            # Get chat configuration from read model
+            from app.infra.read_repos.chat_read_repo import ChatReadRepo
+
+            chat = await ChatReadRepo.get_chat_by_id(
+                UUID(chat_id) if isinstance(chat_id, str) else chat_id
+            )
 
             if not chat:
                 log.debug(f"Chat {chat_id} not found")
                 return
 
-            # Check if sync is enabled and channel is Telegram
-            if not getattr(chat, 'sync_enabled', False):
-                return
-
-            if getattr(chat, 'external_channel_type', None) != 'telegram':
+            # Check if chat has Telegram integration
+            if not chat.telegram_chat_id:
+                log.debug(f"Chat {chat_id} has no Telegram integration")
                 return
 
             # Get Telegram identifiers
-            telegram_chat_id = self._telegram.denormalize_chat_id(
-                getattr(chat, 'external_channel_id', '')
-            )
-            topic_id = getattr(chat, 'external_topic_id', None)
-            topic_id = int(topic_id) if topic_id else None
+            telegram_chat_id = chat.telegram_chat_id
+            topic_id = chat.telegram_topic_id
 
             # Format message with sender name
             formatted_content = f"<b>{sender_name}</b>\n{content}"
@@ -300,44 +386,26 @@ class TelegramEventListener:
 
 
 # =============================================================================
-# Event Registration Helper
+# Factory Function for Startup
 # =============================================================================
 
-def register_telegram_event_handlers(event_bus: Any, listener: TelegramEventListener) -> None:
+async def create_telegram_event_listener(
+    event_bus: Any,
+    chat_repository: Optional[ChatReadRepository] = None
+) -> TelegramEventListener:
     """
-    Register event handlers with the event bus.
+    Factory function to create and start a TelegramEventListener.
 
-    Call this during app startup to connect the listener to the event bus.
-
-    Usage:
-        listener = TelegramEventListener()
-        await listener.initialize()
-        register_telegram_event_handlers(event_bus, listener)
+    Usage in startup:
+        listener = await create_telegram_event_listener(
+            event_bus=app.state.event_bus,
+            chat_repository=chat_read_repo  # optional
+        )
+        app.state.telegram_event_listener = listener
     """
-    # Map event types to handlers
-    handlers = {
-        "MessageSent": listener.on_message_sent,
-        "ChatCreated": listener.on_chat_created,
-        "ChatUpdated": listener.on_chat_updated,
-        "ChatDeleted": listener.on_chat_deleted,
-    }
-
-    for event_type, handler in handlers.items():
-        event_bus.subscribe(event_type, handler)
-        log.info(f"Registered Telegram handler for {event_type}")
-
-
-# =============================================================================
-# Singleton Instance
-# =============================================================================
-
-_listener: Optional[TelegramEventListener] = None
-
-
-async def get_telegram_event_listener() -> TelegramEventListener:
-    """Get singleton event listener instance"""
-    global _listener
-    if _listener is None:
-        _listener = TelegramEventListener()
-        await _listener.initialize()
-    return _listener
+    listener = TelegramEventListener(
+        event_bus=event_bus,
+        chat_repository=chat_repository
+    )
+    await listener.start()
+    return listener

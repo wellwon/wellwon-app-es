@@ -111,7 +111,7 @@ class MessageSent(BaseEvent):
     event_type: Literal["MessageSent"] = "MessageSent"
     message_id: uuid.UUID
     chat_id: uuid.UUID
-    sender_id: uuid.UUID
+    sender_id: Optional[uuid.UUID] = None  # None for external Telegram users
     content: str
     message_type: str = "text"  # text, file, voice, image, system
     reply_to_id: Optional[uuid.UUID] = None
@@ -121,9 +121,14 @@ class MessageSent(BaseEvent):
     file_type: Optional[str] = None
     voice_duration: Optional[int] = None  # seconds
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    # Source tracking
+    source: str = "web"  # web, telegram, api
     # Telegram integration
     telegram_message_id: Optional[int] = None
-    source: str = "web"  # web, telegram, api
+    telegram_user_id: Optional[int] = None  # Telegram user ID (for unmapped users)
+    telegram_user_data: Optional[Dict[str, Any]] = None  # {first_name, last_name, username, is_bot}
+    telegram_forward_data: Optional[Dict[str, Any]] = None  # Forward info if forwarded
+    telegram_topic_id: Optional[int] = None  # Forum topic ID
 
 
 @domain_event(category="domain")

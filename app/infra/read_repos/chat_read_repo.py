@@ -415,6 +415,11 @@ class ChatReadRepo:
         voice_duration: Optional[int] = None,
         source: str = "web",
         telegram_message_id: Optional[int] = None,
+        telegram_user_id: Optional[int] = None,
+        telegram_user_data: Optional[Dict[str, Any]] = None,
+        telegram_forward_data: Optional[Dict[str, Any]] = None,
+        telegram_topic_id: Optional[int] = None,
+        sync_direction: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         created_at: Optional[datetime] = None,
     ) -> None:
@@ -424,14 +429,17 @@ class ChatReadRepo:
             INSERT INTO messages (
                 id, chat_id, sender_id, content, message_type,
                 reply_to_id, file_url, file_name, file_size, file_type,
-                voice_duration, source, telegram_message_id, metadata, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                voice_duration, source, telegram_message_id,
+                telegram_user_id, telegram_user_data, telegram_forward_data,
+                telegram_topic_id, sync_direction, metadata, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
             ON CONFLICT (id) DO NOTHING
             """,
             message_id, chat_id, sender_id, content, message_type,
             reply_to_id, file_url, file_name, file_size, file_type,
             voice_duration, source, telegram_message_id,
-            metadata or {}, created_at or datetime.utcnow()
+            telegram_user_id, telegram_user_data, telegram_forward_data,
+            telegram_topic_id, sync_direction, metadata or {}, created_at or datetime.utcnow()
         )
 
     @staticmethod

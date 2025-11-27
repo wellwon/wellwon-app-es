@@ -138,6 +138,16 @@ async def telegram_webhook(
             chat_detail = await query_bus.query(query)
 
             if chat_detail:
+                # Determine message type
+                if telegram_message.file_type == "voice":
+                    message_type = "voice"
+                elif telegram_message.file_type == "photo":
+                    message_type = "image"
+                elif telegram_message.file_url or telegram_message.file_id:
+                    message_type = "file"
+                else:
+                    message_type = "text"
+
                 # Dispatch to Chat Domain via Command Bus
                 command = ProcessTelegramMessageCommand(
                     chat_id=chat_detail.id,
@@ -145,9 +155,19 @@ async def telegram_webhook(
                     telegram_user_id=telegram_message.from_user_id,
                     sender_id=None,  # TODO: Map telegram user to WellWon user if exists
                     content=telegram_message.text or "",
-                    message_type="text" if not telegram_message.file_url else "file",
+                    message_type=message_type,
                     file_url=telegram_message.file_url,
                     file_name=telegram_message.file_name,
+                    file_size=telegram_message.file_size,
+                    file_type=telegram_message.file_type,
+                    voice_duration=telegram_message.voice_duration,
+                    telegram_topic_id=telegram_message.topic_id,
+                    telegram_user_data={
+                        "first_name": telegram_message.from_first_name,
+                        "last_name": telegram_message.from_last_name,
+                        "username": telegram_message.from_username,
+                        "is_bot": telegram_message.from_is_bot,
+                    },
                 )
                 await command_bus.send(command)
                 log.info(f"Dispatched ProcessTelegramMessageCommand for chat {chat_detail.id}")

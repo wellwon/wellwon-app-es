@@ -325,12 +325,27 @@ class EventTransformer:
 
     @staticmethod
     def _transform_message_event(event: Dict[str, Any]) -> Dict[str, Any]:
-        """Transform message event"""
+        """Transform message event with full Telegram support"""
+        # Extract telegram_user_data for external senders
+        telegram_user_data = event.get('telegram_user_data') or {}
+
+        # Build sender display name
+        sender_id = event.get('sender_id')
+        if sender_id:
+            # WellWon user - use sender_name from event or lookup
+            sender_name = event.get('sender_name')
+        else:
+            # External Telegram user - build name from telegram_user_data
+            first = telegram_user_data.get('first_name', '')
+            last = telegram_user_data.get('last_name', '')
+            username = telegram_user_data.get('username', '')
+            sender_name = f"{first} {last}".strip() or f"@{username}" if username else "Telegram User"
+
         return {
             'message_id': str(event.get('message_id', event.get('aggregate_id', ''))),
             'chat_id': str(event.get('chat_id', '')) if event.get('chat_id') else None,
-            'sender_id': str(event.get('sender_id', '')) if event.get('sender_id') else None,
-            'sender_name': event.get('sender_name'),
+            'sender_id': str(sender_id) if sender_id else None,
+            'sender_name': sender_name,
             'content': event.get('content'),
             'message_type': event.get('message_type', 'text'),
             'reply_to_id': str(event.get('reply_to_id', '')) if event.get('reply_to_id') else None,
@@ -338,8 +353,12 @@ class EventTransformer:
             'file_name': event.get('file_name'),
             'file_size': event.get('file_size'),
             'file_type': event.get('file_type'),
+            'voice_duration': event.get('voice_duration'),
             'source': event.get('source', 'web'),
+            # Telegram-specific fields
             'telegram_message_id': event.get('telegram_message_id'),
+            'telegram_user_id': event.get('telegram_user_id'),
+            'telegram_user_data': telegram_user_data if telegram_user_data else None,
             'is_edited': event.get('is_edited', False),
             'is_deleted': event.get('is_deleted', False),
             'created_at': event.get('created_at'),

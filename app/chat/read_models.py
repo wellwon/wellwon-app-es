@@ -65,7 +65,7 @@ class MessageReadModel(BaseModel):
     """Read model for messages (PostgreSQL table: messages)"""
     id: uuid.UUID
     chat_id: uuid.UUID
-    sender_id: uuid.UUID
+    sender_id: Optional[uuid.UUID] = None  # None for external Telegram users
     content: str
     message_type: str = "text"  # text, file, voice, image, system
     reply_to_id: Optional[uuid.UUID] = None
@@ -83,7 +83,13 @@ class MessageReadModel(BaseModel):
     is_deleted: bool = False
     # Source tracking
     source: str = "web"  # web, telegram, api
+    # Telegram integration
     telegram_message_id: Optional[int] = None
+    telegram_user_id: Optional[int] = None  # Telegram user ID (for unmapped users)
+    telegram_user_data: Optional[Dict[str, Any]] = None  # {first_name, last_name, username, is_bot}
+    telegram_forward_data: Optional[Dict[str, Any]] = None  # Forward info if forwarded
+    telegram_topic_id: Optional[int] = None  # Forum topic ID
+    sync_direction: Optional[str] = None  # 'telegram_to_web' | 'web_to_telegram' | 'bidirectional'
     # Metadata
     metadata: Dict[str, Any] = Field(default_factory=dict)
 

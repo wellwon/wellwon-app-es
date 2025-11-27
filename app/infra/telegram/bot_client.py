@@ -35,6 +35,9 @@ class TelegramMessage:
     topic_id: Optional[int] = None
     from_user_id: Optional[int] = None
     from_username: Optional[str] = None
+    from_first_name: Optional[str] = None
+    from_last_name: Optional[str] = None
+    from_is_bot: bool = False
     text: Optional[str] = None
     date: Optional[datetime] = None
     reply_to_message_id: Optional[int] = None
@@ -190,6 +193,9 @@ class TelegramBotClient:
             topic_id=msg.message_thread_id,
             from_user_id=msg.from_user.id if msg.from_user else None,
             from_username=msg.from_user.username if msg.from_user else None,
+            from_first_name=msg.from_user.first_name if msg.from_user else None,
+            from_last_name=msg.from_user.last_name if msg.from_user else None,
+            from_is_bot=msg.from_user.is_bot if msg.from_user else False,
             text=msg.text or msg.caption,
             date=msg.date,
             reply_to_message_id=msg.reply_to_message.message_id if msg.reply_to_message else None,
@@ -243,7 +249,13 @@ class TelegramBotClient:
         parse_mode: str = "HTML",
         disable_notification: bool = False,
     ) -> SendMessageResult:
-        """Send a text message"""
+        """
+        Send a text message with automatic retry logic.
+
+        Retries:
+        - If topic not found → retry without topic (General)
+        - If HTML parse error → retry without parse_mode
+        """
         if not self._initialized:
             return SendMessageResult(success=False, error="Bot not initialized")
 
@@ -269,6 +281,44 @@ class TelegramBotClient:
             return SendMessageResult(success=False, error=f"Rate limited. Retry after {e.retry_after}s")
 
         except TelegramError as e:
+            error_str = str(e).lower()
+
+            # Auto-retry: Topic not found → send to General
+            if "thread not found" in error_str or "message thread not found" in error_str:
+                log.warning(f"Topic {topic_id} not found, retrying without topic (General)")
+                try:
+                    msg = await self._bot.send_message(
+                        chat_id=chat_id,
+                        text=text,
+                        message_thread_id=None,  # Send to General
+                        reply_to_message_id=None,  # Remove reply when switching to General
+                        parse_mode=parse_mode,
+                        disable_notification=disable_notification,
+                    )
+                    self._record_message(chat_id)
+                    return SendMessageResult(success=True, message_id=msg.message_id)
+                except Exception as retry_e:
+                    log.error(f"Retry to General also failed: {retry_e}")
+                    return SendMessageResult(success=False, error=str(retry_e))
+
+            # Auto-retry: HTML parse error → send without parse_mode
+            if "parse" in error_str or "can't parse" in error_str:
+                log.warning("HTML parse error, retrying without parse_mode")
+                try:
+                    msg = await self._bot.send_message(
+                        chat_id=chat_id,
+                        text=text,
+                        message_thread_id=topic_id,
+                        reply_to_message_id=reply_to_message_id,
+                        parse_mode=None,  # No parse mode
+                        disable_notification=disable_notification,
+                    )
+                    self._record_message(chat_id)
+                    return SendMessageResult(success=True, message_id=msg.message_id)
+                except Exception as retry_e:
+                    log.error(f"Retry without parse_mode also failed: {retry_e}")
+                    return SendMessageResult(success=False, error=str(retry_e))
+
             log.error(f"Telegram API error: {e}")
             return SendMessageResult(success=False, error=str(e))
 
@@ -423,16 +473,49 @@ class TelegramBotClient:
     # =========================================================================
 
     async def get_file_url(self, file_id: str) -> Optional[str]:
-        """Get download URL for a file"""
+        """
+        Get full download URL for a file.
+
+        Returns the complete URL that can be used to download the file.
+        Format: https://api.telegram.org/file/bot<token>/<file_path>
+        """
         if not self._initialized:
             return None
 
         try:
             file = await self._bot.get_file(file_id)
-            return file.file_path
+            if file.file_path:
+                # Build full download URL
+                return f"https://api.telegram.org/file/bot{self.config.bot_token}/{file.file_path}"
+            return None
 
         except Exception as e:
             log.error(f"Failed to get file URL: {e}", exc_info=True)
+            return None
+
+    async def download_file(self, file_id: str) -> Optional[bytes]:
+        """
+        Download file content from Telegram.
+
+        Args:
+            file_id: Telegram file ID
+
+        Returns:
+            File content as bytes, or None on error
+        """
+        if not self._initialized:
+            return None
+
+        try:
+            file = await self._bot.get_file(file_id)
+            if file.file_path:
+                # Use python-telegram-bot's download method
+                file_bytes = await file.download_as_bytearray()
+                return bytes(file_bytes)
+            return None
+
+        except Exception as e:
+            log.error(f"Failed to download file: {e}", exc_info=True)
             return None
 
     # =========================================================================

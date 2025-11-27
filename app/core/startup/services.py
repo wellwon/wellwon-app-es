@@ -46,6 +46,13 @@ async def initialize_services(app: FastAPI) -> None:
     except Exception as e:
         logger.error(f"FAILED initialize_wse_domain_publisher: {e}", exc_info=True)
 
+    # Initialize Telegram Event Listener
+    try:
+        await initialize_telegram_event_listener(app)
+        logger.info("Telegram Event Listener initialized")
+    except Exception as e:
+        logger.error(f"FAILED initialize_telegram_event_listener: {e}", exc_info=True)
+
     # Create SnapshotService in app.state (needed by SnapshotPublisher)
     try:
         from app.wse.services.snapshot_service import create_wse_snapshot_service
@@ -67,6 +74,38 @@ async def initialize_services(app: FastAPI) -> None:
         logger.error(f"FAILED initialize_wse_snapshot_publisher: {e}", exc_info=True)
 
     logger.info("All services initialized successfully")
+
+
+async def initialize_telegram_event_listener(app: FastAPI) -> None:
+    """Initialize Telegram Event Listener for bidirectional chat sync"""
+    logger.info("Initializing Telegram Event Listener...")
+
+    enable_telegram = os.getenv("ENABLE_TELEGRAM_SYNC", "true").lower() == "true"
+
+    if not enable_telegram:
+        logger.info("Telegram Event Listener disabled by configuration")
+        app.state.telegram_event_listener = None
+        return
+
+    try:
+        from app.infra.telegram.listener import create_telegram_event_listener
+
+        telegram_listener = await create_telegram_event_listener(
+            event_bus=app.state.event_bus,
+            chat_repository=None  # Will be set when Chat domain read repo is available
+        )
+
+        app.state.telegram_event_listener = telegram_listener
+
+        logger.info("Telegram Event Listener started - bidirectional chat sync enabled")
+
+    except ImportError as import_error:
+        logger.warning(f"Telegram Event Listener not available: {import_error}")
+        app.state.telegram_event_listener = None
+    except Exception as telegram_error:
+        logger.error(f"Failed to initialize Telegram Event Listener: {telegram_error}", exc_info=True)
+        logger.warning("Continuing without Telegram sync - WellWon messages will not be forwarded to Telegram")
+        app.state.telegram_event_listener = None
 
 
 async def initialize_wse_domain_publisher(app: FastAPI) -> None:

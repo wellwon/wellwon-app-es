@@ -60,7 +60,7 @@ class ParticipantState(BaseModel):
 class MessageState(BaseModel):
     """Lightweight message state in aggregate"""
     message_id: uuid.UUID
-    sender_id: uuid.UUID
+    sender_id: Optional[uuid.UUID] = None  # None for external Telegram users
     is_deleted: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -305,6 +305,10 @@ class ChatAggregate:
         voice_duration: Optional[int] = None,
         source: str = "web",
         telegram_message_id: Optional[int] = None,
+        telegram_user_id: Optional[int] = None,
+        telegram_user_data: Optional[Dict[str, Any]] = None,
+        telegram_forward_data: Optional[Dict[str, Any]] = None,
+        telegram_topic_id: Optional[int] = None,
     ) -> None:
         """Send a message to the chat"""
         self._ensure_active()
@@ -324,6 +328,61 @@ class ChatAggregate:
             voice_duration=voice_duration,
             source=source,
             telegram_message_id=telegram_message_id,
+            telegram_user_id=telegram_user_id,
+            telegram_user_data=telegram_user_data,
+            telegram_forward_data=telegram_forward_data,
+            telegram_topic_id=telegram_topic_id,
+        )
+        self._apply_and_record(event)
+
+    def receive_external_message(
+        self,
+        message_id: uuid.UUID,
+        content: str,
+        message_type: str = "text",
+        source: str = "telegram",
+        telegram_message_id: Optional[int] = None,
+        telegram_user_id: Optional[int] = None,
+        telegram_user_data: Optional[Dict[str, Any]] = None,
+        telegram_forward_data: Optional[Dict[str, Any]] = None,
+        telegram_topic_id: Optional[int] = None,
+        file_url: Optional[str] = None,
+        file_name: Optional[str] = None,
+        file_size: Optional[int] = None,
+        file_type: Optional[str] = None,
+        voice_duration: Optional[int] = None,
+    ) -> None:
+        """
+        Receive message from external source (e.g., Telegram).
+
+        This method is used for messages from users who are NOT WellWon participants.
+        It does NOT require sender to be a chat participant.
+
+        Business context:
+        - New clients contact via Telegram general topic
+        - Messages distributed to available managers
+        - No WellWon account required for external sender
+        """
+        self._ensure_active()
+        self._ensure_telegram_linked()
+
+        event = MessageSent(
+            message_id=message_id,
+            chat_id=self.id,
+            sender_id=None,  # External user has no WellWon ID
+            content=content,
+            message_type=message_type,
+            source=source,
+            telegram_message_id=telegram_message_id,
+            telegram_user_id=telegram_user_id,
+            telegram_user_data=telegram_user_data,
+            telegram_forward_data=telegram_forward_data,
+            telegram_topic_id=telegram_topic_id,
+            file_url=file_url,
+            file_name=file_name,
+            file_size=file_size,
+            file_type=file_type,
+            voice_duration=voice_duration,
         )
         self._apply_and_record(event)
 
@@ -473,6 +532,11 @@ class ChatAggregate:
         self._ensure_participant(user_id)
         if self.state.participants[user_key].role != ParticipantRole.ADMIN.value:
             raise InsufficientPermissionsError(str(user_id), "perform admin action")
+
+    def _ensure_telegram_linked(self) -> None:
+        """Ensure chat has Telegram integration enabled"""
+        if not self.state.telegram_chat_id:
+            raise ChatInactiveError(f"Chat {self.id} is not linked to Telegram")
 
     def is_participant(self, user_id: uuid.UUID) -> bool:
         """Check if user is an active participant"""

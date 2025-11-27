@@ -982,18 +982,9 @@ export type Database = {
         Args: { client_user_id: string; company_uuid: number }
         Returns: undefined
       }
-      can_access_chat: {
-        Args: { chat_uuid: string }
-        Returns: boolean
-      }
-      cleanup_expired_typing_indicators: {
-        Args: Record<PropertyKey, never>
-        Returns: undefined
-      }
-      cleanup_orphaned_replies: {
-        Args: Record<PropertyKey, never>
-        Returns: Json
-      }
+      can_access_chat: { Args: { chat_uuid: string }; Returns: boolean }
+      cleanup_expired_typing_indicators: { Args: never; Returns: undefined }
+      cleanup_orphaned_replies: { Args: never; Returns: Json }
       create_chat_with_company: {
         Args: {
           chat_name: string
@@ -1064,10 +1055,7 @@ export type Database = {
           updated_at: string
         }[]
       }
-      get_client_from_chat: {
-        Args: { chat_uuid: string }
-        Returns: string
-      }
+      get_client_from_chat: { Args: { chat_uuid: string }; Returns: string }
       get_company_users: {
         Args: {
           filter_relationship_type?: Database["public"]["Enums"]["user_company_relationship"]
@@ -1083,18 +1071,9 @@ export type Database = {
           user_id: string
         }[]
       }
-      get_current_user_type: {
-        Args: Record<PropertyKey, never>
-        Returns: string
-      }
-      get_next_chat_number: {
-        Args: Record<PropertyKey, never>
-        Returns: number
-      }
-      get_next_user_number: {
-        Args: Record<PropertyKey, never>
-        Returns: number
-      }
+      get_current_user_type: { Args: never; Returns: string }
+      get_next_chat_number: { Args: never; Returns: number }
+      get_next_user_number: { Args: never; Returns: number }
       get_user_chats_by_company: {
         Args: { company_uuid?: number; user_uuid: string }
         Returns: {
@@ -1179,22 +1158,10 @@ export type Database = {
           updated_at: string
         }[]
       }
-      is_active_employee: {
-        Args: Record<PropertyKey, never>
-        Returns: boolean
-      }
-      is_current_user_developer: {
-        Args: Record<PropertyKey, never>
-        Returns: boolean
-      }
-      is_developer: {
-        Args: Record<PropertyKey, never>
-        Returns: boolean
-      }
-      is_user_developer: {
-        Args: Record<PropertyKey, never>
-        Returns: boolean
-      }
+      is_active_employee: { Args: never; Returns: boolean }
+      is_current_user_developer: { Args: never; Returns: boolean }
+      is_developer: { Args: never; Returns: boolean }
+      is_user_developer: { Args: never; Returns: boolean }
       normalize_telegram_supergroup_id: {
         Args: { input_id: number }
         Returns: number
@@ -1212,10 +1179,7 @@ export type Database = {
         }
         Returns: boolean
       }
-      update_supabase_config: {
-        Args: Record<PropertyKey, never>
-        Returns: undefined
-      }
+      update_supabase_config: { Args: never; Returns: undefined }
       update_user_type_for_testing: {
         Args: {
           new_user_type: Database["public"]["Enums"]["user_type"]
