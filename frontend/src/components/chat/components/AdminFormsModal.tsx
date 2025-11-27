@@ -44,73 +44,19 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
   } = useAuth();
   const { isLightTheme } = usePlatform();
 
-  // Theme styles according to DESIGN_SYSTEM.md
+  // Theme object for form styling per DESIGN_SYSTEM.md §19
   const theme = isLightTheme ? {
-    modal: {
-      bg: 'bg-white',
-      border: 'border-gray-200',
-    },
-    header: {
-      bg: 'bg-white',
-      border: 'border-gray-200',
-      title: 'text-gray-900',
-      closeBtn: 'text-gray-500 hover:text-gray-700 hover:bg-gray-100',
-    },
-    card: {
-      bg: 'bg-[#f4f4f4]',
-      border: 'border-gray-200',
-    },
-    text: {
-      primary: 'text-gray-900',
-      secondary: 'text-gray-500',
-      muted: 'text-gray-400',
-    },
-    toggle: {
-      bg: 'bg-gray-100',
-      border: 'border-gray-200',
-    },
-    process: {
-      cardBg: 'bg-gray-50',
-      border: 'border-gray-200',
-      progressBg: 'bg-gray-200',
-    },
-    result: {
-      fieldBg: 'bg-white',
-      fieldBorder: 'border-gray-200',
-    },
+    modal: { bg: 'bg-[#f4f4f4]', border: 'border-gray-300' },
+    card: { bg: 'bg-white', border: 'border-gray-300', shadow: 'shadow-sm' },
+    toggle: { bg: 'bg-gray-50', border: 'border-gray-300' },
+    text: { primary: 'text-gray-900', secondary: 'text-gray-600', muted: 'text-gray-500' },
+    closeButton: 'hover:bg-gray-100 text-gray-500'
   } : {
-    modal: {
-      bg: 'bg-[#232328]',
-      border: 'border-white/10',
-    },
-    header: {
-      bg: 'bg-[#232328]',
-      border: 'border-white/10',
-      title: 'text-white',
-      closeBtn: 'text-gray-400 hover:text-white hover:bg-white/10',
-    },
-    card: {
-      bg: 'bg-[#1a1a1e]',
-      border: 'border-white/10',
-    },
-    text: {
-      primary: 'text-white',
-      secondary: 'text-gray-400',
-      muted: 'text-gray-500',
-    },
-    toggle: {
-      bg: 'bg-white/5',
-      border: 'border-white/10',
-    },
-    process: {
-      cardBg: 'bg-[#1a1a1e]',
-      border: 'border-white/10',
-      progressBg: 'bg-white/10',
-    },
-    result: {
-      fieldBg: 'bg-[#1a1a1e]',
-      fieldBorder: 'border-white/10',
-    },
+    modal: { bg: 'bg-[#1a1a1e]', border: 'border-white/10' },
+    card: { bg: 'bg-[#232328]', border: 'border-white/10', shadow: '' },
+    toggle: { bg: 'bg-[#1e1e22]', border: 'border-white/10' },
+    text: { primary: 'text-white', secondary: 'text-gray-400', muted: 'text-gray-500' },
+    closeButton: 'hover:bg-white/10 text-gray-400'
   };
   const [isLoading, setIsLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(true);
@@ -596,12 +542,12 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
   };
   return <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className={`max-w-2xl max-h-[90vh] overflow-y-auto ${theme.modal.bg} border ${theme.modal.border}`}>
-        <DialogHeader className={`flex flex-row items-center gap-3 space-y-0 pb-6 border-b ${theme.header.border}`}>
-          <div className={theme.text.primary}>{getFormIcon()}</div>
+        <DialogHeader className="flex flex-row items-center gap-3 space-y-0">
+          <span className="text-accent-red">{getFormIcon()}</span>
           <div className="flex-1">
-            <DialogTitle className={`text-xl ${theme.header.title}`}>{getFormTitle()}</DialogTitle>
+            <DialogTitle className={`text-xl ${theme.text.primary}`}>{getFormTitle()}</DialogTitle>
           </div>
-          <button onClick={onClose} className={`p-2 rounded-lg ${theme.header.closeBtn}`}>
+          <button onClick={onClose} className={`p-2 rounded-lg transition-colors ${theme.closeButton}`}>
             <X className="h-4 w-4" />
           </button>
         </DialogHeader>
@@ -609,17 +555,17 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
         <div className="space-y-6">
           {isLoading && <div className="flex items-center justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-accent-red" />
-              <span className={`ml-2 ${theme.text.secondary}`}>Загрузка...</span>
+              <span className="ml-2 text-text-gray-400">Загрузка...</span>
             </div>}
 
-          {showingProcess && <div className={`w-full ${theme.process.cardBg} border ${theme.process.border} rounded-2xl p-6`}>
+          {showingProcess && <div className="w-full bg-glass-surface/30 border border-glass-border rounded-lg p-6">
               <div className="flex flex-col items-center space-y-6">
                 {/* Заголовок */}
                 <div className="text-center">
-                  <h3 className={`text-lg font-semibold ${theme.text.primary} mb-2`}>
+                  <h3 className="text-lg font-semibold text-foreground mb-2">
                     Создание компании
                   </h3>
-                  <p className={`text-sm ${theme.text.secondary}`}>
+                  <p className="text-sm text-muted-foreground">
                     Пожалуйста, подождите...
                   </p>
                 </div>
@@ -627,10 +573,10 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
                 {/* Прогресс бар */}
                 <div className="w-full">
                     <div className={`rounded-full h-2 mb-4 ${
-                      stepStatuses.some(s => s === 'error') ? 'bg-accent-red/20' : theme.process.progressBg
+                      stepStatuses.some(s => s === 'error') ? 'bg-accent-red/20' : 'bg-secondary'
                     }`}>
                      <div className={`h-2 rounded-full transition-all duration-500 ${
-                       stepStatuses.some(s => s === 'error') ? 'bg-accent-red' : 'bg-accent-red'
+                       stepStatuses.some(s => s === 'error') ? 'bg-accent-red' : 'bg-accent-blue'
                      }`} style={{
                    width: `${stepStatuses.filter(s => s === 'success').length / processSteps.length * 100}%`
                  }} />
@@ -638,16 +584,16 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
                 </div>
 
                 {/* Этапы - первая карточка */}
-                <div className={`w-full p-4 border ${theme.process.border} rounded-xl ${theme.result.fieldBg}`}>
+                <div className="w-full p-4 border border-border rounded-lg bg-card/50">
                   <div className="space-y-3">
                     {processSteps.map((step, index) => <div key={index} className="flex items-center space-x-3">
                         {/* Статус этапа */}
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold transition-none ${stepStatuses[index] === 'success' ? 'bg-accent-green text-white' : stepStatuses[index] === 'error' ? 'bg-accent-red text-white' : stepStatuses[index] === 'loading' ? 'bg-accent-red text-white animate-pulse' : isLightTheme ? 'bg-gray-200 text-gray-500' : 'bg-white/10 text-gray-400'}`}>
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold transition-all ${stepStatuses[index] === 'success' ? 'bg-accent-green text-white' : stepStatuses[index] === 'error' ? 'bg-accent-red text-white' : stepStatuses[index] === 'loading' ? 'bg-accent-blue text-white animate-pulse' : 'bg-secondary text-muted-foreground'}`}>
                           {stepStatuses[index] === 'success' ? '✓' : stepStatuses[index] === 'error' ? '✗' : stepStatuses[index] === 'loading' ? '...' : index + 1}
                         </div>
-
+                        
                         {/* Название этапа */}
-                        <span className={`text-sm ${stepStatuses[index] === 'success' ? 'text-accent-green' : stepStatuses[index] === 'error' ? 'text-accent-red' : stepStatuses[index] === 'loading' ? 'text-accent-red' : theme.text.secondary}`}>
+                        <span className={`text-sm ${stepStatuses[index] === 'success' ? 'text-accent-green' : stepStatuses[index] === 'error' ? 'text-accent-red' : stepStatuses[index] === 'loading' ? 'text-accent-blue' : 'text-muted-foreground'}`}>
                           {step}
                         </span>
                       </div>)}
@@ -656,137 +602,122 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
 
                 {/* Результат процесса создания - вторая карточка */}
                 {groupCreationResult && createdCompanyData && (
-                  <div className={`w-full p-4 border ${theme.process.border} rounded-xl ${theme.result.fieldBg} space-y-6`}>
+                  <div className="w-full p-4 border border-border rounded-lg bg-card/50 space-y-6">
                     <div className="text-center">
                       <div className="w-16 h-16 mx-auto mb-4 flex items-center justify-center rounded-full bg-accent-green/10">
                         <CheckCircle className="w-8 h-8 text-accent-green" />
                       </div>
-                      <h4 className={`text-lg font-semibold ${theme.text.primary} mb-6`}>
+                      <h4 className="text-lg font-semibold text-foreground mb-6">
                         Компания и группа успешно созданы!
                       </h4>
-
+                      
                       {/* Divider */}
-                      <div className={`w-full h-px ${isLightTheme ? 'bg-gray-200' : 'bg-white/10'} mb-6`}></div>
+                      <div className="w-full h-px bg-border mb-6"></div>
                     </div>
-
+                    
                     {/* Данные в красивых полях по 2 в строке */}
                     <div className="grid grid-cols-2 gap-4">
                       {/* Название компании */}
                       <div className="space-y-1">
-                        <label className={`text-xs font-medium ${theme.text.secondary} uppercase tracking-wider`}>Название компании</label>
-                        <div className={`px-3 py-2 ${theme.result.fieldBg} border ${theme.result.fieldBorder} rounded-xl text-sm ${theme.text.primary}`}>
+                        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Название компании</label>
+                        <div className="px-3 py-2 bg-background border border-border rounded-md text-sm">
                           {createdCompanyData.name}
                         </div>
                       </div>
-
+                      
                       {/* ID компании */}
                       <div className="space-y-1">
-                        <label className={`text-xs font-medium ${theme.text.secondary} uppercase tracking-wider`}>ID компании</label>
-                        <div className={`px-3 py-2 ${theme.result.fieldBg} border ${theme.result.fieldBorder} rounded-xl text-sm ${theme.text.primary}`}>
+                        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">ID компании</label>
+                        <div className="px-3 py-2 bg-background border border-border rounded-md text-sm">
                           {createdCompanyData.id}
                         </div>
                       </div>
-
+                      
                       {/* Название группы */}
                       {groupCreationResult?.group_data && (
                         <div className="space-y-1">
-                          <label className={`text-xs font-medium ${theme.text.secondary} uppercase tracking-wider`}>Название группы</label>
-                          <div className={`px-3 py-2 ${theme.result.fieldBg} border ${theme.result.fieldBorder} rounded-xl text-sm ${theme.text.primary}`}>
+                          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Название группы</label>
+                          <div className="px-3 py-2 bg-background border border-border rounded-md text-sm">
                             {groupCreationResult.group_data.group_title || groupCreationResult.group_title}
                           </div>
                         </div>
                       )}
-
+                      
                       {/* ID группы */}
                       {groupCreationResult?.group_data && (
                         <div className="space-y-1">
-                          <label className={`text-xs font-medium ${theme.text.secondary} uppercase tracking-wider`}>ID группы</label>
-                          <div className={`px-3 py-2 ${theme.result.fieldBg} border ${theme.result.fieldBorder} rounded-xl text-sm ${theme.text.primary}`}>
+                          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">ID группы</label>
+                          <div className="px-3 py-2 bg-background border border-border rounded-md text-sm">
                             {groupCreationResult.group_data.group_id ? `-100${groupCreationResult.group_data.group_id}` : (groupCreationResult.group_id ? `-100${groupCreationResult.group_id}` : 'Не указан')}
                           </div>
                         </div>
                       )}
                     </div>
-
+                    
                     {/* Ссылка приглашения */}
                     {(groupCreationResult?.group_data?.invite_link || groupCreationResult?.invite_link) && (
                       <div className="space-y-2">
-                        <label className={`text-xs font-medium ${theme.text.secondary} uppercase tracking-wider`}>Ссылка приглашение в группу</label>
+                        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Ссылка приглашение в группу</label>
                         <div className="flex gap-2">
                           <input
                             type="text"
                             value={groupCreationResult.group_data?.invite_link || groupCreationResult.invite_link}
                             readOnly
-                            className={`flex-1 px-3 py-2 h-10 ${theme.result.fieldBg} border ${theme.result.fieldBorder} rounded-xl text-sm ${theme.text.primary} transition-none`}
+                            className="flex-1 px-3 py-2 bg-background border border-border rounded-md text-sm"
                           />
-                          <button
+                          <GlassButton
+                            variant="outline"
+                            size="sm"
                             onClick={() => handleCopyClick(groupCreationResult.group_data?.invite_link || groupCreationResult.invite_link, 'invite-link')}
-                            className={`h-10 px-3 rounded-xl flex items-center justify-center border ${
-                              isLightTheme
-                                ? 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200'
-                                : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10'
-                            }`}
+                            className="border-border hover:bg-white/5"
                           >
                             {copiedStates['invite-link'] ? (
                               <Check className="w-4 h-4 text-accent-green" />
                             ) : (
-                              <Copy className="w-4 h-4" />
+                              <Copy className="w-4 h-4 text-muted-foreground" />
                             )}
-                          </button>
+                          </GlassButton>
                         </div>
                       </div>
                     )}
-
+                    
                     {/* Кнопки */}
-                    <div className="flex gap-3 justify-center pt-2">
+                    <div className="flex gap-3 justify-center">
                       {(groupCreationResult?.group_data?.invite_link || groupCreationResult?.invite_link) && (
-                        <button
+                        <GlassButton
+                          variant="primary"
                           onClick={() => window.open(groupCreationResult.group_data?.invite_link || groupCreationResult.invite_link, '_blank')}
-                          className="h-10 px-4 rounded-xl flex items-center justify-center bg-[#0088cc] hover:bg-[#0088cc]/90 text-white font-medium"
+                          className="bg-[#0088cc] hover:bg-[#0088cc]/90 text-white"
                         >
                           <TelegramIcon className="w-4 h-4 mr-2" />
                           Открыть группу
-                        </button>
+                        </GlassButton>
                       )}
-                      <button
-                        onClick={handleProcessClose}
-                        className={`h-10 px-4 rounded-xl flex items-center justify-center border font-medium ${
-                          isLightTheme
-                            ? 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
-                            : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10'
-                        }`}
-                      >
+                      <GlassButton variant="secondary" onClick={handleProcessClose}>
                         Закрыть
-                      </button>
+                      </GlassButton>
                     </div>
                   </div>
                 )}
 
                 {/* Ошибка */}
                 {processError && !groupCreationResult && (
-                  <div className={`w-full p-4 border ${theme.process.border} rounded-xl ${theme.result.fieldBg} space-y-6`}>
+                  <div className="w-full p-4 border border-border rounded-lg bg-card/50 space-y-6">
                     <div className="text-center">
                       <div className="w-16 h-16 mx-auto mb-4 flex items-center justify-center rounded-full bg-accent-red/10">
                         <XCircle className="w-8 h-8 text-accent-red" />
                       </div>
-                      <h4 className={`text-lg font-semibold ${theme.text.primary} mb-2`}>
+                      <h4 className="text-lg font-semibold text-foreground mb-2">
                         Ошибка создания компании
                       </h4>
-                      <p className={`text-sm ${theme.text.secondary} mb-6`}>
+                      <p className="text-sm text-muted-foreground mb-6">
                         {processError}
                       </p>
                     </div>
                     <div className="flex justify-center">
-                      <button
-                        onClick={handleProcessClose}
-                        className={`h-10 px-4 rounded-xl flex items-center justify-center border font-medium ${
-                          isLightTheme
-                            ? 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
-                            : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10'
-                        }`}
-                      >
+                      <GlassButton variant="secondary" onClick={handleProcessClose}>
                         Закрыть
-                      </button>
+                      </GlassButton>
                     </div>
                   </div>
                 )}
@@ -795,7 +726,7 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
 
           {!isLoading && !showingProcess && formType === 'company-registration' && <div className="space-y-6">
               {/* Блок 1: Информация о компании/проекте */}
-              <div className={`rounded-2xl p-6 border ${theme.card.bg} ${theme.card.border} space-y-6`}>
+              <div className={`p-6 rounded-2xl ${theme.card.bg} border ${theme.card.border} ${theme.card.shadow} space-y-6`}>
                 {/* Company/Project Toggle */}
                 <div className={`flex items-center space-x-3 p-4 rounded-xl border ${theme.toggle.bg} ${theme.toggle.border}`}>
                   <Switch id="project-mode" checked={isProject} onCheckedChange={handleProjectToggle} />
@@ -812,7 +743,7 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
               </div>
 
               {/* Блок 2: Создание Telegram-группы */}
-              <div className={`rounded-2xl p-6 border ${theme.card.bg} ${theme.card.border}`}>
+              <div className={`p-6 rounded-2xl ${theme.card.bg} border ${theme.card.border} ${theme.card.shadow}`}>
                 <div className="space-y-6">
                   <h3 className={`font-semibold text-xl mb-6 flex items-center gap-3 ${theme.text.primary}`}>
                     <TelegramIcon className="w-6 h-6 text-[#0088cc]" />
@@ -829,9 +760,9 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
 
 
           {!isLoading && !formType && <div className="text-center py-8">
-              <Building size={48} className={`mx-auto mb-4 ${theme.text.secondary}`} />
-              <h3 className={`font-medium mb-2 ${theme.text.primary}`}>Выберите тип формы</h3>
-              <p className={`text-sm ${theme.text.secondary}`}>Выберите нужную форму из меню</p>
+              <Building size={48} className="text-text-gray-400 mx-auto mb-4" />
+              <h3 className="text-text-white font-medium mb-2">Выберите тип формы</h3>
+              <p className="text-text-gray-400 text-sm">Выберите нужную форму из меню</p>
             </div>}
         </div>
       </DialogContent>

@@ -60,7 +60,7 @@ const SidebarChat: React.FC = () => {
     },
     input: 'bg-white border-gray-300 text-gray-900 placeholder:text-gray-400',
     button: {
-      ghost: 'bg-white border border-gray-300 text-gray-600 hover:text-gray-900 hover:bg-gray-50',
+      ghost: 'bg-white border border-gray-300 text-gray-600 hover:text-gray-900 hover:bg-gray-50 hover:border-gray-400 hover:scale-105',
       active: 'bg-white border border-accent-red text-accent-red hover:bg-accent-red/10'
     }
   } : {
@@ -76,7 +76,7 @@ const SidebarChat: React.FC = () => {
     },
     input: 'bg-white/5 border-white/10 text-white placeholder:!text-[#9da3af]',
     button: {
-      ghost: 'text-gray-400 hover:text-white hover:bg-white/10',
+      ghost: 'bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 hover:border-white/20 hover:scale-105',
       active: 'text-accent-red border-accent-red/60 bg-accent-red/10 hover:bg-accent-red/20'
     }
   };

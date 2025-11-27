@@ -1,7 +1,6 @@
 import React from 'react';
-import { GlassCard } from '@/components/design-system/GlassCard';
 import { GlassInput } from '@/components/design-system/GlassInput';
-import { TelegramIcon } from '@/components/ui/TelegramIcon';
+
 interface TelegramGroupData {
   title: string;
   description: string;

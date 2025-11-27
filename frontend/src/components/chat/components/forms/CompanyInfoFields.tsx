@@ -1,5 +1,7 @@
 import React from 'react';
+import { Label } from '@/components/ui/label';
 import { GlassInput } from '@/components/design-system/GlassInput';
+import { Button } from '@/components/ui/button';
 import { Search, Loader2, Building } from 'lucide-react';
 
 interface CompanyInfoFieldsProps {
@@ -27,9 +29,6 @@ export const CompanyInfoFields: React.FC<CompanyInfoFieldsProps> = ({
 }) => {
   // Theme styles
   const titleClass = isLightTheme ? 'text-gray-900' : 'text-white';
-  const searchButtonClass = isLightTheme
-    ? 'bg-gray-100 border-gray-300 hover:bg-gray-200 text-accent-red'
-    : 'bg-white/5 border-white/10 hover:bg-white/10 text-accent-red';
 
   return (
     <div className="space-y-6">
@@ -37,7 +36,7 @@ export const CompanyInfoFields: React.FC<CompanyInfoFieldsProps> = ({
         <Building className="w-6 h-6 text-accent-red" />
         {isProject ? 'Информация о проекте' : 'Информация о компании'}
       </h3>
-
+      
       {!isProject && (
         <>
           {/* ИНН и Название компании на одной строке */}
@@ -56,23 +55,36 @@ export const CompanyInfoFields: React.FC<CompanyInfoFieldsProps> = ({
                   error={errors.vat}
                   isLightTheme={isLightTheme}
                 />
-                {isEditing && (
-                  <button
-                    type="button"
-                    onClick={onSearchByINN}
-                    disabled={isSearching || !formData.vat}
-                    className={`h-10 w-10 shrink-0 rounded-xl border flex items-center justify-center disabled:opacity-50 ${searchButtonClass}`}
-                  >
-                    {isSearching ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Search className="h-4 w-4" />
-                    )}
-                  </button>
-                )}
+                {isEditing && (() => {
+                  const vatValue = formData.vat || '';
+                  const isValidINN = /^\d{10,12}$/.test(vatValue);
+                  const buttonClass = isLightTheme
+                    ? isValidINN
+                      ? 'bg-green-500/10 border-green-500 hover:bg-green-500/20'
+                      : 'bg-white border-gray-300 hover:bg-gray-50 opacity-50 cursor-not-allowed'
+                    : isValidINN
+                      ? 'bg-green-500/10 border-green-500 hover:bg-green-500/20'
+                      : 'bg-[#1e1e22] border-white/10 hover:bg-[#252529] opacity-50 cursor-not-allowed';
+                  const iconClass = isValidINN ? 'text-green-500' : 'text-gray-400';
+
+                  return (
+                    <button
+                      type="button"
+                      onClick={onSearchByINN}
+                      disabled={isSearching || !isValidINN}
+                      className={`h-10 w-10 shrink-0 rounded-xl border flex items-center justify-center transition-none ${buttonClass}`}
+                    >
+                      {isSearching ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-green-500" />
+                      ) : (
+                        <Search className={`h-4 w-4 ${iconClass}`} />
+                      )}
+                    </button>
+                  );
+                })()}
               </div>
             </div>
-
+            
             <div className="flex-[1.3]">
               <GlassInput
                 label="Название компании *"

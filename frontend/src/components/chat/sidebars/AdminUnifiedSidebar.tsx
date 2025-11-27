@@ -279,12 +279,12 @@ const AdminUnifiedSidebar = () => {
       size="sm"
       onClick={onClick}
       className={`
-        h-9 px-4 text-sm font-medium rounded-md transition-all flex items-center gap-2
+        h-9 px-4 text-sm font-medium rounded-lg transition-all flex items-center gap-2 hover:scale-105
         ${active
           ? 'bg-accent-red/20 text-accent-red border border-accent-red/30'
           : isLightTheme
-            ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-200 border border-gray-300'
-            : 'text-gray-400 hover:text-white hover:bg-white/10 border border-white/10'
+            ? 'bg-white text-gray-600 hover:text-gray-900 hover:bg-gray-50 border border-gray-300 hover:border-gray-400'
+            : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 border border-white/10 hover:border-white/20'
         }
       `}
     >

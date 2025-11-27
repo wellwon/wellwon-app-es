@@ -469,11 +469,11 @@ const HeaderBarMock = ({
       </div>
 
       <div className="flex items-center gap-2 px-6">
-        <button className={`px-3 py-2 rounded-lg flex items-center gap-2 ${theme.button.default}`}>
+        <button className={`px-4 h-10 rounded-xl flex items-center gap-2 text-sm font-medium ${theme.button.default}`}>
           <FileText className="w-4 h-4" />
           Декларации
         </button>
-        <button className={`px-3 py-2 rounded-lg flex items-center gap-2 ${theme.button.default}`}>
+        <button className={`px-4 h-10 rounded-xl flex items-center gap-2 text-sm font-medium ${theme.button.default}`}>
           <FileJson className="w-4 h-4" />
           Шаблоны
         </button>
@@ -605,19 +605,19 @@ const DeclarantContent: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-3">
-              <button className={`px-3 py-2 rounded-lg flex items-center gap-2 ${theme.button.danger}`}>
+              <button className={`px-4 h-10 rounded-xl flex items-center gap-2 text-sm font-medium ${theme.button.danger}`}>
                 <Trash2 className="w-4 h-4" />
                 Удалить
               </button>
-              <button className={`px-3 py-2 rounded-lg flex items-center gap-2 ${theme.button.default}`}>
+              <button className={`px-4 h-10 rounded-xl flex items-center gap-2 text-sm font-medium ${theme.button.default}`}>
                 <Download className="w-4 h-4" />
                 Экспорт
               </button>
-              <button className={`px-3 py-2 rounded-lg flex items-center gap-2 ${theme.button.default}`}>
+              <button className={`px-4 h-10 rounded-xl flex items-center gap-2 text-sm font-medium ${theme.button.default}`}>
                 <Eye className="w-4 h-4" />
                 Просмотр
               </button>
-              <button className={`px-4 py-2 bg-accent-red text-white rounded-lg hover:bg-accent-red/90 flex items-center gap-2 ${isDark ? '' : 'shadow-sm'}`}>
+              <button className={`px-4 h-10 bg-accent-red text-white rounded-xl hover:bg-accent-red/90 flex items-center gap-2 text-sm font-medium ${isDark ? '' : 'shadow-sm'}`}>
                 <Plus className="w-4 h-4" />
                 Создать пакет
               </button>
@@ -705,14 +705,14 @@ const DeclarantContent: React.FC = () => {
                 {/* Кнопка фильтров */}
                 <button
                   onClick={() => setFiltersOpen(!filtersOpen)}
-                  className={`flex items-center gap-2 px-4 h-10 rounded-xl border ${
+                  className={`flex items-center gap-2 px-4 h-10 rounded-xl border text-sm font-medium ${
                     isDark
-                      ? 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border-white/10'
-                      : 'bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-900 border-gray-300'
+                      ? 'bg-[#1e1e22] hover:bg-[#252529] text-gray-300 hover:text-white border-white/10'
+                      : 'bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-900 border-gray-300'
                   }`}
                 >
                   <SlidersHorizontal size={16} />
-                  <span className="font-medium">Фильтры</span>
+                  <span>Фильтры</span>
                   <ChevronDown size={16} className={`transition-transform ${filtersOpen ? 'rotate-180' : ''}`} />
                 </button>
 
@@ -1045,10 +1045,10 @@ const DeclarantContent: React.FC = () => {
               {/* Выбор количества строк */}
               <div className="flex items-center gap-2">
                 <Select value={String(rowsPerPage)} onValueChange={handleRowsPerPageChange}>
-                  <SelectTrigger className={`w-[70px] h-8 focus:outline-none focus:ring-0 transition-none ${
+                  <SelectTrigger className={`w-[70px] h-8 focus:outline-none focus:ring-0 transition-none border-0 ${
                     isDark
-                      ? 'bg-[#1e1e22] border-white/10 text-white'
-                      : 'bg-gray-50 border-gray-200 text-gray-900'
+                      ? 'bg-white/5 text-white hover:bg-white/10'
+                      : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
                   }`}>
                     <SelectValue />
                   </SelectTrigger>

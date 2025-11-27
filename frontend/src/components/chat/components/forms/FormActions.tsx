@@ -21,20 +21,18 @@ export const FormActions: React.FC<FormActionsProps> = ({
   isLightTheme = false
 }) => {
 
-  // Theme styles according to DESIGN_SYSTEM.md
+  // Theme styles according to DESIGN_SYSTEM.md §19
   const cancelButtonClass = isLightTheme
-    ? 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
-    : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10';
-
-  const borderClass = isLightTheme ? 'border-gray-200' : 'border-white/10';
+    ? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+    : 'bg-[#232328] text-gray-300 border-white/10 hover:bg-[#2a2a30]';
 
   return (
-    <div className={`flex justify-center gap-3 pt-6 border-t ${borderClass}`}>
+    <div className="flex justify-center gap-3">
       <button
         type="button"
         onClick={onCancel}
         disabled={isSaving}
-        className={`h-10 px-4 rounded-xl flex items-center gap-2 border font-medium disabled:opacity-50 ${cancelButtonClass}`}
+        className={`h-12 px-6 py-3 rounded-xl flex items-center gap-2 border text-sm font-medium disabled:opacity-50 ${cancelButtonClass}`}
       >
         <X className="h-4 w-4" />
         Отмена
@@ -43,7 +41,7 @@ export const FormActions: React.FC<FormActionsProps> = ({
       <button
         onClick={onSave}
         disabled={isSaving}
-        className="h-10 px-4 rounded-xl flex items-center gap-2 bg-accent-red hover:bg-accent-red/90 text-white font-medium disabled:opacity-50"
+        className="h-12 px-6 py-3 rounded-xl flex items-center gap-2 bg-accent-red hover:bg-accent-red/90 text-white text-sm font-medium disabled:opacity-50"
       >
         {isSaving ? (
           <Loader2 className="h-4 w-4 animate-spin" />

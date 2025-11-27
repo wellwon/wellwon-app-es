@@ -20,12 +20,12 @@ const FilterButton: React.FC<{
     size="sm"
     onClick={onClick}
     className={`
-      h-7 px-2 text-xs font-medium rounded-md transition-all
+      h-7 px-2 text-xs font-medium rounded-lg transition-all hover:scale-105
       ${active
         ? 'bg-accent-red/20 text-accent-red border border-accent-red/30'
         : isLightTheme
-          ? 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-          : 'text-gray-400 hover:text-white hover:bg-white/10'
+          ? 'bg-white text-gray-600 hover:text-gray-900 hover:bg-gray-50 border border-gray-300 hover:border-gray-400'
+          : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 border border-white/10 hover:border-white/20'
       }
     `}
   >
@@ -48,7 +48,7 @@ const ChatNavigationBar: React.FC = () => {
       primary: 'text-gray-900',
       secondary: 'text-[#6b7280]'
     },
-    button: 'text-gray-600 hover:text-gray-900 hover:bg-gray-100',
+    button: 'bg-white border border-gray-300 text-gray-600 hover:text-gray-900 hover:bg-gray-50 hover:border-gray-400 hover:scale-105',
     icon: 'bg-gray-200'
   } : {
     header: 'bg-dark-gray border-white/10',
@@ -56,7 +56,7 @@ const ChatNavigationBar: React.FC = () => {
       primary: 'text-white',
       secondary: 'text-gray-400'
     },
-    button: 'text-gray-400 hover:text-white hover:bg-white/10',
+    button: 'bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 hover:border-white/20 hover:scale-105',
     icon: 'bg-accent-gray'
   };
 

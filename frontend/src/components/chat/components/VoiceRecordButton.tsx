@@ -168,7 +168,7 @@ export function VoiceRecordButton({ disabled }: VoiceRecordButtonProps) {
     <Button
       variant="ghost"
       size="icon"
-      className={`rounded-full h-11 w-11 transition-all ${
+      className={`rounded-full h-11 w-11 transition-all hover:scale-105 ${
         isLightTheme
           ? 'text-gray-500 hover:text-accent-red bg-[#e8e8e8] hover:bg-accent-red/10 border border-gray-300 hover:border-accent-red/30'
           : 'text-gray-400 hover:text-accent-red hover:bg-accent-red/10 border border-transparent hover:border-accent-red/30'

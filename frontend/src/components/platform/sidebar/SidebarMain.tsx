@@ -171,7 +171,7 @@ const SidebarMain = () => {
             <div className="absolute -bottom-0.5 left-0 w-10 h-0.5 bg-accent-red"></div>
           </div>}
         
-        <Button variant="ghost" size="icon" onClick={toggleSidebar} className="text-gray-400 hover:text-white hover:bg-white/10 rounded-lg h-8 w-8">
+        <Button variant="ghost" size="icon" onClick={toggleSidebar} className="bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 hover:border-white/20 hover:scale-105 rounded-lg h-8 w-8">
           {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
         </Button>
       </div>
