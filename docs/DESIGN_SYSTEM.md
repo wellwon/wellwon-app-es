@@ -24,7 +24,8 @@
 14. [Select Component Styling](#14-select-component-styling)
 15. [Pagination Component](#15-pagination-component)
 16. [Table Action Buttons](#16-table-action-buttons)
-17. [Filter Section Component](#17-filter-section-component)
+17. [Form Input Styling](#17-form-input-styling)
+18. [Filter Section Component](#18-filter-section-component)
 
 ---
 
@@ -718,9 +719,92 @@ className="..." // без transition
 
 ---
 
-## 17. Filter Section Component
+## 17. Form Input Styling
 
-### 17.1 Структура секции фильтров
+### 17.1 Цветовая иерархия фонов
+
+Для создания визуальной глубины и отделения полей ввода от фона карточки используется следующая иерархия:
+
+| Слой | Light Mode | Dark Mode | Описание |
+|------|------------|-----------|----------|
+| **Фон страницы** | `#f4f4f4` | `#1a1a1e` | Самый внешний слой |
+| **Фон карточки** | `#ffffff` | `#232328` | Контейнер формы |
+| **Фон поля ввода** | `#f9fafb` (bg-gray-50) | `#1e1e22` | Чуть темнее карточки |
+
+**Принцип:** Поля ввода должны быть немного темнее, чем фон карточки, в которой они находятся.
+
+### 17.2 Input / Textarea
+
+```tsx
+<Input
+  className={`h-10 rounded-xl transition-none ${
+    isDark
+      ? 'bg-[#1e1e22] border-white/10 text-white placeholder:text-gray-500'
+      : 'bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400'
+  }`}
+/>
+```
+
+### 17.3 Select / Dropdown
+
+```tsx
+<SelectTrigger className={`h-10 rounded-xl transition-none focus:outline-none focus:ring-0 ${
+  isDark
+    ? 'bg-[#1e1e22] border-white/10 text-white'
+    : 'bg-gray-50 border-gray-300 text-gray-900'
+}`}>
+  <SelectValue placeholder="Выберите..." />
+</SelectTrigger>
+
+<SelectContent className={
+  isDark
+    ? 'bg-[#232328] border-white/10'
+    : 'bg-white border-gray-200'
+}>
+  <SelectItem className={
+    isDark
+      ? 'focus:bg-white/10 focus:text-white text-white'
+      : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'
+  }>
+    Option
+  </SelectItem>
+</SelectContent>
+```
+
+### 17.4 Таблица цветов для полей ввода
+
+| Свойство | Light Mode | Dark Mode |
+|----------|------------|-----------|
+| **Background** | `bg-gray-50` (#f9fafb) | `bg-[#1e1e22]` |
+| **Border** | `border-gray-300` | `border-white/10` |
+| **Text** | `text-gray-900` | `text-white` |
+| **Placeholder** | `placeholder:text-gray-400` | `placeholder:text-gray-500` |
+| **Focus ring** | `focus:ring-0` | `focus:ring-0` |
+
+### 17.5 Стандартные размеры полей
+
+| Элемент | Высота | Радиус | Классы |
+|---------|--------|--------|--------|
+| Input | 40px | 12px | `h-10 rounded-xl` |
+| Select | 40px | 12px | `h-10 rounded-xl` |
+| Textarea | auto | 12px | `rounded-xl` |
+| Button | 40px | 12px | `h-10 rounded-xl` |
+
+### 17.6 Важно: Без transition при переключении темы
+
+```tsx
+// ❌ Неправильно
+className="... transition-colors"
+
+// ✅ Правильно
+className="... transition-none"
+```
+
+---
+
+## 18. Filter Section Component
+
+### 18.1 Структура секции фильтров
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -733,7 +817,7 @@ className="..." // без transition
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-### 17.2 Поле поиска
+### 18.2 Поле поиска
 
 ```tsx
 <div className="relative flex-1">
@@ -751,7 +835,7 @@ className="..." // без transition
 </div>
 ```
 
-### 17.3 Кнопка "Фильтры"
+### 18.3 Кнопка "Фильтры"
 
 Кнопка с бордером, высота совпадает с полем поиска (h-10).
 
@@ -770,7 +854,7 @@ className="..." // без transition
 </button>
 ```
 
-### 17.4 Кнопка сброса фильтров (условная)
+### 18.4 Кнопка сброса фильтров (условная)
 
 **Важно:** Кнопка появляется ТОЛЬКО когда есть активные фильтры.
 
@@ -794,7 +878,7 @@ const hasActiveFilters =
 )}
 ```
 
-### 17.5 Раскрывающиеся фильтры (Collapsible)
+### 18.5 Раскрывающиеся фильтры (Collapsible)
 
 ```tsx
 <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
@@ -806,7 +890,7 @@ const hasActiveFilters =
 </Collapsible>
 ```
 
-### 17.6 Функция сброса всех фильтров
+### 18.6 Функция сброса всех фильтров
 
 ```tsx
 const resetAllFilters = () => {
@@ -818,7 +902,7 @@ const resetAllFilters = () => {
 };
 ```
 
-### 17.7 Консистентность высоты элементов
+### 18.7 Консистентность высоты элементов
 
 Все элементы в строке фильтров должны иметь **одинаковую высоту h-10** (40px):
 
@@ -828,7 +912,7 @@ const resetAllFilters = () => {
 | Кнопка "Фильтры" | 40px | `h-10 rounded-xl` |
 | Кнопка сброса | 40px | `w-10 h-10 rounded-lg` |
 
-### 17.8 Полный пример секции фильтров
+### 18.8 Полный пример секции фильтров
 
 ```tsx
 const [searchQuery, setSearchQuery] = useState('');
@@ -906,7 +990,8 @@ return (
 
 | Version | Date | Changes |
 |---------|------|---------|
-| **3.2** | 2025-11-26 | Added §17: Filter Section Component with conditional reset button |
+| **3.3** | 2025-11-27 | Added §17: Form Input Styling with color hierarchy, renumbered §18: Filter Section |
+| **3.2** | 2025-11-26 | Added Filter Section Component with conditional reset button |
 | **3.1** | 2025-11-25 | Added §13-§16: UI State Persistence, Select, Pagination, Action Buttons |
 | **3.0** | 2025-11-25 | Complete rewrite with HEX colors from `/test-app` audit |
 | **2.0** | 2025-10-15 | Added hybrid theme architecture, glassmorphism specs |

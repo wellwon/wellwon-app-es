@@ -16,6 +16,7 @@ import { GlassCard, GlassButton } from '@/components/design-system';
 import { CompanyService } from '@/services/CompanyService';
 import { useRealtimeChatContext } from '@/contexts/RealtimeChatContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePlatform } from '@/contexts/PlatformContext';
 import { logger } from '@/utils/logger';
 
 // Константа URL логотипа для Telegram групп
@@ -41,6 +42,76 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
   const {
     user
   } = useAuth();
+  const { isLightTheme } = usePlatform();
+
+  // Theme styles according to DESIGN_SYSTEM.md
+  const theme = isLightTheme ? {
+    modal: {
+      bg: 'bg-white',
+      border: 'border-gray-200',
+    },
+    header: {
+      bg: 'bg-white',
+      border: 'border-gray-200',
+      title: 'text-gray-900',
+      closeBtn: 'text-gray-500 hover:text-gray-700 hover:bg-gray-100',
+    },
+    card: {
+      bg: 'bg-[#f4f4f4]',
+      border: 'border-gray-200',
+    },
+    text: {
+      primary: 'text-gray-900',
+      secondary: 'text-gray-500',
+      muted: 'text-gray-400',
+    },
+    toggle: {
+      bg: 'bg-gray-100',
+      border: 'border-gray-200',
+    },
+    process: {
+      cardBg: 'bg-gray-50',
+      border: 'border-gray-200',
+      progressBg: 'bg-gray-200',
+    },
+    result: {
+      fieldBg: 'bg-white',
+      fieldBorder: 'border-gray-200',
+    },
+  } : {
+    modal: {
+      bg: 'bg-[#232328]',
+      border: 'border-white/10',
+    },
+    header: {
+      bg: 'bg-[#232328]',
+      border: 'border-white/10',
+      title: 'text-white',
+      closeBtn: 'text-gray-400 hover:text-white hover:bg-white/10',
+    },
+    card: {
+      bg: 'bg-[#1a1a1e]',
+      border: 'border-white/10',
+    },
+    text: {
+      primary: 'text-white',
+      secondary: 'text-gray-400',
+      muted: 'text-gray-500',
+    },
+    toggle: {
+      bg: 'bg-white/5',
+      border: 'border-white/10',
+    },
+    process: {
+      cardBg: 'bg-[#1a1a1e]',
+      border: 'border-white/10',
+      progressBg: 'bg-white/10',
+    },
+    result: {
+      fieldBg: 'bg-[#1a1a1e]',
+      fieldBorder: 'border-white/10',
+    },
+  };
   const [isLoading, setIsLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(true);
   const [errors, setErrors] = useState<FormValidationErrors>({});
@@ -524,31 +595,31 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
     }
   };
   return <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-background border-glass-border">
-        <DialogHeader className="flex flex-row items-center gap-3 space-y-0 pb-6 border-b border-glass-border">
-          {getFormIcon()}
+      <DialogContent className={`max-w-2xl max-h-[90vh] overflow-y-auto ${theme.modal.bg} border ${theme.modal.border}`}>
+        <DialogHeader className={`flex flex-row items-center gap-3 space-y-0 pb-6 border-b ${theme.header.border}`}>
+          <div className={theme.text.primary}>{getFormIcon()}</div>
           <div className="flex-1">
-            <DialogTitle className="text-xl text-text-white">{getFormTitle()}</DialogTitle>
+            <DialogTitle className={`text-xl ${theme.header.title}`}>{getFormTitle()}</DialogTitle>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-glass-surface rounded-lg transition-colors">
-            <X className="h-4 w-4 text-text-gray-400" />
+          <button onClick={onClose} className={`p-2 rounded-lg ${theme.header.closeBtn}`}>
+            <X className="h-4 w-4" />
           </button>
         </DialogHeader>
 
         <div className="space-y-6">
           {isLoading && <div className="flex items-center justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-accent-red" />
-              <span className="ml-2 text-text-gray-400">Загрузка...</span>
+              <span className={`ml-2 ${theme.text.secondary}`}>Загрузка...</span>
             </div>}
 
-          {showingProcess && <div className="w-full bg-glass-surface/30 border border-glass-border rounded-lg p-6">
+          {showingProcess && <div className={`w-full ${theme.process.cardBg} border ${theme.process.border} rounded-2xl p-6`}>
               <div className="flex flex-col items-center space-y-6">
                 {/* Заголовок */}
                 <div className="text-center">
-                  <h3 className="text-lg font-semibold text-foreground mb-2">
+                  <h3 className={`text-lg font-semibold ${theme.text.primary} mb-2`}>
                     Создание компании
                   </h3>
-                  <p className="text-sm text-muted-foreground">
+                  <p className={`text-sm ${theme.text.secondary}`}>
                     Пожалуйста, подождите...
                   </p>
                 </div>
@@ -556,10 +627,10 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
                 {/* Прогресс бар */}
                 <div className="w-full">
                     <div className={`rounded-full h-2 mb-4 ${
-                      stepStatuses.some(s => s === 'error') ? 'bg-accent-red/20' : 'bg-secondary'
+                      stepStatuses.some(s => s === 'error') ? 'bg-accent-red/20' : theme.process.progressBg
                     }`}>
                      <div className={`h-2 rounded-full transition-all duration-500 ${
-                       stepStatuses.some(s => s === 'error') ? 'bg-accent-red' : 'bg-accent-blue'
+                       stepStatuses.some(s => s === 'error') ? 'bg-accent-red' : 'bg-accent-red'
                      }`} style={{
                    width: `${stepStatuses.filter(s => s === 'success').length / processSteps.length * 100}%`
                  }} />
@@ -567,16 +638,16 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
                 </div>
 
                 {/* Этапы - первая карточка */}
-                <div className="w-full p-4 border border-border rounded-lg bg-card/50">
+                <div className={`w-full p-4 border ${theme.process.border} rounded-xl ${theme.result.fieldBg}`}>
                   <div className="space-y-3">
                     {processSteps.map((step, index) => <div key={index} className="flex items-center space-x-3">
                         {/* Статус этапа */}
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold transition-all ${stepStatuses[index] === 'success' ? 'bg-accent-green text-white' : stepStatuses[index] === 'error' ? 'bg-accent-red text-white' : stepStatuses[index] === 'loading' ? 'bg-accent-blue text-white animate-pulse' : 'bg-secondary text-muted-foreground'}`}>
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold transition-none ${stepStatuses[index] === 'success' ? 'bg-accent-green text-white' : stepStatuses[index] === 'error' ? 'bg-accent-red text-white' : stepStatuses[index] === 'loading' ? 'bg-accent-red text-white animate-pulse' : isLightTheme ? 'bg-gray-200 text-gray-500' : 'bg-white/10 text-gray-400'}`}>
                           {stepStatuses[index] === 'success' ? '✓' : stepStatuses[index] === 'error' ? '✗' : stepStatuses[index] === 'loading' ? '...' : index + 1}
                         </div>
-                        
+
                         {/* Название этапа */}
-                        <span className={`text-sm ${stepStatuses[index] === 'success' ? 'text-accent-green' : stepStatuses[index] === 'error' ? 'text-accent-red' : stepStatuses[index] === 'loading' ? 'text-accent-blue' : 'text-muted-foreground'}`}>
+                        <span className={`text-sm ${stepStatuses[index] === 'success' ? 'text-accent-green' : stepStatuses[index] === 'error' ? 'text-accent-red' : stepStatuses[index] === 'loading' ? 'text-accent-red' : theme.text.secondary}`}>
                           {step}
                         </span>
                       </div>)}
@@ -585,122 +656,137 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
 
                 {/* Результат процесса создания - вторая карточка */}
                 {groupCreationResult && createdCompanyData && (
-                  <div className="w-full p-4 border border-border rounded-lg bg-card/50 space-y-6">
+                  <div className={`w-full p-4 border ${theme.process.border} rounded-xl ${theme.result.fieldBg} space-y-6`}>
                     <div className="text-center">
                       <div className="w-16 h-16 mx-auto mb-4 flex items-center justify-center rounded-full bg-accent-green/10">
                         <CheckCircle className="w-8 h-8 text-accent-green" />
                       </div>
-                      <h4 className="text-lg font-semibold text-foreground mb-6">
+                      <h4 className={`text-lg font-semibold ${theme.text.primary} mb-6`}>
                         Компания и группа успешно созданы!
                       </h4>
-                      
+
                       {/* Divider */}
-                      <div className="w-full h-px bg-border mb-6"></div>
+                      <div className={`w-full h-px ${isLightTheme ? 'bg-gray-200' : 'bg-white/10'} mb-6`}></div>
                     </div>
-                    
+
                     {/* Данные в красивых полях по 2 в строке */}
                     <div className="grid grid-cols-2 gap-4">
                       {/* Название компании */}
                       <div className="space-y-1">
-                        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Название компании</label>
-                        <div className="px-3 py-2 bg-background border border-border rounded-md text-sm">
+                        <label className={`text-xs font-medium ${theme.text.secondary} uppercase tracking-wider`}>Название компании</label>
+                        <div className={`px-3 py-2 ${theme.result.fieldBg} border ${theme.result.fieldBorder} rounded-xl text-sm ${theme.text.primary}`}>
                           {createdCompanyData.name}
                         </div>
                       </div>
-                      
+
                       {/* ID компании */}
                       <div className="space-y-1">
-                        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">ID компании</label>
-                        <div className="px-3 py-2 bg-background border border-border rounded-md text-sm">
+                        <label className={`text-xs font-medium ${theme.text.secondary} uppercase tracking-wider`}>ID компании</label>
+                        <div className={`px-3 py-2 ${theme.result.fieldBg} border ${theme.result.fieldBorder} rounded-xl text-sm ${theme.text.primary}`}>
                           {createdCompanyData.id}
                         </div>
                       </div>
-                      
+
                       {/* Название группы */}
                       {groupCreationResult?.group_data && (
                         <div className="space-y-1">
-                          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Название группы</label>
-                          <div className="px-3 py-2 bg-background border border-border rounded-md text-sm">
+                          <label className={`text-xs font-medium ${theme.text.secondary} uppercase tracking-wider`}>Название группы</label>
+                          <div className={`px-3 py-2 ${theme.result.fieldBg} border ${theme.result.fieldBorder} rounded-xl text-sm ${theme.text.primary}`}>
                             {groupCreationResult.group_data.group_title || groupCreationResult.group_title}
                           </div>
                         </div>
                       )}
-                      
+
                       {/* ID группы */}
                       {groupCreationResult?.group_data && (
                         <div className="space-y-1">
-                          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">ID группы</label>
-                          <div className="px-3 py-2 bg-background border border-border rounded-md text-sm">
+                          <label className={`text-xs font-medium ${theme.text.secondary} uppercase tracking-wider`}>ID группы</label>
+                          <div className={`px-3 py-2 ${theme.result.fieldBg} border ${theme.result.fieldBorder} rounded-xl text-sm ${theme.text.primary}`}>
                             {groupCreationResult.group_data.group_id ? `-100${groupCreationResult.group_data.group_id}` : (groupCreationResult.group_id ? `-100${groupCreationResult.group_id}` : 'Не указан')}
                           </div>
                         </div>
                       )}
                     </div>
-                    
+
                     {/* Ссылка приглашения */}
                     {(groupCreationResult?.group_data?.invite_link || groupCreationResult?.invite_link) && (
                       <div className="space-y-2">
-                        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Ссылка приглашение в группу</label>
+                        <label className={`text-xs font-medium ${theme.text.secondary} uppercase tracking-wider`}>Ссылка приглашение в группу</label>
                         <div className="flex gap-2">
                           <input
                             type="text"
                             value={groupCreationResult.group_data?.invite_link || groupCreationResult.invite_link}
                             readOnly
-                            className="flex-1 px-3 py-2 bg-background border border-border rounded-md text-sm"
+                            className={`flex-1 px-3 py-2 h-10 ${theme.result.fieldBg} border ${theme.result.fieldBorder} rounded-xl text-sm ${theme.text.primary} transition-none`}
                           />
-                          <GlassButton
-                            variant="outline"
-                            size="sm"
+                          <button
                             onClick={() => handleCopyClick(groupCreationResult.group_data?.invite_link || groupCreationResult.invite_link, 'invite-link')}
-                            className="border-border hover:bg-white/5"
+                            className={`h-10 px-3 rounded-xl flex items-center justify-center border ${
+                              isLightTheme
+                                ? 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200'
+                                : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10'
+                            }`}
                           >
                             {copiedStates['invite-link'] ? (
                               <Check className="w-4 h-4 text-accent-green" />
                             ) : (
-                              <Copy className="w-4 h-4 text-muted-foreground" />
+                              <Copy className="w-4 h-4" />
                             )}
-                          </GlassButton>
+                          </button>
                         </div>
                       </div>
                     )}
-                    
+
                     {/* Кнопки */}
-                    <div className="flex gap-3 justify-center">
+                    <div className="flex gap-3 justify-center pt-2">
                       {(groupCreationResult?.group_data?.invite_link || groupCreationResult?.invite_link) && (
-                        <GlassButton
-                          variant="primary"
+                        <button
                           onClick={() => window.open(groupCreationResult.group_data?.invite_link || groupCreationResult.invite_link, '_blank')}
-                          className="bg-[#0088cc] hover:bg-[#0088cc]/90 text-white"
+                          className="h-10 px-4 rounded-xl flex items-center justify-center bg-[#0088cc] hover:bg-[#0088cc]/90 text-white font-medium"
                         >
                           <TelegramIcon className="w-4 h-4 mr-2" />
                           Открыть группу
-                        </GlassButton>
+                        </button>
                       )}
-                      <GlassButton variant="secondary" onClick={handleProcessClose}>
+                      <button
+                        onClick={handleProcessClose}
+                        className={`h-10 px-4 rounded-xl flex items-center justify-center border font-medium ${
+                          isLightTheme
+                            ? 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
+                            : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10'
+                        }`}
+                      >
                         Закрыть
-                      </GlassButton>
+                      </button>
                     </div>
                   </div>
                 )}
 
                 {/* Ошибка */}
                 {processError && !groupCreationResult && (
-                  <div className="w-full p-4 border border-border rounded-lg bg-card/50 space-y-6">
+                  <div className={`w-full p-4 border ${theme.process.border} rounded-xl ${theme.result.fieldBg} space-y-6`}>
                     <div className="text-center">
                       <div className="w-16 h-16 mx-auto mb-4 flex items-center justify-center rounded-full bg-accent-red/10">
                         <XCircle className="w-8 h-8 text-accent-red" />
                       </div>
-                      <h4 className="text-lg font-semibold text-foreground mb-2">
+                      <h4 className={`text-lg font-semibold ${theme.text.primary} mb-2`}>
                         Ошибка создания компании
                       </h4>
-                      <p className="text-sm text-muted-foreground mb-6">
+                      <p className={`text-sm ${theme.text.secondary} mb-6`}>
                         {processError}
                       </p>
                     </div>
                     <div className="flex justify-center">
-                      <GlassButton variant="secondary" onClick={handleProcessClose}>
+                      <button
+                        onClick={handleProcessClose}
+                        className={`h-10 px-4 rounded-xl flex items-center justify-center border font-medium ${
+                          isLightTheme
+                            ? 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
+                            : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10'
+                        }`}
+                      >
                         Закрыть
-                      </GlassButton>
+                      </button>
                     </div>
                   </div>
                 )}
@@ -709,43 +795,43 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
 
           {!isLoading && !showingProcess && formType === 'company-registration' && <div className="space-y-6">
               {/* Блок 1: Информация о компании/проекте */}
-              <GlassCard className="space-y-6" hover={false}>
+              <div className={`rounded-2xl p-6 border ${theme.card.bg} ${theme.card.border} space-y-6`}>
                 {/* Company/Project Toggle */}
-                <div className="flex items-center space-x-3 p-4 bg-glass-surface rounded-xl border border-glass-border">
+                <div className={`flex items-center space-x-3 p-4 rounded-xl border ${theme.toggle.bg} ${theme.toggle.border}`}>
                   <Switch id="project-mode" checked={isProject} onCheckedChange={handleProjectToggle} />
-                  <Label htmlFor="project-mode" className="text-text-white font-medium">
+                  <Label htmlFor="project-mode" className={`font-medium ${theme.text.primary}`}>
                     Нет компании
                   </Label>
                 </div>
 
-                <CompanyInfoFields formData={companyFormData} setFormData={setCompanyFormData} errors={errors} isEditing={isEditing} isProject={isProject} isSearching={isSearching} onSearchByINN={handleSearchByINN} getFieldIndicatorColor={getFieldIndicatorColor} />
-                
-                <AddressFields formData={companyFormData} setFormData={setCompanyFormData} errors={errors} isEditing={isEditing} isProject={isProject} getFieldIndicatorColor={getFieldIndicatorColor} />
-                
-                <ContactInfoFields formData={companyFormData} setFormData={setCompanyFormData} errors={errors} isEditing={isEditing} getFieldIndicatorColor={getFieldIndicatorColor} />
-              </GlassCard>
+                <CompanyInfoFields formData={companyFormData} setFormData={setCompanyFormData} errors={errors} isEditing={isEditing} isProject={isProject} isSearching={isSearching} onSearchByINN={handleSearchByINN} getFieldIndicatorColor={getFieldIndicatorColor} isLightTheme={isLightTheme} />
+
+                <AddressFields formData={companyFormData} setFormData={setCompanyFormData} errors={errors} isEditing={isEditing} isProject={isProject} getFieldIndicatorColor={getFieldIndicatorColor} isLightTheme={isLightTheme} />
+
+                <ContactInfoFields formData={companyFormData} setFormData={setCompanyFormData} errors={errors} isEditing={isEditing} getFieldIndicatorColor={getFieldIndicatorColor} isLightTheme={isLightTheme} />
+              </div>
 
               {/* Блок 2: Создание Telegram-группы */}
-              <GlassCard variant="default" padding="lg" className="border-white/10" hover={false}>
+              <div className={`rounded-2xl p-6 border ${theme.card.bg} ${theme.card.border}`}>
                 <div className="space-y-6">
-                  <h3 className="text-text-white font-semibold text-xl mb-6 flex items-center gap-3">
+                  <h3 className={`font-semibold text-xl mb-6 flex items-center gap-3 ${theme.text.primary}`}>
                     <TelegramIcon className="w-6 h-6 text-[#0088cc]" />
                     Создание Telegram-группы
                   </h3>
-                  
-                  <TelegramGroupFields groupData={telegramGroupData} setGroupData={setTelegramGroupData} />
+
+                  <TelegramGroupFields groupData={telegramGroupData} setGroupData={setTelegramGroupData} isLightTheme={isLightTheme} />
                 </div>
-              </GlassCard>
-              
+              </div>
+
               {/* Кнопки действий */}
-              <FormActions isEditing={isEditing} isSaving={isLoading} hasChanges={true} onCancel={handleCancel} onSave={handleSave} isProject={isProject} isCreatingGroup={false} />
+              <FormActions isEditing={isEditing} isSaving={isLoading} hasChanges={true} onCancel={handleCancel} onSave={handleSave} isProject={isProject} isCreatingGroup={false} isLightTheme={isLightTheme} />
             </div>}
 
 
           {!isLoading && !formType && <div className="text-center py-8">
-              <Building size={48} className="text-text-gray-400 mx-auto mb-4" />
-              <h3 className="text-text-white font-medium mb-2">Выберите тип формы</h3>
-              <p className="text-text-gray-400 text-sm">Выберите нужную форму из меню</p>
+              <Building size={48} className={`mx-auto mb-4 ${theme.text.secondary}`} />
+              <h3 className={`font-medium mb-2 ${theme.text.primary}`}>Выберите тип формы</h3>
+              <p className={`text-sm ${theme.text.secondary}`}>Выберите нужную форму из меню</p>
             </div>}
         </div>
       </DialogContent>

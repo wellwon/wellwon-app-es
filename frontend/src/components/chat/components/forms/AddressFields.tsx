@@ -8,6 +8,7 @@ interface AddressFieldsProps {
   isEditing: boolean;
   isProject: boolean;
   getFieldIndicatorColor: (fieldName: string) => string;
+  isLightTheme?: boolean;
 }
 
 export const AddressFields: React.FC<AddressFieldsProps> = ({
@@ -16,7 +17,8 @@ export const AddressFields: React.FC<AddressFieldsProps> = ({
   errors,
   isEditing,
   isProject,
-  getFieldIndicatorColor
+  getFieldIndicatorColor,
+  isLightTheme = false
 }) => {
   return (
     <div className="space-y-6">
@@ -31,6 +33,7 @@ export const AddressFields: React.FC<AddressFieldsProps> = ({
               placeholder="г. Москва, ул. Примерная, д. 1"
               disabled={!isEditing}
               error={errors.street}
+              isLightTheme={isLightTheme}
             />
           </div>
           <div className="flex-[1]">
@@ -41,6 +44,7 @@ export const AddressFields: React.FC<AddressFieldsProps> = ({
               placeholder="Москва"
               disabled={!isEditing}
               error={errors.city}
+              isLightTheme={isLightTheme}
             />
           </div>
         </div>
@@ -54,8 +58,9 @@ export const AddressFields: React.FC<AddressFieldsProps> = ({
             placeholder="г. Москва, ул. Примерная, д. 1"
             disabled={!isEditing}
             error={errors.street}
+            isLightTheme={isLightTheme}
           />
-          
+
           <div className="grid grid-cols-3 gap-4">
             <GlassInput
               label="Город *"
@@ -64,8 +69,9 @@ export const AddressFields: React.FC<AddressFieldsProps> = ({
               placeholder="Москва"
               disabled={!isEditing}
               error={errors.city}
+              isLightTheme={isLightTheme}
             />
-            
+
             <GlassInput
               label="Индекс"
               value={formData.postal_code || ''}
@@ -73,6 +79,7 @@ export const AddressFields: React.FC<AddressFieldsProps> = ({
               placeholder="123456"
               disabled={!isEditing}
               error={errors.postal_code}
+              isLightTheme={isLightTheme}
             />
 
             <GlassInput
@@ -82,6 +89,7 @@ export const AddressFields: React.FC<AddressFieldsProps> = ({
               placeholder="Россия"
               disabled={!isEditing}
               error={errors.country}
+              isLightTheme={isLightTheme}
             />
           </div>
         </>

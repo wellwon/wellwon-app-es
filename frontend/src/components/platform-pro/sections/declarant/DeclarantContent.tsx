@@ -550,7 +550,7 @@ const DeclarantContent: React.FC = () => {
   };
 
   const theme = isDark ? {
-    page: 'bg-[#18181b]',
+    page: 'bg-[#1a1a1e]',
     text: {
       primary: 'text-white',
       secondary: 'text-gray-400'
@@ -696,7 +696,7 @@ const DeclarantContent: React.FC = () => {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className={`pl-10 h-10 rounded-xl transition-none ${
                       isDark
-                        ? 'bg-[#18181b] border-white/10 text-white placeholder:text-gray-500'
+                        ? 'bg-[#1e1e22] border-white/10 text-white placeholder:text-gray-500'
                         : 'bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400'
                     }`}
                   />
@@ -760,7 +760,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={mainDocumentFilter} onValueChange={setMainDocumentFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#18181b] border-white/10 text-white'
+                              ? 'bg-[#1e1e22] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="Все" />
@@ -780,7 +780,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={procedureCodeFilter} onValueChange={setProcedureCodeFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#18181b] border-white/10 text-white'
+                              ? 'bg-[#1e1e22] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="Все" />
@@ -800,7 +800,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={featureFilter} onValueChange={setFeatureFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#18181b] border-white/10 text-white'
+                              ? 'bg-[#1e1e22] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="Все" />
@@ -823,7 +823,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={recipientFilter} onValueChange={setRecipientFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#18181b] border-white/10 text-white'
+                              ? 'bg-[#1e1e22] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="Все" />
@@ -843,7 +843,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={senderFilter} onValueChange={setSenderFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#18181b] border-white/10 text-white'
+                              ? 'bg-[#1e1e22] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="Все" />
@@ -863,7 +863,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={registrationDateFilter} onValueChange={setRegistrationDateFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#18181b] border-white/10 text-white'
+                              ? 'bg-[#1e1e22] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="За все время" />
@@ -887,7 +887,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={documentTypeFilter} onValueChange={setDocumentTypeFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#18181b] border-white/10 text-white'
+                              ? 'bg-[#1e1e22] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="Все" />
@@ -908,7 +908,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={documentFilter} onValueChange={setDocumentFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#18181b] border-white/10 text-white'
+                              ? 'bg-[#1e1e22] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="Все" />
@@ -928,7 +928,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={documentDateFilter} onValueChange={setDocumentDateFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#18181b] border-white/10 text-white'
+                              ? 'bg-[#1e1e22] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="За все время" />
@@ -1047,7 +1047,7 @@ const DeclarantContent: React.FC = () => {
                 <Select value={String(rowsPerPage)} onValueChange={handleRowsPerPageChange}>
                   <SelectTrigger className={`w-[70px] h-8 focus:outline-none focus:ring-0 transition-none ${
                     isDark
-                      ? 'bg-[#18181b] border-white/10 text-white'
+                      ? 'bg-[#1e1e22] border-white/10 text-white'
                       : 'bg-gray-50 border-gray-200 text-gray-900'
                   }`}>
                     <SelectValue />
