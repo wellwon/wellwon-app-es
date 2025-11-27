@@ -162,6 +162,12 @@
 }
 
 @layer components {
+  /* Disable all transitions during theme switch */
+  .no-transitions,
+  .no-transitions * {
+    transition: none !important;
+  }
+
   /* Glass Card Effect */
   .glass-card {
     background: linear-gradient(135deg, hsl(var(--light-gray) / 0.8) 0%, hsl(var(--dark-gray) / 0.8) 100%);
@@ -449,40 +455,6 @@
   [data-radix-scroll-area-viewport] {
     scrollbar-gutter: stable both-edges;
     overflow-y: auto !important;
-  }
-
-  /* Custom thin scrollbar styles */
-  .scrollbar-thin {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
-  }
-
-  .scrollbar-thin::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-
-  .scrollbar-thin::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .scrollbar-thin::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 3px;
-  }
-
-  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.3);
-  }
-
-  /* Hide scrollbar but keep functionality */
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
   }
 
   /* Отключение браузерного якоря */

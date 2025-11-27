@@ -21,6 +21,9 @@ interface PlatformContextType {
   setSelectedCompany: (company: Company | null) => void;
   companyInitialized: boolean;
   chatId?: string;
+  // Light theme support (like Declarant page)
+  isLightTheme: boolean;
+  toggleTheme: () => void;
 }
 
 const PlatformContext = createContext<PlatformContextType | null>(null);
@@ -30,10 +33,18 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const navigate = useNavigate();
   const { profile } = useAuth();
   const [activeSection, setActiveSectionState] = useState<PlatformSection>('chat');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    const saved = localStorage.getItem('ww-platform-sidebar-collapsed');
+    return saved === 'true';
+  });
   const [isInitialized, setIsInitialized] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [companyInitialized, setCompanyInitialized] = useState(false);
+  // Light theme support (like Declarant page - content is light, sidebar stays dark)
+  const [isLightTheme, setIsLightTheme] = useState(() => {
+    const saved = localStorage.getItem('ww-platform-light-theme');
+    return saved === 'true';
+  });
 
   // Get user type - simplified to just isDeveloper boolean
   const isDeveloper = profile?.is_developer || false;
@@ -85,13 +96,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Загрузка состояния из localStorage (только один раз)
   useEffect(() => {
     if (isInitialized) return;
-    
-    try {
-      const savedCollapsed = localStorage.getItem('ww-platform-sidebar-collapsed');
-      if (savedCollapsed) {
-        setSidebarCollapsed(JSON.parse(savedCollapsed));
-      }
 
+    try {
       const savedCompany = localStorage.getItem('ww-platform-selected-company');
       if (savedCompany) {
         try {
@@ -112,7 +118,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch (error) {
       logger.error('Error loading platform state', error, { component: 'PlatformContext' });
     }
-    
+
     setIsInitialized(true);
   }, [isInitialized]);
 
@@ -142,6 +148,24 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setSidebarCollapsed(!sidebarCollapsed);
   }, [sidebarCollapsed]);
 
+  // Toggle theme function (light/dark for content area, sidebar stays dark)
+  // Disables transitions for instant theme switch
+  const toggleTheme = useCallback(() => {
+    // Add no-transitions class to body to disable all transitions during theme change
+    document.body.classList.add('no-transitions');
+
+    const newValue = !isLightTheme;
+    setIsLightTheme(newValue);
+    localStorage.setItem('ww-platform-light-theme', String(newValue));
+
+    // Remove no-transitions class after a brief moment to re-enable transitions
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document.body.classList.remove('no-transitions');
+      });
+    });
+  }, [isLightTheme]);
+
   // Функция для изменения активной секции с обновлением URL
   const setActiveSection = useCallback((newSection: PlatformSection, newChatId?: string) => {
     if (newChatId) {
@@ -164,8 +188,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     selectedCompany,
     setSelectedCompany,
     companyInitialized,
-    chatId
-  }), [activeSection, setActiveSection, sidebarCollapsed, toggleSidebar, userTheme, availableSections, isDeveloper, selectedCompany, companyInitialized, chatId]);
+    chatId,
+    isLightTheme,
+    toggleTheme
+  }), [activeSection, setActiveSection, sidebarCollapsed, toggleSidebar, userTheme, availableSections, isDeveloper, selectedCompany, companyInitialized, chatId, isLightTheme, toggleTheme]);
 
   return (
     <PlatformContext.Provider value={contextValue}>

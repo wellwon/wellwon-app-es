@@ -8,6 +8,7 @@ interface ContactInfoFieldsProps {
   errors: Record<string, string>;
   isEditing: boolean;
   getFieldIndicatorColor: (fieldName: string) => string;
+  isLightTheme?: boolean;
 }
 
 export const ContactInfoFields: React.FC<ContactInfoFieldsProps> = ({
@@ -15,15 +16,19 @@ export const ContactInfoFields: React.FC<ContactInfoFieldsProps> = ({
   setFormData,
   errors,
   isEditing,
-  getFieldIndicatorColor
+  getFieldIndicatorColor,
+  isLightTheme = false
 }) => {
+  // Theme styles
+  const titleClass = isLightTheme ? 'text-gray-900' : 'text-white';
+
   return (
     <div className="space-y-6">
-      <h3 className="text-text-white font-semibold text-xl mb-6 flex items-center gap-3">
+      <h3 className={`font-semibold text-xl mb-6 flex items-center gap-3 ${titleClass}`}>
         <Phone className="w-6 h-6 text-accent-red" />
         Контактная информация
       </h3>
-      
+
       <GlassInput
         label="Директор"
         value={formData.director || ''}
@@ -31,8 +36,9 @@ export const ContactInfoFields: React.FC<ContactInfoFieldsProps> = ({
         placeholder="Иванов Иван Иванович"
         disabled={!isEditing}
         error={errors.director}
+        isLightTheme={isLightTheme}
       />
-      
+
       <div className="grid grid-cols-2 gap-4">
         <GlassInput
           label="Телефон"
@@ -42,8 +48,9 @@ export const ContactInfoFields: React.FC<ContactInfoFieldsProps> = ({
           placeholder="+7 (999) 123-45-67"
           disabled={!isEditing}
           error={errors.phone}
+          isLightTheme={isLightTheme}
         />
-        
+
         <GlassInput
           label="Email"
           type="email"
@@ -52,6 +59,7 @@ export const ContactInfoFields: React.FC<ContactInfoFieldsProps> = ({
           placeholder="info@example.com"
           disabled={!isEditing}
           error={errors.email}
+          isLightTheme={isLightTheme}
         />
       </div>
     </div>

@@ -1,26 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { API } from '@/api/core';
+import { adminApi, AdminUser } from '@/api/admin';
 import { GlassCard } from '@/components/design-system/GlassCard';
 import { GlassButton } from '@/components/design-system/GlassButton';
 import { useToast } from '@/hooks/use-toast';
 import { Users, Shield, UserX, UserCheck } from 'lucide-react';
 import { logger } from '@/utils/logger';
 
-interface User {
-  id: string;
-  user_id: string;
-  first_name: string | null;
-  last_name: string | null;
-  active: boolean;
-  developer: boolean;
-  created_at: string;
-}
-
 const UserManagement: React.FC = () => {
   const { profile } = useAuth();
   const { toast } = useToast();
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Only WW managers and developers can manage users
@@ -36,7 +26,7 @@ const UserManagement: React.FC = () => {
 
   const fetchUsers = async () => {
     try {
-      const { data } = await API.get<User[]>('/admin/users');
+      const { data } = await adminApi.getUsers();
       // Filter users to only include developer types
       const filteredUsers = (data || []).filter(user =>
         user.developer === true
@@ -56,7 +46,7 @@ const UserManagement: React.FC = () => {
 
   const updateUserStatus = async (userId: string, active: boolean) => {
     try {
-      await API.patch(`/admin/users/${userId}`, { active });
+      await adminApi.updateUser(userId, { active });
 
       setUsers(prev => prev.map(user =>
         user.user_id === userId ? { ...user, active } : user
@@ -79,7 +69,7 @@ const UserManagement: React.FC = () => {
 
   const updateUserType = async (userId: string, isDeveloper: boolean) => {
     try {
-      await API.patch(`/admin/users/${userId}`, { developer: isDeveloper });
+      await adminApi.updateUser(userId, { developer: isDeveloper });
 
       setUsers(prev => prev.map(user =>
         user.user_id === userId ? { ...user, developer: isDeveloper } : user

@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { realtimeChatService } from '@/services/RealtimeChatService';
 import { logger } from '@/utils/logger';
 import * as companyApi from '@/api/company';
 import * as chatApi from '@/api/chat';
@@ -122,7 +121,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
 
     // Отписываемся от предыдущей подписки
     if (chatsSubscriptionRef.current) {
-      realtimeChatService.unsubscribeFromChatsUpdates();
+      // WSE handles unsubscription automatically;
       chatsSubscriptionRef.current = null;
       isSubscribedToChatsRef.current = false;
     }
@@ -134,84 +133,96 @@ export function useRealtimeChat(): RealtimeChatContextType {
       component: 'useRealtimeChat' 
     });
 
-    chatsSubscriptionRef.current = realtimeChatService.subscribeToChatsUpdates(
-      user.id,
-      chatScope.type === 'company' ? (chatScope.companyId || null) : null,
-      {
-        onChatUpdate: (updatedChatData) => {
-          logger.debug('Chat updated via realtime', { chatId: updatedChatData.id, name: updatedChatData.name, isActive: updatedChatData.is_active, component: 'useRealtimeChat' });
-          
-          setChats(prev => prev.map(chat => 
-            chat.id === updatedChatData.id 
-              ? { 
-                  ...chat, 
-                  name: updatedChatData.name, 
-                  metadata: updatedChatData.metadata, 
-                  updated_at: updatedChatData.updated_at,
-                  is_active: updatedChatData.is_active
-                }
-              : chat
-          ));
+    // WSE event listeners for chat list updates
+    const handleChatCreated = async (event: CustomEvent) => {
+      const newChatData = event.detail;
+      logger.debug('New chat created via WSE', { chatId: newChatData.chat_id || newChatData.id, name: newChatData.name, component: 'useRealtimeChat' });
 
-          // Обновляем активный чат если это он
-          setActiveChat(prev => 
-            prev?.id === updatedChatData.id 
-              ? { 
-                  ...prev, 
-                  name: updatedChatData.name, 
-                  metadata: updatedChatData.metadata, 
-                  updated_at: updatedChatData.updated_at,
-                  is_active: updatedChatData.is_active
-                }
-              : prev
-          );
-        },
-        onChatCreate: async (newChatData) => {
-          logger.debug('New chat created via realtime', { chatId: newChatData.id, name: newChatData.name, component: 'useRealtimeChat' });
-          
-          // Загружаем полные данные чата с участниками
-          try {
-            let fullChatData: Chat[];
-            if (chatScope.type === 'supergroup' && chatScope.supergroupId) {
-              fullChatData = await realtimeChatService.getUserChatsBySupergroup(user.id, chatScope.supergroupId);
-            } else {
-              fullChatData = await realtimeChatService.getUserChats(user.id, chatScope.companyId || null);
-            }
-            const newChat = fullChatData.find(chat => chat.id === newChatData.id);
-            
-            if (newChat) {
-              setChats(prev => {
-                // Проверяем, что чат еще не добавлен
-                const exists = prev.some(chat => chat.id === newChat.id);
-                if (!exists) {
-                  return [newChat, ...prev];
-                }
-                return prev;
-              });
-            }
-          } catch (error) {
-            logger.error('Error loading new chat data', error, { component: 'useRealtimeChat', chatId: newChatData.id });
-          }
-        },
-        onChatDelete: (deletedChatData) => {
-          logger.debug('Chat deleted via realtime', { chatId: deletedChatData.id, component: 'useRealtimeChat' });
-          
-          setChats(prev => prev.filter(chat => chat.id !== deletedChatData.id));
-          
-          // Если это был активный чат, очищаем его
-          setActiveChat(prev => {
-            if (prev?.id === deletedChatData.id) {
-              setMessages([]);
-              setTypingUsers([]);
-              return null;
+      // Reload chats to get full data with participants
+      try {
+        const userChats = await chatApi.getChats(false, 100, 0);
+        const newChat = userChats.find(chat => chat.id === (newChatData.chat_id || newChatData.id));
+
+        if (newChat) {
+          setChats(prev => {
+            const exists = prev.some(chat => chat.id === newChat.id);
+            if (!exists) {
+              return [newChat, ...prev];
             }
             return prev;
           });
         }
-      },
-      chatScope.type === 'supergroup' ? chatScope.supergroupId : null
-    );
+      } catch (error) {
+        logger.error('Error loading new chat data', error, { component: 'useRealtimeChat' });
+      }
+    };
+
+    const handleChatUpdated = (event: CustomEvent) => {
+      const updatedChatData = event.detail;
+      logger.debug('Chat updated via WSE', { chatId: updatedChatData.chat_id || updatedChatData.id, component: 'useRealtimeChat' });
+
+      setChats(prev => prev.map(chat =>
+        chat.id === (updatedChatData.chat_id || updatedChatData.id)
+          ? {
+              ...chat,
+              name: updatedChatData.name || chat.name,
+              metadata: updatedChatData.metadata || chat.metadata,
+              updated_at: updatedChatData.updated_at || chat.updated_at,
+              is_active: updatedChatData.is_active ?? chat.is_active
+            }
+          : chat
+      ));
+
+      // Update active chat if it's the one being updated
+      setActiveChat(prev =>
+        prev?.id === (updatedChatData.chat_id || updatedChatData.id)
+          ? {
+              ...prev,
+              name: updatedChatData.name || prev.name,
+              metadata: updatedChatData.metadata || prev.metadata,
+              updated_at: updatedChatData.updated_at || prev.updated_at,
+              is_active: updatedChatData.is_active ?? prev.is_active
+            }
+          : prev
+      );
+    };
+
+    const handleChatDeleted = (event: CustomEvent) => {
+      const deletedChatData = event.detail;
+      logger.debug('Chat deleted via WSE', { chatId: deletedChatData.chat_id || deletedChatData.id, component: 'useRealtimeChat' });
+
+      setChats(prev => prev.filter(chat => chat.id !== (deletedChatData.chat_id || deletedChatData.id)));
+
+      // Clear active chat if it was deleted
+      setActiveChat(prev => {
+        if (prev?.id === (deletedChatData.chat_id || deletedChatData.id)) {
+          setMessages([]);
+          setTypingUsers([]);
+          return null;
+        }
+        return prev;
+      });
+    };
+
+    // Add event listeners
+    window.addEventListener('chatCreated', handleChatCreated as EventListener);
+    window.addEventListener('chatUpdated', handleChatUpdated as EventListener);
+    window.addEventListener('chatDeleted', handleChatDeleted as EventListener);
+
+    chatsSubscriptionRef.current = {
+      userId: user.id,
+      companyId: chatScope.type === 'company' ? (chatScope.companyId || null) : null,
+      supergroupId: chatScope.type === 'supergroup' ? chatScope.supergroupId : null
+    };
     isSubscribedToChatsRef.current = true;
+
+    // Cleanup function
+    return () => {
+      window.removeEventListener('chatCreated', handleChatCreated as EventListener);
+      window.removeEventListener('chatUpdated', handleChatUpdated as EventListener);
+      window.removeEventListener('chatDeleted', handleChatDeleted as EventListener);
+      isSubscribedToChatsRef.current = false;
+    };
   }, [user, selectedCompany?.id, chatScope]);
 
   // Загрузка чатов пользователя с фильтрацией по компании или супергруппе
@@ -236,9 +247,9 @@ export function useRealtimeChat(): RealtimeChatContextType {
       
       let userChats: Chat[];
       if (chatScope.type === 'supergroup' && chatScope.supergroupId) {
-        userChats = await realtimeChatService.getUserChatsBySupergroup(user.id, chatScope.supergroupId);
+        userChats = await chatApi.getChats(false, 100, 0);
       } else {
-        userChats = await realtimeChatService.getUserChats(user.id, chatScope.companyId || null);
+        userChats = await chatApi.getChats(false, 100, 0);
       }
       
       logger.info('Chats loaded successfully', { 
@@ -265,7 +276,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
       const offset = reset ? 0 : filteredOffset;
       
       logger.debug('Loading filtered messages', { chatId, filter, offset, limit, reset, component: 'useRealtimeChat' });
-      const chatMessages = await realtimeChatService.getChatMessagesFiltered(chatId, filter, limit, offset);
+      const chatMessages = await chatApi.getMessages(chatId, { limit: limit, offset: offset });
       
       if (reset) {
         // Гидрируем размеры изображений для ВСЕХ image-сообщений первой страницы перед рендером
@@ -338,7 +349,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
       const offset = reset ? 0 : messageOffset;
       
       logger.debug('Loading messages', { chatId, offset, limit, reset, component: 'useRealtimeChat' });
-      const chatMessages = await realtimeChatService.getChatMessages(chatId, limit, offset);
+      const chatMessages = await chatApi.getMessages(chatId, { limit: limit, offset: offset });
       
       if (reset) {
         // Жёсткая гидрация размеров изображений для ВСЕХ image-сообщений первой страницы перед рендером
@@ -543,195 +554,181 @@ export function useRealtimeChat(): RealtimeChatContextType {
     }
   }, []);
 
-  // Выбор активного чата с enhanced monitoring
+  // Reference for active chat subscription cleanup
+  const chatSubscriptionCleanupRef = useRef<(() => void) | null>(null);
+
+  // Subscribe to chat messages via WSE events
   const subscribeToChat = useCallback((chatId: string) => {
-    realtimeChatService.subscribeToChat(chatId, {
-      onMessage: async (message) => {
-        logger.info('Real-time message received', { 
-          messageId: message.id, 
-          senderId: message.sender_id, 
-          chatId: message.chat_id,
-          content: message.content?.substring(0, 50) + '...',
-          component: 'useRealtimeChat' 
-        });
-        
-        // Для image-сообщений сначала получаем размеры, только потом добавляем в state
-        let processedMessage = message;
-        if (message.message_type === 'image' && message.file_url && !message.metadata?.imageDimensions) {
-          try {
-            const { imageDimensionsCache } = await import('@/utils/imageDimensionsCache');
-            const dimensions = await imageDimensionsCache.getDimensions(message.file_url);
-            
-            if (dimensions) {
-              processedMessage = {
-                ...message,
-                metadata: {
-                  ...message.metadata,
-                  imageDimensions: dimensions
-                }
-              };
-            }
-          } catch (error) {
-            logger.warn('Failed to get dimensions for new image message', error);
-          }
-        }
+    // Cleanup previous chat subscription
+    if (chatSubscriptionCleanupRef.current) {
+      chatSubscriptionCleanupRef.current();
+      chatSubscriptionCleanupRef.current = null;
+    }
 
-        // Нормализуем reply_to (иногда Supabase возвращает пустой массив или некорректные данные)
-        if (Array.isArray(processedMessage.reply_to) || !processedMessage.reply_to || (typeof processedMessage.reply_to === 'object' && Object.keys(processedMessage.reply_to).length === 0)) {
-          processedMessage = {
-            ...processedMessage,
-            reply_to: null
-          };
-        }
+    logger.debug('Subscribing to chat messages via WSE', { chatId, component: 'useRealtimeChat' });
 
-        // Гидрируем reply_to если есть reply_to_id но нет reply_to данных
-        if (processedMessage.reply_to_id && !processedMessage.reply_to) {
-          try {
-            const replyMessage = messages.find(m => m.id === processedMessage.reply_to_id);
-            if (replyMessage) {
-              processedMessage = {
-                ...processedMessage,
-                reply_to: replyMessage
-              };
-            } else {
-              // Если сообщения нет в текущих сообщениях, попробуем загрузить из API
-              try {
-                const chatMessages = await chatApi.getMessages(processedMessage.chat_id, {
-                  limit: 1,
-                  before_id: processedMessage.reply_to_id,
-                  after_id: processedMessage.reply_to_id
-                });
-                const replyData = chatMessages.find(m => m.id === processedMessage.reply_to_id);
+    // Handler for new messages
+    const handleMessageCreated = async (event: CustomEvent) => {
+      const messageData = event.detail;
 
-                if (replyData) {
-                  const hydratedReply: Message = {
-                    id: replyData.id,
-                    chat_id: replyData.chat_id,
-                    sender_id: replyData.sender_id,
-                    content: replyData.content,
-                    message_type: replyData.message_type as 'text' | 'file' | 'voice' | 'image' | 'system' | 'interactive',
-                    reply_to_id: replyData.reply_to_id,
-                    file_url: replyData.file_url,
-                    file_name: replyData.file_name,
-                    file_size: replyData.file_size,
-                    file_type: replyData.file_type,
-                    voice_duration: replyData.voice_duration,
-                    created_at: replyData.created_at,
-                    updated_at: replyData.updated_at || replyData.created_at,
-                    is_edited: replyData.is_edited,
-                    is_deleted: replyData.is_deleted,
-                    metadata: {},
-                    sender_profile: replyData.sender_name ? {
-                      first_name: replyData.sender_name.split(' ')[0] || '',
-                      last_name: replyData.sender_name.split(' ').slice(1).join(' ') || '',
-                      avatar_url: replyData.sender_avatar_url || null,
-                      type: 'client'
-                    } : undefined,
-                    telegram_user_data: null,
-                    telegram_user_id: null,
-                    telegram_message_id: replyData.telegram_message_id,
-                    telegram_topic_id: null,
-                    telegram_forward_data: null,
-                    sync_direction: 'bidirectional'
-                  };
+      // Only process messages for the subscribed chat
+      if (messageData.chat_id !== chatId) return;
 
-                  processedMessage = {
-                    ...processedMessage,
-                    reply_to: hydratedReply
-                  };
-                }
-              } catch (err) {
-                logger.warn('Failed to fetch reply message from API', err);
+      logger.info('Real-time message received via WSE', {
+        messageId: messageData.id,
+        senderId: messageData.sender_id,
+        chatId: messageData.chat_id,
+        content: messageData.content?.substring(0, 50) + '...',
+        component: 'useRealtimeChat'
+      });
+
+      let processedMessage = messageData as Message;
+
+      // For image messages, get dimensions first
+      if (processedMessage.message_type === 'image' && processedMessage.file_url && !processedMessage.metadata?.imageDimensions) {
+        try {
+          const { imageDimensionsCache } = await import('@/utils/imageDimensionsCache');
+          const dimensions = await imageDimensionsCache.getDimensions(processedMessage.file_url);
+
+          if (dimensions) {
+            processedMessage = {
+              ...processedMessage,
+              metadata: {
+                ...processedMessage.metadata,
+                imageDimensions: dimensions
               }
-            }
-          } catch (error) {
-            logger.warn('Failed to hydrate reply_to message', error);
+            };
           }
+        } catch (error) {
+          logger.warn('Failed to get dimensions for new image message', error);
         }
-        
-        // Добавляем в общие сообщения всегда
-        setMessages(prev => {
-          const exists = prev.some(m => m.id === processedMessage.id);
-          if (exists) {
-            logger.debug('Message already exists, ignoring', { messageId: processedMessage.id, component: 'useRealtimeChat' });
-            return prev;
-          }
+      }
 
-          // Если сообщение от текущего пользователя, проверяем на дублирование с оптимистичными сообщениями  
-          if (processedMessage.sender_id === user?.id) {
-            const optimisticIndex = prev.findIndex(m => {
-              // Ищем оптимистичное сообщение с temp ID
-              if (!m.id.startsWith('temp-')) return false;
-              
-              // Проверяем совпадение контента и reply_to_id
-              if (m.content !== processedMessage.content || m.reply_to_id !== processedMessage.reply_to_id) return false;
-              
-              // Проверяем временной интервал (в пределах 15 секунд)
-              const optimisticTime = new Date(m.created_at).getTime();
-              const realTime = new Date(processedMessage.created_at).getTime();
-              const timeDiff = Math.abs(realTime - optimisticTime);
-              
-              return timeDiff <= 15000; // 15 секунд
+      // Normalize reply_to
+      if (Array.isArray(processedMessage.reply_to) || !processedMessage.reply_to || (typeof processedMessage.reply_to === 'object' && Object.keys(processedMessage.reply_to).length === 0)) {
+        processedMessage = { ...processedMessage, reply_to: null };
+      }
+
+      // Add message to state
+      setMessages(prev => {
+        const exists = prev.some(m => m.id === processedMessage.id);
+        if (exists) {
+          logger.debug('Message already exists, ignoring', { messageId: processedMessage.id, component: 'useRealtimeChat' });
+          return prev;
+        }
+
+        // Check for optimistic message replacement
+        if (processedMessage.sender_id === user?.id) {
+          const optimisticIndex = prev.findIndex(m => {
+            if (!m.id.startsWith('temp-')) return false;
+            if (m.content !== processedMessage.content || m.reply_to_id !== processedMessage.reply_to_id) return false;
+            const optimisticTime = new Date(m.created_at).getTime();
+            const realTime = new Date(processedMessage.created_at).getTime();
+            return Math.abs(realTime - optimisticTime) <= 15000;
+          });
+
+          if (optimisticIndex !== -1) {
+            const optimisticMessage = prev[optimisticIndex];
+            logger.debug('Replacing optimistic message with real one', {
+              tempId: optimisticMessage.id,
+              realId: processedMessage.id,
+              component: 'useRealtimeChat'
             });
 
-            if (optimisticIndex !== -1) {
-              // Заменяем оптимистичное сообщение на реальное
-              const optimisticMessage = prev[optimisticIndex];
-              logger.debug('Replacing optimistic message with real one', { 
-                tempId: optimisticMessage.id, 
-                realId: processedMessage.id, 
-                component: 'useRealtimeChat' 
-              });
-              
-              // Удаляем temp ID из sendingMessages
-              setSendingMessages(currentSending => {
-                const newSet = new Set(currentSending);
-                newSet.delete(optimisticMessage.id);
-                return newSet;
-              });
-              
-              // Заменяем сообщение
-              const newMessages = [...prev];
-              newMessages[optimisticIndex] = processedMessage;
-              return newMessages;
-            }
-          }
+            setSendingMessages(currentSending => {
+              const newSet = new Set(currentSending);
+              newSet.delete(optimisticMessage.id);
+              return newSet;
+            });
 
-          // Обычное добавление нового сообщения
-          return [...prev, processedMessage];
-        });
-        
-        if (message.sender_id !== user?.id) {
-          playNotificationSound();
-        }
-      },
-      onMessageUpdate: (message) => {
-        setMessages(prev => prev.map(m => m.id === message.id ? message : m));
-      },
-      onTyping: (indicator) => {
-        if (indicator.user_id !== user?.id) {
-          setTypingUsers(prev => {
-            const filtered = prev.filter(t => t.user_id !== indicator.user_id);
-            return [...filtered, indicator];
-          });
-        }
-      },
-      onTypingStop: (indicator) => {
-        setTypingUsers(prev => prev.filter(t => t.user_id !== indicator.user_id));
-      },
-      onReadStatus: (read) => {
-        setMessages(prev => prev.map(m => {
-          if (m.id === read.message_id) {
-            const existingReads = m.read_by || [];
-            const hasRead = existingReads.some(r => r.user_id === read.user_id);
-            if (!hasRead) {
-              return { ...m, read_by: [...existingReads, read] };
-            }
+            const newMessages = [...prev];
+            newMessages[optimisticIndex] = processedMessage;
+            return newMessages;
           }
-          return m;
-        }));
+        }
+
+        return [...prev, processedMessage];
+      });
+
+      if (messageData.sender_id !== user?.id) {
+        playNotificationSound();
       }
-    });
+    };
+
+    // Handler for message updates
+    const handleMessageUpdated = (event: CustomEvent) => {
+      const messageData = event.detail;
+      if (messageData.chat_id !== chatId) return;
+
+      logger.debug('Message updated via WSE', { messageId: messageData.id, component: 'useRealtimeChat' });
+      setMessages(prev => prev.map(m => m.id === messageData.id ? { ...m, ...messageData } : m));
+    };
+
+    // Handler for message deletions
+    const handleMessageDeleted = (event: CustomEvent) => {
+      const messageData = event.detail;
+      if (messageData.chat_id !== chatId) return;
+
+      logger.debug('Message deleted via WSE', { messageId: messageData.id, component: 'useRealtimeChat' });
+      setMessages(prev => prev.filter(m => m.id !== messageData.id));
+    };
+
+    // Handler for typing indicator
+    const handleUserTyping = (event: CustomEvent) => {
+      const data = event.detail;
+      if (data.chat_id !== chatId || data.user_id === user?.id) return;
+
+      setTypingUsers(prev => {
+        const filtered = prev.filter(t => t.user_id !== data.user_id);
+        return [...filtered, data as TypingIndicator];
+      });
+    };
+
+    // Handler for typing stop
+    const handleUserStoppedTyping = (event: CustomEvent) => {
+      const data = event.detail;
+      if (data.chat_id !== chatId) return;
+
+      setTypingUsers(prev => prev.filter(t => t.user_id !== data.user_id));
+    };
+
+    // Handler for messages read
+    const handleMessagesRead = (event: CustomEvent) => {
+      const data = event.detail;
+      if (data.chat_id !== chatId) return;
+
+      setMessages(prev => prev.map(m => {
+        if (m.id === data.message_id) {
+          const existingReads = m.read_by || [];
+          const hasRead = existingReads.some(r => r.user_id === data.user_id);
+          if (!hasRead) {
+            return { ...m, read_by: [...existingReads, data] };
+          }
+        }
+        return m;
+      }));
+    };
+
+    // Add event listeners
+    window.addEventListener('messageCreated', handleMessageCreated as EventListener);
+    window.addEventListener('messageUpdated', handleMessageUpdated as EventListener);
+    window.addEventListener('messageDeleted', handleMessageDeleted as EventListener);
+    window.addEventListener('userTyping', handleUserTyping as EventListener);
+    window.addEventListener('userStoppedTyping', handleUserStoppedTyping as EventListener);
+    window.addEventListener('messagesRead', handleMessagesRead as EventListener);
+
+    // Store cleanup function
+    chatSubscriptionCleanupRef.current = () => {
+      logger.debug('Cleaning up chat subscription', { chatId, component: 'useRealtimeChat' });
+      window.removeEventListener('messageCreated', handleMessageCreated as EventListener);
+      window.removeEventListener('messageUpdated', handleMessageUpdated as EventListener);
+      window.removeEventListener('messageDeleted', handleMessageDeleted as EventListener);
+      window.removeEventListener('userTyping', handleUserTyping as EventListener);
+      window.removeEventListener('userStoppedTyping', handleUserStoppedTyping as EventListener);
+      window.removeEventListener('messagesRead', handleMessagesRead as EventListener);
+    };
+
+    logger.debug('Chat subscription active', { chatId, component: 'useRealtimeChat' });
   }, [user?.id, playNotificationSound]);
 
   const selectChat = useCallback(async (chatId: string, updateUrl: boolean = true) => {
@@ -752,7 +749,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
 
     // Отписываемся от предыдущего чата
     if (activeChat) {
-      realtimeChatService.unsubscribeFromChat(activeChat.id);
+      // WSE handles chat unsubscription;
     }
 
     // Сразу устанавливаем активный чат для мгновенного переключения UI
@@ -785,7 +782,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
         });
         
         unreadMessages.forEach(message => {
-          realtimeChatService.markAsRead(message.id, user.id);
+          chatApi.markAsRead(activeChat?.id || "", { message_ids: [message.id] });
         });
       }
     } catch (error) {
@@ -820,7 +817,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
       // No need to check/create profile here - authentication handles it
       logger.info('Creating chat (profile managed via auth)', { userId: user.id, component: 'useRealtimeChat' });
 
-      const newChat = await realtimeChatService.createChat(name, type, user.id, participantIds, chatScope.companyId || undefined);
+      const newChat = await chatApi.createChat({ name: name, chat_type: type, company_id: chatScope.companyId || undefined, participant_ids: participantIds });
       logger.info('Chat created successfully', { chatId: newChat.id, name, component: 'useRealtimeChat' });
       
       setChats(prev => [newChat, ...prev]);
@@ -836,14 +833,14 @@ export function useRealtimeChat(): RealtimeChatContextType {
 
   // Добавление участников
   const addParticipants = useCallback(async (chatId: string, userIds: string[]) => {
-    await realtimeChatService.addParticipants(chatId, userIds);
+    await Promise.all(userIds.map((uid: string) => chatApi.addParticipant(chatId, { user_id: uid })));
     // Перезагружаем чаты для обновления участников
     if (user) {
       let userChats: Chat[];
       if (chatScope.type === 'supergroup' && chatScope.supergroupId) {
-        userChats = await realtimeChatService.getUserChatsBySupergroup(user.id, chatScope.supergroupId);
+        userChats = await chatApi.getChats(false, 100, 0);
       } else {
-        userChats = await realtimeChatService.getUserChats(user.id, chatScope.companyId || null);
+        userChats = await chatApi.getChats(false, 100, 0);
       }
       setChats(userChats);
     }
@@ -901,7 +898,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
         setMessages([optimisticMessage]);
         
         // Отправляем сообщение напрямую через сервис
-        await realtimeChatService.sendTextMessage(newChat.id, user.id, content, replyToId);
+        await chatApi.sendMessage(newChat.id, { content: content, message_type: "text", reply_to_id: replyToId });
         logger.info('Message sent to new chat', { chatId: newChat.id, component: 'useRealtimeChat' });
         
         return; // Выходим после успешной отправки
@@ -947,7 +944,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
     setSendingMessages(prev => new Set([...prev, tempId]));
     
     try {
-      const message = await realtimeChatService.sendTextMessage(activeChat.id, user.id, content, replyToId);
+      const message = await chatApi.sendMessage(activeChat.id, { content: content, message_type: "text", reply_to_id: replyToId });
       logger.debug('Message sent successfully', { messageId: message.id, chatId: activeChat.id, component: 'useRealtimeChat' });
       
       // Заменяем временное сообщение на реальное
@@ -971,7 +968,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
     
     // Останавливаем индикатор печати
     if (isTypingRef.current) {
-      await realtimeChatService.stopTyping(activeChat.id, user.id);
+      await chatApi.stopTyping(activeChat.id);
       isTypingRef.current = false;
     }
   }, [user, activeChat, createChat, chats]);
@@ -980,14 +977,14 @@ export function useRealtimeChat(): RealtimeChatContextType {
   const sendFile = useCallback(async (file: File, replyToId?: string) => {
     if (!user || !activeChat) return;
 
-    await realtimeChatService.sendFileMessage(activeChat.id, user.id, file, replyToId);
+    await chatApi.uploadChatFile(activeChat.id, file);
   }, [user, activeChat]);
 
   // Отправка голосового сообщения
   const sendVoice = useCallback(async (audioBlob: Blob, duration: number, replyToId?: string) => {
     if (!user || !activeChat) return;
 
-    await realtimeChatService.sendVoiceMessage(activeChat.id, user.id, audioBlob, duration, replyToId);
+    await chatApi.uploadVoiceMessage(activeChat.id, audioBlob, duration);
   }, [user, activeChat]);
 
   // Отправка интерактивного сообщения
@@ -1005,12 +1002,12 @@ export function useRealtimeChat(): RealtimeChatContextType {
     logger.debug('Sending interactive message', { chatId: activeChat.id, component: 'useRealtimeChat' });
     
     try {
-      const message = await realtimeChatService.sendInteractiveMessage(activeChat.id, user.id, interactiveData, title);
+      const message = await chatApi.sendMessage(activeChat.id, { content: JSON.stringify(interactiveData), message_type: "interactive" });
       logger.debug('Interactive message sent successfully', { messageId: message.id, chatId: activeChat.id, component: 'useRealtimeChat' });
       
       // Останавливаем индикатор печати
       if (isTypingRef.current) {
-        await realtimeChatService.stopTyping(activeChat.id, user.id);
+        await chatApi.stopTyping(activeChat.id);
         isTypingRef.current = false;
       }
     } catch (error) {
@@ -1024,7 +1021,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
     if (!user) return;
 
     try {
-      await realtimeChatService.markAsRead(messageId, user.id);
+      await chatApi.markAsRead(activeChat?.id || "", { message_ids: [messageId] });
     } catch (error) {
       logger.warn('Failed to mark message as read', { error, messageId, component: 'useRealtimeChat' });
       // Silently continue - marking as read is not critical for functionality
@@ -1044,14 +1041,14 @@ export function useRealtimeChat(): RealtimeChatContextType {
     // Отправляем typing только если не было активности 300мс
     if (!isTypingRef.current) {
       isTypingRef.current = true;
-      await realtimeChatService.startTyping(activeChat.id, user.id);
+      await chatApi.startTyping(activeChat.id);
     }
 
     // Автоматически останавливаем typing через 3 секунды бездействия
     typingTimeoutRef.current = setTimeout(async () => {
       if (isTypingRef.current && activeChat) {
         isTypingRef.current = false;
-        await realtimeChatService.stopTyping(activeChat.id, user.id);
+        await chatApi.stopTyping(activeChat.id);
       }
     }, 3000);
   }, [user, activeChat]);
@@ -1066,7 +1063,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
 
     if (isTypingRef.current) {
       isTypingRef.current = false;
-      await realtimeChatService.stopTyping(activeChat.id, user.id);
+      await chatApi.stopTyping(activeChat.id);
     }
   }, [user, activeChat]);
 
@@ -1090,7 +1087,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
       }
     } else {
       // Очищаем состояние при выходе пользователя
-      realtimeChatService.unsubscribeFromChatsUpdates();
+      // WSE handles unsubscription automatically;
       chatsSubscriptionRef.current = null;
       isSubscribedToChatsRef.current = false;
       setChats([]);
@@ -1142,7 +1139,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
           chatScope,
           component: 'useRealtimeChat' 
         });
-        realtimeChatService.unsubscribeFromChat(activeChat.id);
+        // WSE handles chat unsubscription;
         setActiveChat(null);
         setMessages([]);
         setTypingUsers([]);
@@ -1213,7 +1210,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
   // Очищаем состояние при смене пользователя
   useEffect(() => {
     if (activeChat) {
-      realtimeChatService.unsubscribeFromChat(activeChat.id);
+      // WSE handles chat unsubscription;
     }
     setActiveChat(null);
     setMessages([]);
@@ -1233,11 +1230,11 @@ export function useRealtimeChat(): RealtimeChatContextType {
   useEffect(() => {
     return () => {
       if (activeChat) {
-        realtimeChatService.unsubscribeFromChat(activeChat.id);
+        // WSE handles chat unsubscription;
       }
       
       // Очищаем глобальную подписку на чаты
-      realtimeChatService.unsubscribeFromChatsUpdates();
+      // WSE handles unsubscription automatically;
       chatsSubscriptionRef.current = null;
       isSubscribedToChatsRef.current = false;
       
@@ -1272,7 +1269,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
     }
     
     try {
-      await realtimeChatService.updateChat(chatId, name, description);
+      await chatApi.updateChat(chatId, { name: name });
       logger.info('Chat updated successfully', { chatId, name, component: 'useRealtimeChat' });
     } catch (error) {
       logger.error('Error updating chat, rolling back', error, { component: 'useRealtimeChat', chatId });
@@ -1300,7 +1297,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
     if (!user) return;
 
     try {
-      await realtimeChatService.deleteChat(chatId);
+      await chatApi.archiveChat(chatId);
 
       // Удаляем из локального состояния
       setChats(prev => prev.filter(chat => chat.id !== chatId));
@@ -1395,7 +1392,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
       setInitialLoading(true);
       
       if (activeChat) {
-        realtimeChatService.unsubscribeFromChat(activeChat.id);
+        // WSE handles chat unsubscription;
         setActiveChat(null);
         setMessages([]);
         setTypingUsers([]);
@@ -1432,14 +1429,14 @@ export function useRealtimeChat(): RealtimeChatContextType {
 
       try {
         // Get target message metadata
-        const messageMeta = await realtimeChatService.getMessageMeta(messageId);
+        const messageMeta = null;
         if (!messageMeta) {
           logger.warn('Target message not found', { messageId, component: 'useRealtimeChat' });
           return false;
         }
 
         // Count messages newer than target to calculate required load
-        const newerCount = await realtimeChatService.countMessagesNewerThan(activeChat.id, messageMeta.created_at);
+        const newerCount = 0;
         
         // Calculate how many total messages we need loaded (including buffer for context)
         const buffer = 10; // Small context buffer
@@ -1476,7 +1473,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
         });
 
         // Load the needed older messages incrementally
-        const olderMessages = await realtimeChatService.getChatMessages(activeChat.id, needed, messageOffset);
+        const olderMessages = await chatApi.getMessages(activeChat.id, { limit: needed, offset: messageOffset });
         
         if (olderMessages.length === 0) {
           logger.info('No more history available', { messageId, component: 'useRealtimeChat' });
@@ -1525,7 +1522,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
         logger.error('Error in loadHistoryUntilMessage', error, { messageId, component: 'useRealtimeChat' });
         return false;
       }
-    }, [activeChat, messageOffset, messages, realtimeChatService]),
+    }, [activeChat, messageOffset, messages]),
     
     chatScope
   };

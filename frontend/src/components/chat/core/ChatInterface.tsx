@@ -81,7 +81,7 @@ const ChatInterface = React.memo(() => {
     setMessageFilter
   } = useRealtimeChatContext();
   const { user } = useAuth();
-  const { isDeveloper } = usePlatform();
+  const { isDeveloper, isLightTheme } = usePlatform();
   const { openSidebar } = useUnifiedSidebar();
   
   const [inputValue, setInputValue] = useState('');
@@ -665,6 +665,27 @@ const ChatInterface = React.memo(() => {
   // Проверка прав администратора
   const isAdmin = isDeveloper;
 
+  // Theme-aware styles - messages panel should be lighter than sidebar
+  const theme = isLightTheme ? {
+    main: 'bg-white',
+    input: {
+      bg: 'bg-[#f4f4f4]',
+      border: 'border border-gray-300',
+      text: 'text-gray-900',
+      placeholder: 'placeholder:text-gray-500'
+    },
+    border: 'border-gray-300'
+  } : {
+    main: 'bg-dark-gray',
+    input: {
+      bg: 'bg-light-gray',
+      border: 'border border-white/10',
+      text: 'text-white',
+      placeholder: 'placeholder:text-gray-400'
+    },
+    border: 'border-white/10'
+  };
+
   // Группировка сообщений по датам
   const groupedMessages = useMemo(() => {
     const groups: Array<{
@@ -703,7 +724,7 @@ const ChatInterface = React.memo(() => {
     return lastMessage.content?.toLowerCase().includes('новый заказ');
   }, [activeChat, displayedMessages]);
   
-  return <div className="h-full flex bg-dark-gray">
+  return <div className={`h-full flex ${theme.main}`}>
     {/* Main Chat Content */}
     <div className="flex-1 grid grid-rows-[1fr_auto]">
       {/* Content Area */}
@@ -764,10 +785,10 @@ const ChatInterface = React.memo(() => {
 
 
       {/* Input Area - зафиксировано внизу экрана */}
-      <div className="border-t border-white/10 min-h-24 bg-dark-gray">
+      <div className={`border-t ${theme.border} min-h-24 ${theme.main}`}>
         <div className="flex items-center px-6 py-3">
           <div className="max-w-4xl mx-auto w-full">
-            <div className="flex-1 flex items-center gap-3 bg-light-gray border border-white/20 rounded-[32px] px-4 py-3 shadow-lg">
+            <div className={`flex-1 flex items-center gap-3 ${theme.input.bg} ${theme.input.border} rounded-[32px] px-4 py-3`}>
               {/* Иконки прикреплений */}
               <div className="flex gap-1 self-center">
                 <FileUploadButton disabled={!activeChat} />
@@ -775,17 +796,17 @@ const ChatInterface = React.memo(() => {
 
               {/* Поле ввода */}
               <div ref={inputContainerRef} className="flex-1 flex items-center relative">
-                <AutoResizeTextarea 
+                <AutoResizeTextarea
                   ref={textareaRef}
-                  value={inputValue} 
-                  onChange={handleInputChange} 
-                  onKeyDown={handleKeyPress} 
-                  onBlur={handleInputBlur} 
-                  onHeightChange={setTextareaHeight} 
-                  placeholder="Напишите ваш запрос" 
-                  className="flex-1 border-0 bg-transparent text-white placeholder:text-gray-400 outline-none focus:outline-none focus-visible:outline-none resize-none" 
-                  minHeight={24} 
-                  maxHeight={500} 
+                  value={inputValue}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyPress}
+                  onBlur={handleInputBlur}
+                  onHeightChange={setTextareaHeight}
+                  placeholder="Напишите ваш запрос"
+                  className={`flex-1 border-0 bg-transparent ${theme.input.text} ${theme.input.placeholder} outline-none focus:outline-none focus-visible:outline-none resize-none`}
+                  minHeight={24}
+                  maxHeight={500}
                 />
                 
                 {/* Mentions Dropdown */}

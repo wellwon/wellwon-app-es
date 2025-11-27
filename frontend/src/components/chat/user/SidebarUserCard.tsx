@@ -47,18 +47,18 @@ const SidebarUserCard = ({ collapsed = false }: SidebarUserCardProps) => {
   if (collapsed) {
     return (
       <div className="relative w-full">
-        <div 
-          className="w-full h-full rounded-xl flex items-center justify-center cursor-pointer"
+        <div
+          className="flex justify-center p-2 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10"
           onClick={() => setIsDropdownOpen(!isDropdownOpen)}
         >
-          <Avatar className="w-8 h-8">
+          <Avatar className="h-9 w-9">
             <AvatarImage src={profile?.avatar_url} />
-            <AvatarFallback className="text-xs font-medium bg-primary/20 text-primary border border-primary/40">
+            <AvatarFallback className="flex h-full w-full items-center justify-center rounded-full bg-accent-red/20 text-accent-red font-semibold text-sm">
               {getUserInitials()}
             </AvatarFallback>
           </Avatar>
         </div>
-        <UniversalProfileDropdown 
+        <UniversalProfileDropdown
           isOpen={isDropdownOpen}
           onClose={() => setIsDropdownOpen(false)}
           position="top"
@@ -70,34 +70,33 @@ const SidebarUserCard = ({ collapsed = false }: SidebarUserCardProps) => {
 
   return (
     <div className="relative w-full">
-      <Button 
-        variant="secondary" 
-        className="w-full justify-start gap-3 h-full min-h-[60px] px-3 py-2.5 !transition-none !transform-none !hover:bg-white/5 !hover:text-gray-300 !hover:border-white/10 !hover:scale-100 !hover:transform-none"
+      <div
+        className="w-full flex items-center gap-3 p-2 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10"
         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
       >
-        <Avatar className="w-10 h-10">
+        <Avatar className="h-10 w-10 shrink-0">
           <AvatarImage src={profile?.avatar_url} />
-          <AvatarFallback className="text-sm font-medium bg-primary/20 text-primary border border-primary/40">
+          <AvatarFallback className="flex h-full w-full items-center justify-center rounded-full bg-accent-red/20 text-accent-red font-semibold text-sm">
             {getUserInitials()}
           </AvatarFallback>
         </Avatar>
-        <div className="flex-1 text-left">
+        <div className="flex-1 min-w-0 text-left">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-medium">
+            <p className="text-sm font-medium text-white truncate">
               {getUserDisplayName()}
             </p>
             {profile?.user_number && (
-              <span className="text-xs text-white/70 font-sans">
+              <span className="text-xs text-white/70 font-sans shrink-0">
                 ID {profile.user_number}
               </span>
             )}
           </div>
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-gray-400 truncate">
             {profile ? getUserTypeLabelText() : 'Системный пользователь'}
           </p>
         </div>
-      </Button>
-      <UniversalProfileDropdown 
+      </div>
+      <UniversalProfileDropdown
         isOpen={isDropdownOpen}
         onClose={() => setIsDropdownOpen(false)}
         position="top"

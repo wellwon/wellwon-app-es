@@ -9,10 +9,12 @@ interface TelegramGroupData {
 interface TelegramGroupFieldsProps {
   groupData: TelegramGroupData;
   setGroupData: (data: TelegramGroupData) => void;
+  isLightTheme?: boolean;
 }
 export const TelegramGroupFields: React.FC<TelegramGroupFieldsProps> = ({
   groupData,
-  setGroupData
+  setGroupData,
+  isLightTheme = false
 }) => {
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setGroupData({
@@ -28,20 +30,22 @@ export const TelegramGroupFields: React.FC<TelegramGroupFieldsProps> = ({
   };
   return (
     <div className="space-y-4">
-      <GlassInput 
-        label="Название рабочей группы" 
-        value={groupData.title} 
-        onChange={handleTitleChange} 
-        placeholder="Введите название группы" 
-        required 
+      <GlassInput
+        label="Название рабочей группы"
+        value={groupData.title}
+        onChange={handleTitleChange}
+        placeholder="Введите название группы"
+        required
+        isLightTheme={isLightTheme}
       />
 
-      <GlassInput 
-        label="Описание группы" 
-        value={groupData.description} 
-        onChange={handleDescriptionChange} 
-        placeholder="Введите описание группы" 
-        required 
+      <GlassInput
+        label="Описание группы"
+        value={groupData.description}
+        onChange={handleDescriptionChange}
+        placeholder="Введите описание группы"
+        required
+        isLightTheme={isLightTheme}
       />
     </div>
   );

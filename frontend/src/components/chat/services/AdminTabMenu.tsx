@@ -1,9 +1,13 @@
-import React from 'react';
+import React, { useState, useRef, useLayoutEffect } from 'react';
 import { useUnifiedSidebar } from '@/contexts/chat';
+import { usePlatform } from '@/contexts/PlatformContext';
 import { Settings, BarChart3, Users, ShoppingCart, Wrench } from 'lucide-react';
 
 const AdminTabMenu = () => {
   const { contentType, openSidebar, closeSidebar, isOpen } = useUnifiedSidebar();
+  const { isLightTheme } = usePlatform();
+  const [isCompact, setIsCompact] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const tabs = [
     {
@@ -46,44 +50,98 @@ const AdminTabMenu = () => {
     openSidebar(tabId);
   };
 
+  // Check if tabs should be compact (icons only)
+  // Using useLayoutEffect to prevent flash of wrong layout
+  useLayoutEffect(() => {
+    const checkWidth = () => {
+      if (containerRef.current) {
+        // Get available width for tabs
+        const containerWidth = containerRef.current.offsetWidth;
+        // Each tab with text needs ~110px minimum, with icon only ~50px
+        // 5 tabs * 110px = 550px minimum for text mode
+        const needsCompact = containerWidth < 550;
+        setIsCompact(needsCompact);
+      }
+    };
+
+    // Initial check - run synchronously
+    checkWidth();
+
+    // Use ResizeObserver for container size changes
+    const resizeObserver = new ResizeObserver(() => {
+      checkWidth();
+    });
+
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  // Theme-aware styles (like Declarant page)
+  const theme = isLightTheme ? {
+    header: 'bg-white border-gray-300 shadow-sm',
+    text: {
+      primary: 'text-gray-900',
+      secondary: 'text-[#6b7280]',
+      active: 'text-accent-gray'
+    },
+    button: {
+      default: 'text-gray-600 hover:text-gray-900 hover:bg-gray-100',
+      active: 'bg-gray-100 text-gray-900'
+    },
+    border: 'border-gray-200'
+  } : {
+    header: 'bg-dark-gray border-white/10',
+    text: {
+      primary: 'text-white',
+      secondary: 'text-gray-400',
+      active: 'text-accent-gray'
+    },
+    button: {
+      default: 'text-gray-400 hover:text-white hover:bg-white/5',
+      active: 'bg-accent-gray/20'
+    },
+    border: 'border-white/10'
+  };
+
   return (
-    <div className="h-16 bg-dark-gray border-b border-white/10 relative z-10 overflow-hidden">
-      {/* Scrollable container for tabs */}
-      <div className="flex h-full relative z-10 overflow-x-auto scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
-        {tabs.map((tab) => {
+    <div ref={containerRef} className={`h-16 border-b relative z-10 overflow-hidden ${theme.header}`}>
+
+      <div className="flex h-full relative z-10 w-full">
+        {/* Tabs container */}
+        {tabs.map((tab, index) => {
           const Icon = tab.icon;
           const isActive = isOpen && contentType === tab.id;
+          const isLast = index === tabs.length - 1;
 
           return (
             <button
               key={tab.id}
               onClick={() => handleTabClick(tab.id)}
-              className={`flex-shrink-0 min-w-[120px] flex items-center justify-center gap-2 px-4 py-2 border-r border-white/10 last:border-r-0 transition-all duration-300 group ${
+              title={tab.label}
+              className={`flex-1 min-w-0 flex items-center justify-center gap-2 ${isCompact ? 'px-1' : 'px-3'} py-2 ${!isLast ? `border-r ${theme.border}` : ''} transition-all duration-200 group overflow-hidden ${
                 isActive
-                  ? 'bg-accent-gray/20 border-b-2 border-accent-gray'
-                  : 'hover:bg-white/5'
+                  ? `${theme.button.active} border-b-2 border-accent-gray`
+                  : theme.button.default
               }`}
             >
               <Icon
-                size={16}
-                className={`flex-shrink-0 transition-colors duration-300 ${
-                  isActive ? 'text-accent-gray' : 'text-gray-400 group-hover:text-white'
+                size={isCompact ? 20 : 16}
+                className={`flex-shrink-0 transition-colors duration-200 ${
+                  isActive ? theme.text.active : `${theme.text.secondary} group-hover:${theme.text.primary}`
                 }`}
               />
-              <div className="flex flex-col items-center">
-                <span className={`text-xs font-semibold whitespace-nowrap transition-colors duration-300 ${
-                  isActive ? 'text-accent-gray' : 'text-gray-300 group-hover:text-white'
+              {!isCompact && (
+                <span className={`text-xs font-semibold transition-colors duration-200 truncate ${
+                  isActive ? theme.text.active : `${isLightTheme ? 'text-gray-700' : 'text-gray-300'} group-hover:${theme.text.primary}`
                 }`}>
                   {tab.label}
                 </span>
-                {tab.sublabel && (
-                  <span className={`text-xs whitespace-nowrap transition-colors duration-300 ${
-                    isActive ? 'text-accent-gray/80' : 'text-gray-500 group-hover:text-gray-400'
-                  }`}>
-                    {tab.sublabel}
-                  </span>
-                )}
-              </div>
+              )}
             </button>
           );
         })}
