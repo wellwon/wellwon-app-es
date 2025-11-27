@@ -192,12 +192,16 @@ const SidebarMock = ({
   collapsed,
   toggleSidebar,
   activeSection,
-  setActiveSection
+  setActiveSection,
+  isDark,
+  toggleTheme
 }: {
   collapsed: boolean;
   toggleSidebar: () => void;
   activeSection: string;
   setActiveSection: (id: string) => void;
+  isDark: boolean;
+  toggleTheme: () => void;
 }) => {
   const theme = {
     sidebar: 'bg-[#232328] border-white/10',
@@ -352,6 +356,33 @@ const SidebarMock = ({
         </div>
       </div>
 
+      {/* Theme Toggle - над профилем */}
+      <div className="px-3 pb-3">
+        {collapsed ? (
+          <div className="flex justify-center">
+            <button
+              onClick={toggleTheme}
+              className="group w-12 h-12 flex items-center justify-center rounded-xl border border-white/10 hover:bg-medium-gray/80 hover:border-accent-red/50"
+              title={isDark ? "Светлая тема" : "Темная тема"}
+            >
+              {isDark ? (
+                <Sun size={20} className="text-gray-400 group-hover:text-accent-red" />
+              ) : (
+                <Moon size={20} className="text-gray-400 group-hover:text-accent-red" />
+              )}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={toggleTheme}
+            className="w-full flex items-center px-3 py-2.5 rounded-xl text-gray-300 hover:text-white hover:bg-white/10"
+          >
+            {isDark ? <Sun size={20} className="mr-3" /> : <Moon size={20} className="mr-3" />}
+            <span className="font-medium text-sm">{isDark ? 'Светлая тема' : 'Темная тема'}</span>
+          </button>
+        )}
+      </div>
+
       {/* Profile at bottom */}
       <div className={`border-t p-3 ${theme.header}`}>
         <div className={`flex ${collapsed ? 'justify-center' : 'items-center gap-3'} p-2 rounded-lg cursor-pointer ${theme.profile}`}>
@@ -379,11 +410,9 @@ const SidebarMock = ({
 
 const HeaderBarMock = ({
   isDark,
-  toggleTheme,
   activeSection
 }: {
   isDark: boolean;
-  toggleTheme: () => void;
   activeSection: string;
 }) => {
   const sectionLabels: Record<string, string> = {
@@ -447,15 +476,6 @@ const HeaderBarMock = ({
         <button className={`px-3 py-2 rounded-lg flex items-center gap-2 ${theme.button.default}`}>
           <FileJson className="w-4 h-4" />
           Шаблоны
-        </button>
-
-        <div className={`ml-2 w-px h-6 ${isDark ? 'bg-white/10' : 'bg-gray-300'}`} />
-        <button
-          onClick={toggleTheme}
-          className={`p-2 rounded-lg ${theme.button.default}`}
-          aria-label={isDark ? "Переключить на светлую тему" : "Переключить на темную тему"}
-        >
-          {isDark ? <Sun size={18} /> : <Moon size={18} />}
         </button>
       </div>
     </div>
@@ -530,7 +550,7 @@ const DeclarantContent: React.FC = () => {
   };
 
   const theme = isDark ? {
-    page: 'bg-[#1a1a1e]',
+    page: 'bg-[#18181b]',
     text: {
       primary: 'text-white',
       secondary: 'text-gray-400'
@@ -676,7 +696,7 @@ const DeclarantContent: React.FC = () => {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className={`pl-10 h-10 rounded-xl transition-none ${
                       isDark
-                        ? 'bg-[#1a1a1e] border-white/10 text-white placeholder:text-gray-500'
+                        ? 'bg-[#18181b] border-white/10 text-white placeholder:text-gray-500'
                         : 'bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400'
                     }`}
                   />
@@ -740,7 +760,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={mainDocumentFilter} onValueChange={setMainDocumentFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              ? 'bg-[#18181b] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="Все" />
@@ -760,7 +780,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={procedureCodeFilter} onValueChange={setProcedureCodeFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              ? 'bg-[#18181b] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="Все" />
@@ -780,7 +800,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={featureFilter} onValueChange={setFeatureFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              ? 'bg-[#18181b] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="Все" />
@@ -803,7 +823,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={recipientFilter} onValueChange={setRecipientFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              ? 'bg-[#18181b] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="Все" />
@@ -823,7 +843,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={senderFilter} onValueChange={setSenderFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              ? 'bg-[#18181b] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="Все" />
@@ -843,7 +863,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={registrationDateFilter} onValueChange={setRegistrationDateFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              ? 'bg-[#18181b] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="За все время" />
@@ -867,7 +887,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={documentTypeFilter} onValueChange={setDocumentTypeFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              ? 'bg-[#18181b] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="Все" />
@@ -888,7 +908,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={documentFilter} onValueChange={setDocumentFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              ? 'bg-[#18181b] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="Все" />
@@ -908,7 +928,7 @@ const DeclarantContent: React.FC = () => {
                         <Select value={documentDateFilter} onValueChange={setDocumentDateFilter}>
                           <SelectTrigger className={`w-full h-10 focus:outline-none focus:ring-0 transition-none ${
                             isDark
-                              ? 'bg-[#1a1a1e] border-white/10 text-white'
+                              ? 'bg-[#18181b] border-white/10 text-white'
                               : 'bg-gray-50 border-gray-300 text-gray-900'
                           }`}>
                             <SelectValue placeholder="За все время" />
@@ -1027,7 +1047,7 @@ const DeclarantContent: React.FC = () => {
                 <Select value={String(rowsPerPage)} onValueChange={handleRowsPerPageChange}>
                   <SelectTrigger className={`w-[70px] h-8 focus:outline-none focus:ring-0 transition-none ${
                     isDark
-                      ? 'bg-[#1a1a1e] border-white/10 text-white'
+                      ? 'bg-[#18181b] border-white/10 text-white'
                       : 'bg-gray-50 border-gray-200 text-gray-900'
                   }`}>
                     <SelectValue />
@@ -1168,6 +1188,8 @@ const DeclarantContent: React.FC = () => {
         toggleSidebar={toggleSidebar}
         activeSection={activeSection}
         setActiveSection={setActiveSection}
+        isDark={isDark}
+        toggleTheme={toggleTheme}
       />
 
       {/* Main content area */}
@@ -1175,7 +1197,6 @@ const DeclarantContent: React.FC = () => {
         {/* Header */}
         <HeaderBarMock
           isDark={isDark}
-          toggleTheme={toggleTheme}
           activeSection={activeSection}
         />
 
