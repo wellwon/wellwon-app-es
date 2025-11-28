@@ -58,6 +58,30 @@ class ChatRestored(BaseEvent):
 
 
 # =============================================================================
+# Company Linking Events
+# =============================================================================
+
+@domain_event(category="domain")
+class ChatLinkedToCompany(BaseEvent):
+    """Event emitted when a chat is linked to a company"""
+    event_type: Literal["ChatLinkedToCompany"] = "ChatLinkedToCompany"
+    chat_id: uuid.UUID
+    company_id: uuid.UUID
+    telegram_supergroup_id: Optional[int] = None
+    linked_by: uuid.UUID
+
+
+@domain_event(category="domain")
+class ChatUnlinkedFromCompany(BaseEvent):
+    """Event emitted when a chat is unlinked from a company"""
+    event_type: Literal["ChatUnlinkedFromCompany"] = "ChatUnlinkedFromCompany"
+    chat_id: uuid.UUID
+    previous_company_id: uuid.UUID
+    unlinked_by: uuid.UUID
+    reason: Optional[str] = None
+
+
+# =============================================================================
 # Participant Events
 # =============================================================================
 

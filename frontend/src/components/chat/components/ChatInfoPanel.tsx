@@ -168,9 +168,9 @@ const ChatInfoPanel: React.FC = () => {
             <div className="flex justify-between text-xs">
               <span className="text-gray-400">Тип чата:</span>
               <span className="text-white">
-                {activeChat.type === 'direct' ? 'Прямой' :
-                 activeChat.type === 'group' ? 'Групповой' :
-                 activeChat.type === 'company' ? 'Компания' :
+                {activeChat.chat_type === 'direct' ? 'Прямой' :
+                 activeChat.chat_type === 'group' ? 'Групповой' :
+                 activeChat.chat_type === 'company' ? 'Компания' :
                  'Неизвестно'}
               </span>
             </div>

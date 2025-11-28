@@ -235,6 +235,33 @@ class OrderFulfillmentCompleted(BaseEvent):
     timestamp: str
 
 
+@saga_event()
+class CompanyCreationSagaCompleted(BaseEvent):
+    """Raised when company creation saga completes successfully"""
+    event_type: Literal["CompanyCreationSagaCompleted"] = "CompanyCreationSagaCompleted"
+    saga_id: str
+    company_id: str
+    company_name: str
+    telegram_group_id: Optional[int] = None
+    telegram_invite_link: Optional[str] = None
+    chat_id: Optional[str] = None
+    chat_linked: bool = False  # True if existing chat was linked, False if new chat created
+    created_by: str
+    timestamp: str
+
+
+@saga_event()
+class CompanyCreationSagaFailed(BaseEvent):
+    """Raised when company creation saga fails"""
+    event_type: Literal["CompanyCreationSagaFailed"] = "CompanyCreationSagaFailed"
+    saga_id: str
+    company_id: str
+    failure_reason: str
+    failed_step: str
+    requires_manual_intervention: bool = False
+    timestamp: str
+
+
 # =============================================================================
 # Saga Compensation Events
 # =============================================================================
@@ -568,7 +595,7 @@ __all__ = [
     # Specific saga completions
     "UserDeletionCompleted", "BrokerDisconnectionCompleted",
     "BrokerConnectionEstablishedSagaCompleted", "AccountRefreshCompleted",
-    "OrderFulfillmentCompleted",
+    "OrderFulfillmentCompleted", "CompanyCreationSagaCompleted", "CompanyCreationSagaFailed",
 
     # Compensation events
     "SagaCompensationStepStarted", "SagaCompensationStepCompleted",

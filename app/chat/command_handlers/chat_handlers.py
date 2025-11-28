@@ -14,6 +14,8 @@ from app.chat.commands import (
     UpdateChatCommand,
     ArchiveChatCommand,
     RestoreChatCommand,
+    LinkChatToCompanyCommand,
+    UnlinkChatFromCompanyCommand,
 )
 from app.chat.aggregate import ChatAggregate
 from app.chat.enums import ParticipantRole
@@ -55,7 +57,7 @@ class CreateChatHandler(BaseCommandHandler):
             chat_type=command.chat_type,
             created_by=command.created_by,
             company_id=command.company_id,
-            telegram_chat_id=command.telegram_chat_id,
+            telegram_chat_id=command.telegram_supergroup_id,  # Map to aggregate's telegram_chat_id
             telegram_topic_id=command.telegram_topic_id,
         )
 
@@ -175,4 +177,83 @@ class RestoreChatHandler(BaseCommandHandler):
         )
 
         log.info(f"Chat restored: {command.chat_id}")
+        return command.chat_id
+
+
+# =============================================================================
+# Company Linking Handlers (used by CompanyCreationSaga)
+# =============================================================================
+
+@command_handler(LinkChatToCompanyCommand)
+class LinkChatToCompanyHandler(BaseCommandHandler):
+    """
+    Handle LinkChatToCompanyCommand.
+    Used by CompanyCreationSaga to link existing chats to newly created companies.
+    """
+
+    def __init__(self, deps: 'HandlerDependencies'):
+        super().__init__(
+            event_bus=deps.event_bus,
+            transport_topic="transport.chat-events",
+            event_store=deps.event_store
+        )
+
+    async def handle(self, command: LinkChatToCompanyCommand) -> uuid.UUID:
+        log.info(f"Linking chat {command.chat_id} to company {command.company_id}")
+
+        # Load aggregate from event store
+        events = await self.event_store.get_events(command.chat_id, "Chat")
+        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+
+        # Link to company
+        chat_aggregate.link_to_company(
+            company_id=command.company_id,
+            linked_by=command.linked_by,
+            telegram_supergroup_id=command.telegram_supergroup_id,
+        )
+
+        await self.publish_events(
+            aggregate=chat_aggregate,
+            aggregate_id=command.chat_id,
+            command=command
+        )
+
+        log.info(f"Chat {command.chat_id} linked to company {command.company_id}")
+        return command.chat_id
+
+
+@command_handler(UnlinkChatFromCompanyCommand)
+class UnlinkChatFromCompanyHandler(BaseCommandHandler):
+    """
+    Handle UnlinkChatFromCompanyCommand.
+    Used by saga compensation when company creation fails.
+    """
+
+    def __init__(self, deps: 'HandlerDependencies'):
+        super().__init__(
+            event_bus=deps.event_bus,
+            transport_topic="transport.chat-events",
+            event_store=deps.event_store
+        )
+
+    async def handle(self, command: UnlinkChatFromCompanyCommand) -> uuid.UUID:
+        log.info(f"Unlinking chat {command.chat_id} from company")
+
+        # Load aggregate from event store
+        events = await self.event_store.get_events(command.chat_id, "Chat")
+        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+
+        # Unlink from company
+        chat_aggregate.unlink_from_company(
+            unlinked_by=command.unlinked_by,
+            reason=command.reason,
+        )
+
+        await self.publish_events(
+            aggregate=chat_aggregate,
+            aggregate_id=command.chat_id,
+            command=command
+        )
+
+        log.info(f"Chat {command.chat_id} unlinked from company")
         return command.chat_id

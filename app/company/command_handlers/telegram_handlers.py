@@ -31,7 +31,12 @@ log = get_logger("wellwon.company.command_handlers.telegram")
 # -----------------------------------------------------------------------------
 @command_handler(CreateTelegramSupergroupCommand)
 class CreateTelegramSupergroupHandler(BaseCommandHandler):
-    """Handles the CreateTelegramSupergroupCommand using Event Sourcing pattern."""
+    """
+    Handles the CreateTelegramSupergroupCommand using Event Sourcing pattern.
+
+    TRUE SAGA: No queries to read models - all data comes via command from enriched event.
+    Simply appends events to company's event stream.
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -43,12 +48,8 @@ class CreateTelegramSupergroupHandler(BaseCommandHandler):
     async def handle(self, command: CreateTelegramSupergroupCommand) -> uuid.UUID:
         log.info(f"Creating Telegram supergroup for company {command.company_id}")
 
-        # Load aggregate from event store
-        company_aggregate = await self.load_aggregate(
-            aggregate_type="Company",
-            aggregate_id=command.company_id,
-            aggregate_class=CompanyAggregate,
-        )
+        # Create aggregate - no query needed, data comes from saga via enriched event
+        company_aggregate = CompanyAggregate(company_id=command.company_id)
 
         # Call aggregate command method
         company_aggregate.create_telegram_supergroup(
@@ -61,11 +62,11 @@ class CreateTelegramSupergroupHandler(BaseCommandHandler):
             created_by=command.created_by,
         )
 
-        # Publish events
+        # Publish events - append to existing company stream
         await self.publish_and_commit_events(
             aggregate=company_aggregate,
             aggregate_type="Company",
-            expected_version=company_aggregate.version - 1,
+            expected_version=None,
         )
 
         log.info(f"Telegram supergroup {command.telegram_group_id} created for company {command.company_id}")
@@ -77,7 +78,10 @@ class CreateTelegramSupergroupHandler(BaseCommandHandler):
 # -----------------------------------------------------------------------------
 @command_handler(LinkTelegramSupergroupCommand)
 class LinkTelegramSupergroupHandler(BaseCommandHandler):
-    """Handles the LinkTelegramSupergroupCommand using Event Sourcing pattern."""
+    """
+    Handles the LinkTelegramSupergroupCommand using Event Sourcing pattern.
+    TRUE SAGA: No queries - all data via command.
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -89,24 +93,17 @@ class LinkTelegramSupergroupHandler(BaseCommandHandler):
     async def handle(self, command: LinkTelegramSupergroupCommand) -> uuid.UUID:
         log.info(f"Linking Telegram supergroup {command.telegram_group_id} to company {command.company_id}")
 
-        # Load aggregate from event store
-        company_aggregate = await self.load_aggregate(
-            aggregate_type="Company",
-            aggregate_id=command.company_id,
-            aggregate_class=CompanyAggregate,
-        )
+        company_aggregate = CompanyAggregate(company_id=command.company_id)
 
-        # Call aggregate command method
         company_aggregate.link_telegram_supergroup(
             telegram_group_id=command.telegram_group_id,
             linked_by=command.linked_by,
         )
 
-        # Publish events
         await self.publish_and_commit_events(
             aggregate=company_aggregate,
             aggregate_type="Company",
-            expected_version=company_aggregate.version - 1,
+            expected_version=None,
         )
 
         log.info(f"Telegram supergroup {command.telegram_group_id} linked to company {command.company_id}")
@@ -118,7 +115,10 @@ class LinkTelegramSupergroupHandler(BaseCommandHandler):
 # -----------------------------------------------------------------------------
 @command_handler(UnlinkTelegramSupergroupCommand)
 class UnlinkTelegramSupergroupHandler(BaseCommandHandler):
-    """Handles the UnlinkTelegramSupergroupCommand using Event Sourcing pattern."""
+    """
+    Handles the UnlinkTelegramSupergroupCommand using Event Sourcing pattern.
+    TRUE SAGA: No queries - all data via command.
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -130,24 +130,17 @@ class UnlinkTelegramSupergroupHandler(BaseCommandHandler):
     async def handle(self, command: UnlinkTelegramSupergroupCommand) -> uuid.UUID:
         log.info(f"Unlinking Telegram supergroup {command.telegram_group_id} from company {command.company_id}")
 
-        # Load aggregate from event store
-        company_aggregate = await self.load_aggregate(
-            aggregate_type="Company",
-            aggregate_id=command.company_id,
-            aggregate_class=CompanyAggregate,
-        )
+        company_aggregate = CompanyAggregate(company_id=command.company_id)
 
-        # Call aggregate command method
         company_aggregate.unlink_telegram_supergroup(
             telegram_group_id=command.telegram_group_id,
             unlinked_by=command.unlinked_by,
         )
 
-        # Publish events
         await self.publish_and_commit_events(
             aggregate=company_aggregate,
             aggregate_type="Company",
-            expected_version=company_aggregate.version - 1,
+            expected_version=None,
         )
 
         log.info(f"Telegram supergroup {command.telegram_group_id} unlinked from company {command.company_id}")
@@ -159,7 +152,10 @@ class UnlinkTelegramSupergroupHandler(BaseCommandHandler):
 # -----------------------------------------------------------------------------
 @command_handler(UpdateTelegramSupergroupCommand)
 class UpdateTelegramSupergroupHandler(BaseCommandHandler):
-    """Handles the UpdateTelegramSupergroupCommand using Event Sourcing pattern."""
+    """
+    Handles the UpdateTelegramSupergroupCommand using Event Sourcing pattern.
+    TRUE SAGA: No queries - all data via command.
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -171,14 +167,8 @@ class UpdateTelegramSupergroupHandler(BaseCommandHandler):
     async def handle(self, command: UpdateTelegramSupergroupCommand) -> uuid.UUID:
         log.info(f"Updating Telegram supergroup {command.telegram_group_id} for company {command.company_id}")
 
-        # Load aggregate from event store
-        company_aggregate = await self.load_aggregate(
-            aggregate_type="Company",
-            aggregate_id=command.company_id,
-            aggregate_class=CompanyAggregate,
-        )
+        company_aggregate = CompanyAggregate(company_id=command.company_id)
 
-        # Call aggregate command method
         company_aggregate.update_telegram_supergroup(
             telegram_group_id=command.telegram_group_id,
             title=command.title,
@@ -186,11 +176,10 @@ class UpdateTelegramSupergroupHandler(BaseCommandHandler):
             invite_link=command.invite_link,
         )
 
-        # Publish events
         await self.publish_and_commit_events(
             aggregate=company_aggregate,
             aggregate_type="Company",
-            expected_version=company_aggregate.version - 1,
+            expected_version=None,
         )
 
         log.info(f"Telegram supergroup {command.telegram_group_id} updated for company {command.company_id}")

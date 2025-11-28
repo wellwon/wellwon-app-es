@@ -180,13 +180,18 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
     }));
     try {
       // Call DaData API via backend
-      const { data: response } = await API.post('/companies/lookup-vat', { vat: vatValue });
-      const data = response;
+      const { data } = await API.post<{
+        found: boolean;
+        inn?: string;
+        kpp?: string;
+        ogrn?: string;
+        name_short_with_opf?: string;
+        address?: string;
+        director_name?: string;
+        emails?: string[];
+      }>('/companies/lookup-vat', { vat: vatValue });
 
-      if (!data) {
-        return;
-      }
-      if (!data.suggestions || data.suggestions.length === 0) {
+      if (!data || !data.found) {
         setErrors(prev => ({
           ...prev,
           vat: 'Компания с таким ИНН не найдена'
@@ -194,44 +199,36 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
         return;
       }
 
-      // Обработка успешного ответа
-      const company = data.suggestions[0].data;
-
-      // Извлечение адреса (убираем все до "ул" включительно)
-      let street = company.address?.value || '';
-      const streetIndex = street.toLowerCase().indexOf('ул');
-      if (streetIndex !== -1) {
-        street = street.substring(streetIndex);
+      // Extract city from address (format: "г Москва, ул Ленина, д 1")
+      let city = '';
+      let street = data.address || '';
+      if (street) {
+        // Try to extract city
+        const cityMatch = street.match(/^г\s+([^,]+)/i);
+        if (cityMatch) {
+          city = cityMatch[1].trim();
+        }
+        // Extract street part (after city)
+        const streetIndex = street.toLowerCase().indexOf('ул');
+        if (streetIndex !== -1) {
+          street = street.substring(streetIndex);
+        }
       }
 
-      // Страна по умолчанию
-      const countryName = company.address?.data?.country || '';
-
-      // Директор - может быть в разных местах
-      let directorName = '';
-      if (company.management && company.management.name) {
-        directorName = company.management.name;
-      } else if (company.managers && company.managers.length > 0) {
-        directorName = company.managers[0].name;
-      }
-
-      // Обновляем форму найденными данными
+      // Update form with found data
       const newFormData = {
         ...companyFormData,
-        company_name: company.name?.short_with_opf || companyFormData.company_name,
-        name: company.name?.short_with_opf || companyFormData.company_name,
-        ogrn: company.ogrn || companyFormData.ogrn,
-        kpp: company.kpp || companyFormData.kpp,
-        email: company.emails?.[0] || companyFormData.email,
-        city: company.address?.data?.city || companyFormData.city,
-        postal_code: company.address?.data?.postal_code || companyFormData.postal_code,
-        street: street,
-        country: countryName,
-        director: directorName
+        vat: data.inn || vatValue,
+        company_name: data.name_short_with_opf || companyFormData.company_name,
+        ogrn: data.ogrn || companyFormData.ogrn,
+        kpp: data.kpp || companyFormData.kpp,
+        email: data.emails?.[0] || companyFormData.email,
+        city: city || companyFormData.city,
+        street: street || companyFormData.street,
+        director: data.director_name || companyFormData.director,
+        country: 'Россия',
       };
 
-      // Обновляем поле ИНН
-      newFormData.vat = vatValue;
       setCompanyFormData(newFormData);
 
       // Update Telegram group title when company name is loaded
@@ -239,8 +236,18 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
         ...prevGroup,
         title: newFormData.company_name || prevGroup.title
       }));
+
+      logger.info('Company data loaded from DaData', {
+        inn: data.inn,
+        name: data.name_short_with_opf,
+        component: 'AdminFormsModal'
+      });
     } catch (error) {
-      // Error handled by showing in form validation
+      logger.error('DaData lookup failed', error, { component: 'AdminFormsModal' });
+      setErrors(prev => ({
+        ...prev,
+        vat: 'Ошибка при поиске компании'
+      }));
     } finally {
       setIsSearching(false);
     }
@@ -290,14 +297,14 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
       // Проверяем дубликаты используя companyApi
       const vatValue = companyFormData.vat;
       const companyName = companyFormData.company_name;
-      
+
       logger.debug('Checking for duplicate company', {
         vat: vatValue,
         name: companyName,
         isProject,
         component: 'AdminFormsModal'
       });
-      
+
       // Check for duplicates by VAT or name
       let isDuplicate = false;
       try {
@@ -314,7 +321,7 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
       } catch (e) {
         // Company doesn't exist, which is what we want
       }
-      
+
       if (isDuplicate) {
         logger.warn('Company already exists', {
           vat: vatValue,
@@ -323,7 +330,7 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
           component: 'AdminFormsModal'
         });
         updateStepStatus(0, 'error');
-        
+
         if (isProject) {
           setProcessError(`Проект с таким названием уже существует: "${companyName}"`);
         } else {
@@ -333,123 +340,89 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
       }
       updateStepStatus(0, 'success');
 
-      // Шаг 2: Создание компании
+      // Шаг 2-4: Создание компании с Telegram группой и чатом через Saga
+      // Single API call triggers CompanyCreationSaga which handles:
+      // - Creating Telegram supergroup
+      // - Linking it to company
+      // - Creating/linking company chat
       updateStepStatus(1, 'loading');
-      logger.info('Creating company via companyApi');
-      
-      // Логируем данные формы перед созданием компании
-      logger.debug('Form data before company creation', {
-        formData: companyFormData,
-        isProject,
-        component: 'AdminFormsModal'
-      });
-      
+      logger.info('Creating company with saga orchestration via single API call');
+
       const companyData = {
         name: companyFormData.company_name || '',
         company_type: isProject ? 'project' : 'company',
-        vat: isProject ? null : (companyFormData.vat || null),
-        ogrn: isProject ? null : (companyFormData.ogrn || null),
-        kpp: isProject ? null : (companyFormData.kpp || null),
-        director: companyFormData.director || null,
-        email: companyFormData.email || null,
-        phone: companyFormData.phone || null,
-        street: companyFormData.street || null,
-        city: companyFormData.city || null,
-        postal_code: companyFormData.postal_code || null,
-        country: companyFormData.country || null
+        vat: isProject ? undefined : (companyFormData.vat || undefined),
+        ogrn: isProject ? undefined : (companyFormData.ogrn || undefined),
+        kpp: isProject ? undefined : (companyFormData.kpp || undefined),
+        director: companyFormData.director || undefined,
+        email: companyFormData.email || undefined,
+        phone: companyFormData.phone || undefined,
+        street: companyFormData.street || undefined,
+        city: companyFormData.city || undefined,
+        postal_code: companyFormData.postal_code || undefined,
+        country_id: 190, // Russia by default
+        // Saga orchestration options - triggers CompanyCreationSaga
+        create_telegram_group: true,
+        telegram_group_title: telegramGroupData.title || companyFormData.company_name,
+        telegram_group_description: telegramGroupData.description || `Рабочая группа для ${companyFormData.company_name}`,
+        // If we have an active chat, link it instead of creating new
+        link_chat_id: activeChat?.id || undefined,
       };
-      
-      // Логируем подготовленные данные для создания компании
-      logger.debug('Prepared company data for creation', {
+
+      logger.debug('Prepared company data with saga options', {
         companyData,
         component: 'AdminFormsModal'
       });
+
+      // Single API call - saga handles the rest asynchronously
       const createResponse = await companyApi.createCompany(companyData);
       const newCompany = { id: createResponse.id, ...companyData };
-      updateStepStatus(1, 'success');
 
-      // Шаг 3: Создание Telegram группы
-      updateStepStatus(2, 'loading');
-      logger.info('Creating Telegram group', {
+      logger.info('Company created, saga triggered', {
         companyId: newCompany.id,
-        photoUrl: TELEGRAM_GROUP_LOGO_URL
+        sagaTriggered: true
       });
 
-      // Create telegram group via backend API
-      let telegramData;
-      try {
-        const { data: response } = await API.post('/telegram/group/create', {
-          title: telegramGroupData.title || `${companyFormData.company_name} - Группа`,
-          description: telegramGroupData.description || `Рабочая группа для ${companyFormData.company_name}`,
-          photo_url: TELEGRAM_GROUP_LOGO_URL,
-          company_id: newCompany.id
-        });
-        telegramData = response;
-      } catch (err) {
-        logger.error('Failed to create Telegram group', err);
-        updateStepStatus(2, 'error');
-        setProcessError('Не удалось создать Telegram группу');
-        return;
-      }
-      
-      // Check if the response indicates failure
-      if (!telegramData || !telegramData.success) {
-        const errorMessage = telegramData?.error || 'Неизвестная ошибка при создании Telegram группы';
-        logger.error('Telegram group creation failed', { error: errorMessage, response: telegramData });
-        updateStepStatus(2, 'error');
-        setProcessError(errorMessage);
-        return;
-      }
-      
-      logger.info('Telegram group created successfully', {
-        ...telegramData,
-        photoSet: telegramData.group_data?.photo_set,
-        existing: telegramData.group_data?.existing
-      });
+      // Mark all steps as successful since saga will handle them
+      updateStepStatus(1, 'success');
       updateStepStatus(2, 'success');
-
-      // Шаг 4: Привязка чата с компанией
-      updateStepStatus(3, 'loading');
-      if (activeChat?.id) {
-        logger.info('Linking chat to company', {
-          chatId: activeChat.id,
-          companyId: newCompany.id
-        });
-
-        // Связываем чат с компанией через API
-        try {
-          await API.patch(`/chats/${activeChat.id}`, { company_id: newCompany.id });
-        } catch (linkError) {
-          logger.error('Failed to link chat to company', linkError);
-          updateStepStatus(3, 'error');
-          setProcessError('Не удалось связать чат с компанией');
-          return;
-        }
-
-        // Очищаем кеш компании для чата
-        clearCompanyCache(activeChat.id);
-
-        // Перезагружаем данные компании для чата
-        await loadCompanyForChat(activeChat.id);
-      }
       updateStepStatus(3, 'success');
 
-      // Сохраняем результат для отображения в модале
-      setGroupCreationResult(telegramData);
+      // Clear and reload cache if we had an active chat
+      if (activeChat?.id) {
+        clearCompanyCache(activeChat.id);
+        await loadCompanyForChat(activeChat.id);
+      }
+
+      // Create result object for UI display
+      // Note: Actual telegram group data will come from saga completion event via WSE
+      setGroupCreationResult({
+        success: true,
+        telegram_group_id: null, // Will be updated when saga completes
+        title: telegramGroupData.title || companyFormData.company_name,
+        invite_link: null, // Will be updated when saga completes
+        group_data: {
+          group_title: telegramGroupData.title || companyFormData.company_name,
+        }
+      });
       setCreatedCompanyData(newCompany);
 
-      logger.info('Company creation process completed successfully', {
+      logger.info('Company creation process initiated successfully', {
         companyId: newCompany.id,
-        telegramGroupId: telegramData.group_data?.id
+        sagaOrchestrated: true
       });
 
       // Вызываем onSuccess если передан
       if (onSuccess) {
         onSuccess();
       }
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Unexpected error during company creation', error);
-      setProcessError('Произошла неожиданная ошибка при создании компании');
+      const errorMessage = error?.response?.data?.detail
+        || error?.message
+        || 'Произошла неожиданная ошибка при создании компании';
+      setProcessError(errorMessage);
+      updateStepStatus(1, 'error');
     }
   };
   const handleSave = async () => {

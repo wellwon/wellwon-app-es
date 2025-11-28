@@ -109,7 +109,14 @@ async def create_company(
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
 ):
-    """Create a new company"""
+    """
+    Create a new company.
+
+    If create_telegram_group=True, a CompanyCreationSaga will be triggered to:
+    1. Create Telegram supergroup
+    2. Link it to the company
+    3. Create company chat (or link existing chat if link_chat_id is provided)
+    """
     try:
         company_id = uuid.uuid4()
         command = CreateCompanyCommand(
@@ -133,9 +140,14 @@ async def create_company(
             tg_manager_2=request.tg_manager_2,
             tg_manager_3=request.tg_manager_3,
             tg_support=request.tg_support,
+            # Saga orchestration options
+            create_telegram_group=request.create_telegram_group,
+            telegram_group_title=request.telegram_group_title,
+            telegram_group_description=request.telegram_group_description,
+            link_chat_id=request.link_chat_id,
         )
 
-        result_id = await command_bus.dispatch(command)
+        result_id = await command_bus.send(command)
         log.info(f"Company created: {result_id} by user {current_user['user_id']}")
         return CompanyResponse(id=result_id, message="Company created")
 
@@ -347,7 +359,7 @@ async def update_company(
             tg_support=request.tg_support,
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return CompanyResponse(id=company_id, message="Company updated")
 
     except ValueError as e:
@@ -370,7 +382,7 @@ async def archive_company(
             reason=request.reason,
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return CompanyResponse(id=company_id, message="Company archived")
 
     except ValueError as e:
@@ -391,7 +403,7 @@ async def restore_company(
             restored_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return CompanyResponse(id=company_id, message="Company restored")
 
     except ValueError as e:
@@ -412,7 +424,7 @@ async def delete_company(
             deleted_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return CompanyResponse(id=company_id, message="Company deleted")
 
     except ValueError as e:
@@ -458,7 +470,7 @@ async def add_user_to_company(
             added_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return CompanyResponse(id=company_id, message="User added to company")
 
     except ValueError as e:
@@ -483,7 +495,7 @@ async def remove_user_from_company(
             reason=reason,
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return CompanyResponse(id=company_id, message="User removed from company")
 
     except ValueError as e:
@@ -508,7 +520,7 @@ async def change_user_company_role(
             changed_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return CompanyResponse(id=company_id, message="User role changed")
 
     except ValueError as e:
@@ -598,7 +610,7 @@ async def create_telegram_supergroup(
             created_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
 
         return CreateSupergroupResponse(
             success=True,
@@ -630,7 +642,7 @@ async def link_telegram_supergroup(
             linked_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return CompanyResponse(id=company_id, message="Telegram supergroup linked")
 
     except ValueError as e:
@@ -653,7 +665,7 @@ async def unlink_telegram_supergroup(
             unlinked_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return CompanyResponse(id=company_id, message="Telegram supergroup unlinked")
 
     except ValueError as e:
@@ -678,7 +690,7 @@ async def update_telegram_supergroup(
             description=request.description,
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return CompanyResponse(id=company_id, message="Telegram supergroup updated")
 
     except ValueError as e:
@@ -724,7 +736,7 @@ async def update_company_balance(
             updated_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
 
         # Return updated balance
         query = GetCompanyBalanceQuery(company_id=company_id)

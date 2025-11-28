@@ -17,6 +17,7 @@ from app.company.commands import (
     RestoreCompanyCommand,
     DeleteCompanyCommand,
 )
+from app.company.queries import GetCompanyByIdQuery
 from app.company.aggregate import CompanyAggregate
 from app.infra.cqrs.decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
@@ -49,6 +50,7 @@ class CreateCompanyHandler(BaseCommandHandler):
         company_aggregate = CompanyAggregate(company_id=command.company_id)
 
         # Call aggregate command method (emits CompanyCreated event)
+        # The event will be enriched with saga orchestration context
         company_aggregate.create_company(
             name=command.name,
             company_type=command.company_type,
@@ -69,6 +71,11 @@ class CreateCompanyHandler(BaseCommandHandler):
             tg_manager_2=command.tg_manager_2,
             tg_manager_3=command.tg_manager_3,
             tg_support=command.tg_support,
+            # Saga orchestration options
+            create_telegram_group=command.create_telegram_group,
+            telegram_group_title=command.telegram_group_title,
+            telegram_group_description=command.telegram_group_description,
+            link_chat_id=command.link_chat_id,
         )
 
         # Auto-add creator as owner
@@ -102,16 +109,20 @@ class UpdateCompanyHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
+        self.query_bus = deps.query_bus
 
     async def handle(self, command: UpdateCompanyCommand) -> uuid.UUID:
         log.info(f"Updating company: {command.company_id}")
 
-        # Load aggregate from event store
-        company_aggregate = await self.load_aggregate(
-            aggregate_type="Company",
-            aggregate_id=command.company_id,
-            aggregate_class=CompanyAggregate,
+        # Verify company exists
+        company = await self.query_bus.query(
+            GetCompanyByIdQuery(company_id=command.company_id)
         )
+        if not company:
+            raise ValueError(f"Company {command.company_id} not found")
+
+        # Create aggregate
+        company_aggregate = CompanyAggregate(company_id=command.company_id)
 
         # Call aggregate command method
         company_aggregate.update_company(
@@ -140,7 +151,7 @@ class UpdateCompanyHandler(BaseCommandHandler):
         await self.publish_and_commit_events(
             aggregate=company_aggregate,
             aggregate_type="Company",
-            expected_version=company_aggregate.version - 1,
+            expected_version=None,
         )
 
         log.info(f"Company updated: {command.company_id}")
@@ -160,16 +171,20 @@ class ArchiveCompanyHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
+        self.query_bus = deps.query_bus
 
     async def handle(self, command: ArchiveCompanyCommand) -> uuid.UUID:
         log.info(f"Archiving company: {command.company_id}")
 
-        # Load aggregate from event store
-        company_aggregate = await self.load_aggregate(
-            aggregate_type="Company",
-            aggregate_id=command.company_id,
-            aggregate_class=CompanyAggregate,
+        # Verify company exists
+        company = await self.query_bus.query(
+            GetCompanyByIdQuery(company_id=command.company_id)
         )
+        if not company:
+            raise ValueError(f"Company {command.company_id} not found")
+
+        # Create aggregate
+        company_aggregate = CompanyAggregate(company_id=command.company_id)
 
         # Call aggregate command method
         company_aggregate.archive_company(
@@ -181,7 +196,7 @@ class ArchiveCompanyHandler(BaseCommandHandler):
         await self.publish_and_commit_events(
             aggregate=company_aggregate,
             aggregate_type="Company",
-            expected_version=company_aggregate.version - 1,
+            expected_version=None,
         )
 
         log.info(f"Company archived: {command.company_id}")
@@ -201,16 +216,20 @@ class RestoreCompanyHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
+        self.query_bus = deps.query_bus
 
     async def handle(self, command: RestoreCompanyCommand) -> uuid.UUID:
         log.info(f"Restoring company: {command.company_id}")
 
-        # Load aggregate from event store
-        company_aggregate = await self.load_aggregate(
-            aggregate_type="Company",
-            aggregate_id=command.company_id,
-            aggregate_class=CompanyAggregate,
+        # Verify company exists
+        company = await self.query_bus.query(
+            GetCompanyByIdQuery(company_id=command.company_id)
         )
+        if not company:
+            raise ValueError(f"Company {command.company_id} not found")
+
+        # Create aggregate
+        company_aggregate = CompanyAggregate(company_id=command.company_id)
 
         # Call aggregate command method
         company_aggregate.restore_company(restored_by=command.restored_by)
@@ -219,7 +238,7 @@ class RestoreCompanyHandler(BaseCommandHandler):
         await self.publish_and_commit_events(
             aggregate=company_aggregate,
             aggregate_type="Company",
-            expected_version=company_aggregate.version - 1,
+            expected_version=None,
         )
 
         log.info(f"Company restored: {command.company_id}")
@@ -239,16 +258,20 @@ class DeleteCompanyHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
+        self.query_bus = deps.query_bus
 
     async def handle(self, command: DeleteCompanyCommand) -> uuid.UUID:
         log.info(f"Deleting company: {command.company_id}")
 
-        # Load aggregate from event store
-        company_aggregate = await self.load_aggregate(
-            aggregate_type="Company",
-            aggregate_id=command.company_id,
-            aggregate_class=CompanyAggregate,
+        # Verify company exists
+        company = await self.query_bus.query(
+            GetCompanyByIdQuery(company_id=command.company_id)
         )
+        if not company:
+            raise ValueError(f"Company {command.company_id} not found")
+
+        # Create aggregate
+        company_aggregate = CompanyAggregate(company_id=command.company_id)
 
         # Call aggregate command method
         company_aggregate.delete_company(deleted_by=command.deleted_by)
@@ -257,8 +280,13 @@ class DeleteCompanyHandler(BaseCommandHandler):
         await self.publish_and_commit_events(
             aggregate=company_aggregate,
             aggregate_type="Company",
-            expected_version=company_aggregate.version - 1,
+            expected_version=None,
         )
 
         log.info(f"Company deleted: {command.company_id}")
         return command.company_id
+
+
+# =============================================================================
+# EOF
+# =============================================================================

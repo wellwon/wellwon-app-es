@@ -17,6 +17,8 @@ from app.chat.events import (
     ChatUpdated,
     ChatArchived,
     ChatRestored,
+    ChatLinkedToCompany,
+    ChatUnlinkedFromCompany,
     ParticipantAdded,
     ParticipantRemoved,
     ParticipantRoleChanged,
@@ -515,6 +517,56 @@ class ChatAggregate:
         self._apply_and_record(event)
 
     # =========================================================================
+    # Company Linking Methods (used by Saga orchestration)
+    # =========================================================================
+
+    def link_to_company(
+        self,
+        company_id: uuid.UUID,
+        linked_by: uuid.UUID,
+        telegram_supergroup_id: Optional[int] = None,
+    ) -> None:
+        """
+        Link chat to a company.
+        Used by CompanyCreationSaga to link existing chats to newly created companies.
+        """
+        self._ensure_active()
+
+        from app.chat.events import ChatLinkedToCompany
+
+        event = ChatLinkedToCompany(
+            chat_id=self.id,
+            company_id=company_id,
+            telegram_supergroup_id=telegram_supergroup_id,
+            linked_by=linked_by,
+        )
+        self._apply_and_record(event)
+
+    def unlink_from_company(
+        self,
+        unlinked_by: uuid.UUID,
+        reason: Optional[str] = None,
+    ) -> None:
+        """
+        Unlink chat from its company.
+        Used by Saga compensation when company creation fails.
+        """
+        self._ensure_active()
+
+        if not self.state.company_id:
+            return  # Already unlinked
+
+        from app.chat.events import ChatUnlinkedFromCompany
+
+        event = ChatUnlinkedFromCompany(
+            chat_id=self.id,
+            previous_company_id=self.state.company_id,
+            unlinked_by=unlinked_by,
+            reason=reason,
+        )
+        self._apply_and_record(event)
+
+    # =========================================================================
     # Validation Helpers
     # =========================================================================
 
@@ -565,6 +617,8 @@ class ChatAggregate:
             ChatUpdated: self._on_chat_updated,
             ChatArchived: self._on_chat_archived,
             ChatRestored: self._on_chat_restored,
+            ChatLinkedToCompany: self._on_chat_linked_to_company,
+            ChatUnlinkedFromCompany: self._on_chat_unlinked_from_company,
             ParticipantAdded: self._on_participant_added,
             ParticipantRemoved: self._on_participant_removed,
             ParticipantRoleChanged: self._on_participant_role_changed,
@@ -604,6 +658,16 @@ class ChatAggregate:
 
     def _on_chat_restored(self, event: ChatRestored) -> None:
         self.state.is_active = True
+        self.state.updated_at = event.timestamp
+
+    def _on_chat_linked_to_company(self, event: ChatLinkedToCompany) -> None:
+        self.state.company_id = event.company_id
+        if event.telegram_supergroup_id:
+            self.state.telegram_chat_id = event.telegram_supergroup_id
+        self.state.updated_at = event.timestamp
+
+    def _on_chat_unlinked_from_company(self, event: ChatUnlinkedFromCompany) -> None:
+        self.state.company_id = None
         self.state.updated_at = event.timestamp
 
     def _on_participant_added(self, event: ParticipantAdded) -> None:

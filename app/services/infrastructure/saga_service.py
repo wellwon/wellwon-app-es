@@ -276,8 +276,10 @@ class SagaService:
 
     def _register_sagas(self) -> None:
         """Register all saga types with the saga manager"""
-        # TODO: Create WellWon-specific sagas
-        # from app.infra.saga.user_deletion_saga import UserDeletionSaga
+        from app.infra.saga.company_creation_saga import CompanyCreationSaga
+
+        # Register Company Creation Saga
+        self.saga_manager.register_saga(CompanyCreationSaga)
 
         saga_types = [
             # UserDeletionSaga,  # Not yet implemented for WellWon
@@ -367,30 +369,40 @@ class SagaService:
 
     def _configure_triggers(self) -> None:
         """Configure saga triggers with enhanced race condition protection"""
-        # TODO: Create WellWon-specific sagas and configure triggers
-        # from app.infra.saga.user_deletion_saga import UserDeletionSaga
+        from app.infra.saga.company_creation_saga import CompanyCreationSaga
 
-        # User domain triggers - commented out until sagas are implemented
-        # self._trigger_configs["transport.user-account-events"] = [
-        #     SagaTriggerConfig(
-        #         event_types=["UserAccountDeleted", "UserDeleted"],
-        #         saga_class=UserDeletionSaga,
-        #         context_builder=lambda event: {
-        #             'user_id': event['user_id'],
-        #             'reason': event.get('reason', 'user_deletion'),
-        #             'grace_period': event.get('grace_period', 0),
-        #             'correlation_id': event.get('correlation_id', event.get('event_id')),
-        #             'causation_id': event.get('event_id'),
-        #             'original_event_type': event.get('event_type'),
-        #             'triggered_from': 'saga_service'
-        #         },
-        #         dedupe_key_builder=lambda event: f"user_deletion:{event['user_id']}",
-        #         dedupe_window_seconds=600,
-        #         description="Triggers user deletion saga to clean up all user resources"
-        #     )
-        # ]
+        # Company domain triggers
+        self._trigger_configs["transport.company-events"] = [
+            SagaTriggerConfig(
+                event_types=["CompanyCreated"],
+                saga_class=CompanyCreationSaga,
+                context_builder=lambda event: {
+                    # Core IDs
+                    'company_id': event.get('aggregate_id') or event.get('company_id'),
+                    'created_by': event.get('created_by') or event.get('user_id'),
+                    # Enriched company data
+                    'company_name': event.get('name', 'Company'),
+                    'company_type': event.get('company_type', 'company'),
+                    # Saga orchestration options (from enriched event)
+                    'create_telegram_group': event.get('create_telegram_group', False),
+                    'telegram_group_title': event.get('telegram_group_title'),
+                    'telegram_group_description': event.get('telegram_group_description'),
+                    'link_chat_id': event.get('link_chat_id'),
+                    # CQRS metadata
+                    'correlation_id': event.get('correlation_id', event.get('event_id')),
+                    'causation_id': event.get('event_id'),
+                    'original_event_type': event.get('event_type'),
+                    'triggered_from': 'saga_service'
+                },
+                dedupe_key_builder=lambda event: f"company_creation:{event.get('aggregate_id') or event.get('company_id')}",
+                dedupe_window_seconds=300,
+                conflict_key_builder=lambda event: f"company:{event.get('aggregate_id') or event.get('company_id')}",
+                allow_concurrent=False,
+                description="Triggers company creation saga to create Telegram group and Chat"
+            )
+        ]
 
-        log.info("No saga triggers configured yet - WellWon sagas to be implemented")
+        log.info(f"Configured {len(self._trigger_configs)} saga trigger topics")
 
 
     async def _setup_event_consumers(self) -> None:

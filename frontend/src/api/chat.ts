@@ -93,6 +93,8 @@ export interface CreateChatRequest {
   chat_type: string;
   company_id?: string;
   participant_ids?: string[];
+  telegram_supergroup_id?: number;
+  telegram_topic_id?: number;
 }
 
 export interface UpdateChatRequest {

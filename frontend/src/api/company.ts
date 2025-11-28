@@ -129,6 +129,13 @@ export interface CreateCompanyRequest {
   tg_manager_2?: string;
   tg_manager_3?: string;
   tg_support?: string;
+  // Saga orchestration options
+  // If true, CompanyCreationSaga will create Telegram group and chat automatically
+  create_telegram_group?: boolean;
+  telegram_group_title?: string;
+  telegram_group_description?: string;
+  // If provided, saga will link this existing chat to the company instead of creating new
+  link_chat_id?: string;
 }
 
 export interface UpdateCompanyRequest {

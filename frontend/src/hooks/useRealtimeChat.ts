@@ -791,7 +791,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
   }, [chats, activeChat, loadChatMessages, user?.id, messages, subscribeToChat, setActiveSection]);
 
   // Создание нового чата с привязкой к выбранной компании
-  const createChat = useCallback(async (name: string, type: 'direct' | 'group' | 'company' = 'direct', participantIds: string[] = []): Promise<Chat> => {
+  const createChat = useCallback(async (name: string, chatType: Chat['chat_type'] = 'direct', participantIds: string[] = []): Promise<Chat> => {
     if (!user) {
       throw new Error('Пользователь не авторизован');
     }
@@ -803,28 +803,29 @@ export function useRealtimeChat(): RealtimeChatContextType {
     }
 
     setIsCreatingChat(true);
-    logger.info('Creating chat', { 
-      name, 
-      type, 
-      userId: user.id, 
-      participantIds: participantIds.length, 
-      companyId: chatScope.companyId, 
-      component: 'useRealtimeChat' 
+    logger.info('Creating chat', {
+      name,
+      chatType,
+      userId: user.id,
+      participantIds: participantIds.length,
+      companyId: chatScope.companyId,
+      component: 'useRealtimeChat'
     });
-    
-    try {
-      // User profile is now managed via /auth/me endpoint and event sourcing
-      // No need to check/create profile here - authentication handles it
-      logger.info('Creating chat (profile managed via auth)', { userId: user.id, component: 'useRealtimeChat' });
 
-      const newChat = await chatApi.createChat({ name: name, chat_type: type, company_id: chatScope.companyId || undefined, participant_ids: participantIds });
+    try {
+      const newChat = await chatApi.createChat({
+        name,
+        chat_type: chatType,
+        company_id: chatScope.companyId || undefined,
+        participant_ids: participantIds
+      });
       logger.info('Chat created successfully', { chatId: newChat.id, name, component: 'useRealtimeChat' });
-      
+
       setChats(prev => [newChat, ...prev]);
-      
+
       return newChat;
     } catch (error) {
-      logger.error('Error in createChat', error, { component: 'useRealtimeChat', name, type });
+      logger.error('Error in createChat', error, { component: 'useRealtimeChat', name, chatType });
       throw error;
     } finally {
       setIsCreatingChat(false);

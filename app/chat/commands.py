@@ -27,7 +27,7 @@ class CreateChatCommand(Command):
     company_id: Optional[uuid.UUID] = None
     participant_ids: List[uuid.UUID] = Field(default_factory=list)
     # Telegram integration
-    telegram_chat_id: Optional[int] = None
+    telegram_supergroup_id: Optional[int] = None  # Telegram supergroup ID
     telegram_topic_id: Optional[int] = None
 
     @field_validator('chat_type')
@@ -50,12 +50,32 @@ class ArchiveChatCommand(Command):
     """Archive (soft delete) a chat"""
     chat_id: uuid.UUID
     archived_by: uuid.UUID
+    reason: Optional[str] = Field(None, max_length=500)
 
 
 class RestoreChatCommand(Command):
     """Restore an archived chat"""
     chat_id: uuid.UUID
     restored_by: uuid.UUID
+
+
+# =============================================================================
+# Company Linking Commands
+# =============================================================================
+
+class LinkChatToCompanyCommand(Command):
+    """Link an existing chat to a company (used by saga)"""
+    chat_id: uuid.UUID
+    company_id: uuid.UUID
+    telegram_supergroup_id: Optional[int] = None
+    linked_by: uuid.UUID
+
+
+class UnlinkChatFromCompanyCommand(Command):
+    """Unlink a chat from its company (used by saga compensation)"""
+    chat_id: uuid.UUID
+    unlinked_by: uuid.UUID
+    reason: Optional[str] = Field(None, max_length=500)
 
 
 # =============================================================================

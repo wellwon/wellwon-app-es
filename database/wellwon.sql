@@ -718,20 +718,37 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 -- COMPANIES
 -- ======================
 CREATE TABLE IF NOT EXISTS companies (
-    id BIGSERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
-    vat TEXT,
+    company_type TEXT NOT NULL DEFAULT 'company',
+    created_by UUID NOT NULL REFERENCES user_accounts(id),
+
+    -- Legal info (Russian business)
+    vat TEXT,                    -- INN
     ogrn TEXT,
     kpp TEXT,
+
+    -- Address
     postal_code TEXT,
-    country_id INTEGER DEFAULT 190,
-    director TEXT,
-    street TEXT,
+    country_id INTEGER DEFAULT 190,  -- Russia
     city TEXT,
+    street TEXT,
+
+    -- Contacts
+    director TEXT,
     email TEXT,
     phone TEXT,
-    company_type TEXT NOT NULL DEFAULT 'company',
-    balance DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+
+    -- Telegram contacts
+    tg_dir TEXT,
+    tg_accountant TEXT,
+    tg_manager_1 TEXT,
+    tg_manager_2 TEXT,
+    tg_manager_3 TEXT,
+    tg_support TEXT,
+
+    -- Financial
+    balance DECIMAL(15,2) NOT NULL DEFAULT 0.00,
 
     -- Status and metrics
     status company_status DEFAULT 'new',
@@ -743,16 +760,13 @@ CREATE TABLE IF NOT EXISTS companies (
     average_delivery_time NUMERIC(8,2),
     logo_url TEXT,
 
-    -- Telegram contacts
-    tg_dir TEXT,
-    tg_accountant TEXT,
-    tg_manager_1 TEXT,
-    tg_manager_2 TEXT,
-    tg_manager_3 TEXT,
-    tg_support TEXT,
+    -- Event Sourcing fields
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    user_count INTEGER NOT NULL DEFAULT 0,
+    version INTEGER NOT NULL DEFAULT 1,
 
-    -- References
-    created_by_user_id UUID REFERENCES user_accounts(id),
+    -- Manager assignment
     assigned_manager_id UUID REFERENCES user_accounts(id),
 
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -764,6 +778,8 @@ CREATE INDEX IF NOT EXISTS idx_companies_email ON companies(email);
 CREATE INDEX IF NOT EXISTS idx_companies_company_type ON companies(company_type);
 CREATE INDEX IF NOT EXISTS idx_companies_assigned_manager ON companies(assigned_manager_id);
 CREATE INDEX IF NOT EXISTS idx_companies_status ON companies(status);
+CREATE INDEX IF NOT EXISTS idx_companies_created_by ON companies(created_by);
+CREATE INDEX IF NOT EXISTS idx_companies_is_active ON companies(is_active);
 
 DROP TRIGGER IF EXISTS set_companies_updated_at ON companies;
 CREATE TRIGGER set_companies_updated_at
@@ -776,7 +792,7 @@ CREATE TRIGGER set_companies_updated_at
 CREATE TABLE IF NOT EXISTS user_companies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES user_accounts(id) ON DELETE CASCADE,
-    company_id BIGINT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     relationship_type user_company_relationship NOT NULL DEFAULT 'owner',
     assigned_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -926,7 +942,7 @@ CREATE INDEX IF NOT EXISTS idx_typing_indicators_expires_at ON typing_indicators
 -- ======================
 CREATE TABLE IF NOT EXISTS telegram_supergroups (
     id BIGINT PRIMARY KEY,
-    company_id BIGINT REFERENCES companies(id),
+    company_id UUID REFERENCES companies(id),
     title TEXT NOT NULL,
     username TEXT,
     description TEXT,
@@ -1239,7 +1255,7 @@ CREATE OR REPLACE FUNCTION get_user_companies(
     p_filter_type user_company_relationship DEFAULT NULL
 )
 RETURNS TABLE (
-    company_id BIGINT,
+    company_id UUID,
     company_name TEXT,
     relationship_type user_company_relationship,
     assigned_at TIMESTAMP WITH TIME ZONE
@@ -1262,7 +1278,7 @@ $$ LANGUAGE plpgsql;
 ALTER FUNCTION get_user_companies(UUID, user_company_relationship) OWNER TO wellwon;
 
 CREATE OR REPLACE FUNCTION get_company_users(
-    p_company_id BIGINT,
+    p_company_id UUID,
     p_filter_type user_company_relationship DEFAULT NULL
 )
 RETURNS TABLE (
@@ -1288,7 +1304,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-ALTER FUNCTION get_company_users(BIGINT, user_company_relationship) OWNER TO wellwon;
+ALTER FUNCTION get_company_users(UUID, user_company_relationship) OWNER TO wellwon;
 
 -- =============================================================================
 -- INITIAL DATA

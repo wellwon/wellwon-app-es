@@ -15,6 +15,7 @@ from app.company.commands import (
     RemoveUserFromCompanyCommand,
     ChangeUserCompanyRoleCommand,
 )
+from app.company.queries import GetCompanyByIdQuery
 from app.company.aggregate import CompanyAggregate
 from app.infra.cqrs.decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
@@ -38,16 +39,20 @@ class AddUserToCompanyHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
+        self.query_bus = deps.query_bus
 
     async def handle(self, command: AddUserToCompanyCommand) -> uuid.UUID:
         log.info(f"Adding user {command.user_id} to company {command.company_id}")
 
-        # Load aggregate from event store
-        company_aggregate = await self.load_aggregate(
-            aggregate_type="Company",
-            aggregate_id=command.company_id,
-            aggregate_class=CompanyAggregate,
+        # Verify company exists
+        company = await self.query_bus.query(
+            GetCompanyByIdQuery(company_id=command.company_id)
         )
+        if not company:
+            raise ValueError(f"Company {command.company_id} not found")
+
+        # Create aggregate
+        company_aggregate = CompanyAggregate(company_id=command.company_id)
 
         # Call aggregate command method
         company_aggregate.add_user(
@@ -60,7 +65,7 @@ class AddUserToCompanyHandler(BaseCommandHandler):
         await self.publish_and_commit_events(
             aggregate=company_aggregate,
             aggregate_type="Company",
-            expected_version=company_aggregate.version - 1,
+            expected_version=None,
         )
 
         log.info(f"User {command.user_id} added to company {command.company_id}")
@@ -80,16 +85,20 @@ class RemoveUserFromCompanyHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
+        self.query_bus = deps.query_bus
 
     async def handle(self, command: RemoveUserFromCompanyCommand) -> uuid.UUID:
         log.info(f"Removing user {command.user_id} from company {command.company_id}")
 
-        # Load aggregate from event store
-        company_aggregate = await self.load_aggregate(
-            aggregate_type="Company",
-            aggregate_id=command.company_id,
-            aggregate_class=CompanyAggregate,
+        # Verify company exists
+        company = await self.query_bus.query(
+            GetCompanyByIdQuery(company_id=command.company_id)
         )
+        if not company:
+            raise ValueError(f"Company {command.company_id} not found")
+
+        # Create aggregate
+        company_aggregate = CompanyAggregate(company_id=command.company_id)
 
         # Call aggregate command method
         company_aggregate.remove_user(
@@ -102,7 +111,7 @@ class RemoveUserFromCompanyHandler(BaseCommandHandler):
         await self.publish_and_commit_events(
             aggregate=company_aggregate,
             aggregate_type="Company",
-            expected_version=company_aggregate.version - 1,
+            expected_version=None,
         )
 
         log.info(f"User {command.user_id} removed from company {command.company_id}")
@@ -122,16 +131,20 @@ class ChangeUserCompanyRoleHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
+        self.query_bus = deps.query_bus
 
     async def handle(self, command: ChangeUserCompanyRoleCommand) -> uuid.UUID:
         log.info(f"Changing role for user {command.user_id} in company {command.company_id}")
 
-        # Load aggregate from event store
-        company_aggregate = await self.load_aggregate(
-            aggregate_type="Company",
-            aggregate_id=command.company_id,
-            aggregate_class=CompanyAggregate,
+        # Verify company exists
+        company = await self.query_bus.query(
+            GetCompanyByIdQuery(company_id=command.company_id)
         )
+        if not company:
+            raise ValueError(f"Company {command.company_id} not found")
+
+        # Create aggregate
+        company_aggregate = CompanyAggregate(company_id=command.company_id)
 
         # Call aggregate command method
         company_aggregate.change_user_role(
@@ -144,7 +157,7 @@ class ChangeUserCompanyRoleHandler(BaseCommandHandler):
         await self.publish_and_commit_events(
             aggregate=company_aggregate,
             aggregate_type="Company",
-            expected_version=company_aggregate.version - 1,
+            expected_version=None,
         )
 
         log.info(f"User {command.user_id} role changed in company {command.company_id}")

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from app.config.logging_config import get_logger
 from app.company.commands import UpdateCompanyBalanceCommand
+from app.company.queries import GetCompanyByIdQuery
 from app.company.aggregate import CompanyAggregate
 from app.infra.cqrs.decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
@@ -34,6 +35,7 @@ class UpdateCompanyBalanceHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
+        self.query_bus = deps.query_bus
 
     async def handle(self, command: UpdateCompanyBalanceCommand) -> uuid.UUID:
         log.info(
@@ -41,12 +43,15 @@ class UpdateCompanyBalanceHandler(BaseCommandHandler):
             f"{command.change_amount} ({command.reason})"
         )
 
-        # Load aggregate from event store
-        company_aggregate = await self.load_aggregate(
-            aggregate_type="Company",
-            aggregate_id=command.company_id,
-            aggregate_class=CompanyAggregate,
+        # Verify company exists
+        company = await self.query_bus.query(
+            GetCompanyByIdQuery(company_id=command.company_id)
         )
+        if not company:
+            raise ValueError(f"Company {command.company_id} not found")
+
+        # Create aggregate
+        company_aggregate = CompanyAggregate(company_id=command.company_id)
 
         # Call aggregate command method
         company_aggregate.update_balance(
@@ -60,7 +65,7 @@ class UpdateCompanyBalanceHandler(BaseCommandHandler):
         await self.publish_and_commit_events(
             aggregate=company_aggregate,
             aggregate_type="Company",
-            expected_version=company_aggregate.version - 1,
+            expected_version=None,
         )
 
         log.info(f"Balance updated for company {command.company_id}")

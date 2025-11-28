@@ -78,7 +78,7 @@ class CreateChatRequest(BaseModel):
     chat_type: str = Field(default="direct", description="direct, group, or company")
     company_id: Optional[uuid.UUID] = None
     participant_ids: List[uuid.UUID] = Field(default_factory=list)
-    telegram_chat_id: Optional[int] = None
+    telegram_supergroup_id: Optional[int] = None  # Telegram supergroup ID
     telegram_topic_id: Optional[int] = None
 
 
@@ -163,11 +163,11 @@ async def create_chat(
             created_by=current_user["user_id"],
             company_id=request.company_id,
             participant_ids=request.participant_ids,
-            telegram_chat_id=request.telegram_chat_id,
+            telegram_supergroup_id=request.telegram_supergroup_id,
             telegram_topic_id=request.telegram_topic_id,
         )
 
-        chat_id = await command_bus.dispatch(command)
+        chat_id = await command_bus.send(command)
         return ChatResponse(id=chat_id, message="Chat created")
 
     except ValueError as e:
@@ -260,7 +260,7 @@ async def update_chat(
             updated_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return ChatResponse(id=chat_id, message="Chat updated")
 
     except ValueError as e:
@@ -281,7 +281,7 @@ async def archive_chat(
             archived_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return ChatResponse(id=chat_id, message="Chat archived")
 
     except ValueError as e:
@@ -326,7 +326,7 @@ async def add_participant(
             added_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return ChatResponse(id=chat_id, message="Participant added")
 
     except ValueError as e:
@@ -349,7 +349,7 @@ async def remove_participant(
             removed_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return ChatResponse(id=chat_id, message="Participant removed")
 
     except ValueError as e:
@@ -374,7 +374,7 @@ async def change_participant_role(
             changed_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return ChatResponse(id=chat_id, message="Role changed")
 
     except ValueError as e:
@@ -395,7 +395,7 @@ async def leave_chat(
             user_id=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return ChatResponse(id=chat_id, message="Left chat")
 
     except ValueError as e:
@@ -454,7 +454,7 @@ async def send_message(
             source="web",
         )
 
-        message_id = await command_bus.dispatch(command)
+        message_id = await command_bus.send(command)
         return MessageResponse(id=message_id, status="sent")
 
     except ValueError as e:
@@ -479,7 +479,7 @@ async def edit_message(
             new_content=request.content,
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return MessageResponse(id=message_id, status="edited")
 
     except ValueError as e:
@@ -502,7 +502,7 @@ async def delete_message(
             deleted_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return MessageResponse(id=message_id, status="deleted")
 
     except ValueError as e:
@@ -544,7 +544,7 @@ async def mark_messages_as_read(
             last_read_message_id=request.last_read_message_id,
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return ChatResponse(id=chat_id, message="Messages marked as read")
 
     except ValueError as e:
@@ -585,7 +585,7 @@ async def start_typing(
         user_id=current_user["user_id"],
     )
 
-    await command_bus.dispatch(command)
+    await command_bus.send(command)
 
 
 @router.post("/{chat_id}/typing/stop", status_code=status.HTTP_204_NO_CONTENT)
@@ -601,7 +601,7 @@ async def stop_typing(
         user_id=current_user["user_id"],
     )
 
-    await command_bus.dispatch(command)
+    await command_bus.send(command)
 
 
 # =============================================================================
@@ -625,7 +625,7 @@ async def link_telegram_chat(
             linked_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return ChatResponse(id=chat_id, message="Telegram chat linked")
 
     except ValueError as e:
@@ -646,7 +646,7 @@ async def unlink_telegram_chat(
             unlinked_by=current_user["user_id"],
         )
 
-        await command_bus.dispatch(command)
+        await command_bus.send(command)
         return ChatResponse(id=chat_id, message="Telegram chat unlinked")
 
     except ValueError as e:

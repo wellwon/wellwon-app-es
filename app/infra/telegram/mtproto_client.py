@@ -517,7 +517,7 @@ class TelegramMTProtoClient:
             icon_emoji_id = EMOJI_MAP.get(new_emoji) if new_emoji else None
 
             await self._client(EditForumTopicRequest(
-                channel=group,
+                peer=group,
                 topic_id=topic_id,
                 title=new_title,
                 icon_emoji_id=icon_emoji_id
@@ -538,7 +538,7 @@ class TelegramMTProtoClient:
         try:
             group = await self._client.get_entity(group_id)
             await self._client(DeleteTopicHistoryRequest(
-                channel=group,
+                peer=group,
                 top_msg_id=topic_id
             ))
             log.info(f"Topic {topic_id} deleted from group {group_id}")
@@ -555,7 +555,7 @@ class TelegramMTProtoClient:
         try:
             group = await self._client.get_entity(group_id)
             await self._client(UpdatePinnedForumTopicRequest(
-                channel=group,
+                peer=group,
                 topic_id=topic_id,
                 pinned=pinned
             ))

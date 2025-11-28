@@ -52,6 +52,14 @@ class CompanyCreated(BaseEvent):
     tg_manager_3: Optional[str] = None
     tg_support: Optional[str] = None
 
+    # Saga orchestration context (enriched data for CompanyCreationSaga)
+    # If True, saga will create Telegram group automatically
+    create_telegram_group: bool = False
+    telegram_group_title: Optional[str] = None
+    telegram_group_description: Optional[str] = None
+    # If provided, saga will link this existing chat to the company
+    link_chat_id: Optional[uuid.UUID] = None
+
 
 @domain_event(category="domain")
 class CompanyUpdated(BaseEvent):

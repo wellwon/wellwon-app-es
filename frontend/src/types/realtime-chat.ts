@@ -1,31 +1,27 @@
-// Типы для новой системы realtime чатов на Supabase
+// Types for WellWon realtime chat system (Event Sourcing + WSE)
 
 export interface Chat {
   id: string;
   name: string | null;
-  // Support both legacy 'type' and new 'chat_type' fields
-  type?: 'direct' | 'group' | 'company';
-  chat_type?: string;
-  company_id: string | number | null;  // UUID (string) from API, legacy number support
-  chat_number?: number;
+  chat_type: 'direct' | 'group' | 'company';
+  company_id: string | null;  // UUID from API
   created_by: string;
   created_at: string;
   updated_at: string | null;
   is_active: boolean;
   metadata?: Record<string, any>;
   participants?: ChatParticipant[];
-  last_message?: Message;
-  unread_count?: number;
   participant_count?: number;
-  // Last message info from API
+  unread_count?: number;
+  // Last message info
+  last_message?: Message;
   last_message_at?: string | null;
   last_message_content?: string | null;
   last_message_sender_id?: string | null;
-  // Telegram integration fields
-  telegram_sync?: boolean;
+  // Telegram integration
+  telegram_chat_id?: number | null;
   telegram_supergroup_id?: number | null;
   telegram_topic_id?: number | null;
-  telegram_chat_id?: number | null;
 }
 
 export interface ChatParticipant {
@@ -172,7 +168,7 @@ export interface RealtimeChatContextType {
   
   // Действия с чатами
   loadChats: () => Promise<void>;
-  createChat: (name: string, type: Chat['type'], participantIds?: string[]) => Promise<Chat>;
+  createChat: (name: string, chatType?: Chat['chat_type'], participantIds?: string[]) => Promise<Chat>;
   selectChat: (chatId: string, updateUrl?: boolean) => Promise<void>;
   loadMoreMessages: () => Promise<void>;
   addParticipants: (chatId: string, userIds: string[]) => Promise<void>;

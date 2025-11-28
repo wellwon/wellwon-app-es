@@ -186,6 +186,11 @@ class CompanyAggregate:
         tg_manager_2: Optional[str] = None,
         tg_manager_3: Optional[str] = None,
         tg_support: Optional[str] = None,
+        # Saga orchestration options (enriches event for CompanyCreationSaga)
+        create_telegram_group: bool = False,
+        telegram_group_title: Optional[str] = None,
+        telegram_group_description: Optional[str] = None,
+        link_chat_id: Optional[uuid.UUID] = None,
     ) -> None:
         """Create a new company"""
         if self.version > 0:
@@ -212,6 +217,11 @@ class CompanyAggregate:
             tg_manager_2=tg_manager_2,
             tg_manager_3=tg_manager_3,
             tg_support=tg_support,
+            # Saga orchestration context
+            create_telegram_group=create_telegram_group,
+            telegram_group_title=telegram_group_title or name,  # Default to company name
+            telegram_group_description=telegram_group_description or f"Рабочая группа компании {name}",
+            link_chat_id=link_chat_id,
         )
         self._apply_and_record(event)
 
