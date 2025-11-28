@@ -33,7 +33,7 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 
 @router.get("/users", response_model=List[AdminUserResponse])
 async def get_all_users(
-    current_user: Annotated[str, Depends(get_current_user)],
+    current_user: Annotated[dict, Depends(get_current_user)],
     include_inactive: bool = Query(True),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -75,7 +75,7 @@ async def get_all_users(
 async def update_user_status(
     user_id: uuid.UUID,
     request: AdminUserUpdateRequest,
-    current_user: Annotated[str, Depends(get_current_user)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     """
     Update user admin status (active/developer flags).
@@ -94,7 +94,7 @@ async def update_user_status(
                 detail="User not found"
             )
 
-        log.info(f"User {user_id} updated by admin {current_user}: active={request.active}, developer={request.developer}")
+        log.info(f"User {user_id} updated by admin {current_user['user_id']}: active={request.active}, developer={request.developer}")
 
         return AdminUserResponse(
             id=str(updated_user.id),

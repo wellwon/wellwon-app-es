@@ -362,9 +362,14 @@ class ChatAggregate:
         - New clients contact via Telegram general topic
         - Messages distributed to available managers
         - No WellWon account required for external sender
+
+        Note: We don't call _ensure_telegram_linked() here because:
+        1. The message is coming FROM Telegram, proving the link exists
+        2. The webhook already validated the chat via query before calling this
+        3. Legacy chats may not have telegram_chat_id in their event history
         """
         self._ensure_active()
-        self._ensure_telegram_linked()
+        # Note: telegram_linked check removed - message source proves linkage
 
         event = MessageSent(
             message_id=message_id,

@@ -78,6 +78,7 @@ async def _import_all_handler_modules() -> Dict[str, Any]:
         ("app.chat.command_handlers.chat_handlers", "chat commands"),
         ("app.chat.command_handlers.message_handlers", "message commands"),
         ("app.chat.command_handlers.participant_handlers", "participant commands"),
+        ("app.chat.command_handlers.telegram_handlers", "chat telegram commands"),
 
         # Chat query handlers
         ("app.chat.query_handlers.chat_query_handlers", "chat queries"),
@@ -163,6 +164,7 @@ async def register_cqrs_handlers(app: FastAPI) -> None:
         query_bus=app.state.query_bus,
         user_auth_service=app.state.user_auth_service,
         user_read_repo=app.state.user_account_read_repo,
+        chat_read_repo=app.state.chat_read_repo if hasattr(app.state, 'chat_read_repo') else None,
         global_config={},
         saga_manager=app.state.saga_service.saga_manager if app.state.saga_service else None,
         cache_manager=app.state.cache_manager,

@@ -45,7 +45,8 @@ from kurrentdbclient import (
 )
 from kurrentdbclient.exceptions import (
     WrongCurrentVersionError as WrongCurrentVersion,  # Alias for compatibility
-    NotFoundError as StreamNotFoundError  # Alias for compatibility
+    NotFoundError as StreamNotFoundError,  # Alias for compatibility
+    StreamIsDeletedError,  # Stream was hard-deleted
 )
 
 # TradeCore imports
@@ -516,6 +517,67 @@ class KurrentDBEventStore:
 
             raise ConcurrencyError(error_msg) from e
 
+        except StreamIsDeletedError:
+            # CRITICAL FIX (2025-11-28): Handle hard-deleted streams
+            # KurrentDB doesn't allow appending to hard-deleted streams.
+            # Solution: Create a new stream with version suffix.
+            log.warning(
+                f"Stream '{stream_name}' was hard-deleted. "
+                f"Creating new versioned stream for aggregate {aggregate_type}-{aggregate_id}"
+            )
+
+            # Find next available version suffix
+            version_suffix = 2
+            while True:
+                versioned_stream = f"{stream_name}_v{version_suffix}"
+                try:
+                    # Check if this versioned stream exists or is deleted
+                    test_gen = await self._client.read_stream(
+                        stream_name=versioned_stream,
+                        limit=1
+                    )
+                    # If we can read it, stream exists - try next version
+                    async for _ in test_gen:
+                        pass
+                    version_suffix += 1
+                    if version_suffix > 100:  # Safety limit
+                        raise EventStoreError(
+                            f"Too many deleted stream versions for {aggregate_type}-{aggregate_id}"
+                        )
+                except StreamNotFoundError:
+                    # Found an available stream name
+                    break
+                except StreamIsDeletedError:
+                    # This version also deleted, try next
+                    version_suffix += 1
+                    if version_suffix > 100:
+                        raise EventStoreError(
+                            f"Too many deleted stream versions for {aggregate_type}-{aggregate_id}"
+                        )
+                    continue
+
+            # Append to new versioned stream
+            try:
+                commit_position = await self._client.append_to_stream(
+                    stream_name=versioned_stream,
+                    current_version=StreamState.NO_STREAM,  # New stream
+                    events=esdb_events
+                )
+                new_version = len(events)
+
+                # Update envelope versions
+                for idx, envelope in enumerate(envelopes):
+                    envelope.aggregate_version = idx + 1
+
+                log.info(
+                    f"Created new versioned stream '{versioned_stream}' with {len(events)} events"
+                )
+            except Exception as retry_error:
+                log.error(f"Failed to create versioned stream '{versioned_stream}': {retry_error}")
+                raise EventStoreError(
+                    f"Failed to append to deleted stream and create new version: {retry_error}"
+                ) from retry_error
+
         except Exception as e:
             log.error(f"Failed to append events to {stream_name}: {e}")
 
@@ -709,6 +771,48 @@ class KurrentDBEventStore:
             log.info(f"Stream '{stream_name}' not found (StreamNotFoundError) - returning empty list")
             return []
 
+        except StreamIsDeletedError:
+            # Stream was hard-deleted - check for versioned streams
+            log.warning(
+                f"Stream '{stream_name}' was deleted (StreamIsDeletedError) - "
+                f"checking for versioned streams..."
+            )
+
+            # Try to find the latest versioned stream
+            for version_suffix in range(100, 1, -1):  # Check from highest to lowest
+                versioned_stream = f"{stream_name}_v{version_suffix}"
+                try:
+                    events_generator = await self._client.read_stream(
+                        stream_name=versioned_stream,
+                        stream_position=from_revision
+                    )
+
+                    envelopes = []
+                    async for recorded_event in events_generator:
+                        event_data = json.loads(recorded_event.data.decode('utf-8'))
+                        envelope = EventEnvelope.from_dict(event_data)
+                        envelope.aggregate_version = recorded_event.stream_position + 1
+
+                        if to_version and envelope.aggregate_version > to_version:
+                            break
+
+                        envelopes.append(envelope)
+
+                    log.info(
+                        f"Found versioned stream '{versioned_stream}' with {len(envelopes)} events"
+                    )
+                    return envelopes
+
+                except (StreamNotFoundError, StreamIsDeletedError):
+                    continue
+
+            # No versioned streams found - treat as new aggregate
+            log.info(
+                f"No versioned streams found for deleted stream '{stream_name}' - "
+                f"treating as new aggregate"
+            )
+            return []
+
         except Exception as e:
             log.error(f"Error reading events from {stream_name}: {type(e).__name__}: {e}")
             raise EventStoreError(f"Failed to read events: {e}") from e
@@ -803,40 +907,95 @@ class KurrentDBEventStore:
         reason: str = "Entity deleted from read model"
     ) -> bool:
         """
-        Archive (soft-delete) an aggregate stream in KurrentDB.
+        Archive (soft-delete) an aggregate stream in KurrentDB using $tb metadata.
 
-        This should be called when an entity is deleted from PostgreSQL to prevent
-        stale events from being replayed. The stream is tombstoned but events are
-        preserved for audit/compliance.
+        KURRENTDB BEST PRACTICE (2025-11-28):
+        Uses TruncateBefore ($tb) metadata instead of delete_stream() to ensure
+        the stream can be recreated if needed. This is the recommended pattern
+        for stream archival that preserves the ability to append new events later.
+
+        Why NOT hard delete:
+        - Hard delete creates a tombstone that permanently prevents stream reuse
+        - If the same aggregate ID needs to be recreated, hard delete blocks it
+        - Soft delete via $tb allows stream reopening by appending new events
 
         Args:
             aggregate_id: The aggregate ID
-            aggregate_type: The aggregate type (e.g., "broker_account", "order")
+            aggregate_type: The aggregate type (e.g., "chat", "order")
             reason: Reason for archival (for logging)
 
         Returns:
             True if archived successfully, False if stream not found or error
         """
-        stream_name = f"{aggregate_type}-{aggregate_id}"
+        stream_name = self._get_stream_name(aggregate_id, aggregate_type)
 
         if not self._initialized or not self._client:
             log.warning(f"EventStore not initialized, cannot archive stream {stream_name}")
             return False
 
         try:
-            # KurrentDB soft-delete: deletes stream but keeps events
-            # Events can still be read with include_deleted=True
-            await self._client.delete_stream(stream_name)
+            # KURRENTDB BEST PRACTICE: Use $tb (TruncateBefore) metadata for soft delete
+            # This sets TruncateBefore to max value, marking all events as "deleted"
+            # but allowing the stream to be reopened by appending new events
+            # Also append a StreamArchived event for audit trail
 
-            log.info(
-                f"Archived EventStore stream '{stream_name}': {reason}. "
-                f"Events preserved for audit but stream is tombstoned."
+            # First, get current version to set proper $tb value
+            current_version = await self.get_aggregate_version(aggregate_id, aggregate_type)
+
+            if current_version == 0:
+                log.debug(f"Stream '{stream_name}' has no events, nothing to archive")
+                return True
+
+            # Append StreamArchived event for audit trail
+            archive_event = NewEvent(
+                type="StreamArchived",
+                data=json.dumps({
+                    "aggregate_id": str(aggregate_id),
+                    "aggregate_type": aggregate_type,
+                    "reason": reason,
+                    "archived_at": datetime.now(timezone.utc).isoformat(),
+                    "archived_version": current_version
+                }).encode('utf-8'),
+                metadata=json.dumps({
+                    "system_event": True,
+                    "reason": reason
+                }).encode('utf-8'),
+                content_type='application/json'
             )
 
-            # Also archive snapshot stream if exists
-            snapshot_stream = f"snapshot-{aggregate_type}-{aggregate_id}"
+            await self._client.append_to_stream(
+                stream_name=stream_name,
+                current_version=current_version - 1,  # 0-based
+                events=[archive_event]
+            )
+
+            # Set $tb to truncate all events before the archive event
+            # This marks old events for scavenging but keeps the stream usable
+            await self._client.set_stream_metadata(
+                stream_name,
+                metadata={
+                    '$tb': current_version,  # Truncate events before archive event
+                    '$archived': True,
+                    '$archivedAt': datetime.now(timezone.utc).isoformat(),
+                    '$archiveReason': reason
+                }
+            )
+
+            log.info(
+                f"Archived EventStore stream '{stream_name}' via $tb metadata: {reason}. "
+                f"Stream can be reopened by appending new events."
+            )
+
+            # Also archive snapshot stream if exists (use same pattern)
+            snapshot_stream = self._get_snapshot_stream_name(aggregate_id, aggregate_type)
             try:
-                await self._client.delete_stream(snapshot_stream)
+                await self._client.set_stream_metadata(
+                    snapshot_stream,
+                    metadata={
+                        '$tb': 9223372036854775807,  # Max Int64 - truncate all
+                        '$archived': True
+                    }
+                )
                 log.debug(f"Also archived snapshot stream '{snapshot_stream}'")
             except Exception:
                 # Snapshot stream might not exist, that's OK
@@ -844,7 +1003,9 @@ class KurrentDBEventStore:
 
             # Invalidate version cache
             if self._cache_manager:
-                cache_key = f"event_store:version:{stream_name}"
+                cache_key = self._cache_manager._make_key(
+                    "event_store", "version", aggregate_type, str(aggregate_id)
+                )
                 await self._cache_manager.delete(cache_key)
 
             return True
@@ -853,8 +1014,80 @@ class KurrentDBEventStore:
             log.debug(f"Stream '{stream_name}' not found for archival (may already be deleted)")
             return True  # Consider success - stream doesn't exist
 
+        except StreamIsDeletedError:
+            log.warning(
+                f"Stream '{stream_name}' was hard-deleted previously. "
+                f"Cannot archive a hard-deleted stream. This is a data integrity issue."
+            )
+            return False
+
         except Exception as e:
             log.error(f"Error archiving stream {stream_name}: {e}")
+            return False
+
+    async def hard_delete_stream(
+        self,
+        aggregate_id: uuid.UUID,
+        aggregate_type: str,
+        reason: str = "Permanent deletion requested"
+    ) -> bool:
+        """
+        PERMANENTLY delete a stream (use with extreme caution!).
+
+        WARNING: Hard delete creates a tombstone that permanently prevents
+        the stream name from being reused. Only use this for:
+        - GDPR "right to be forgotten" compliance
+        - Permanent data erasure requirements
+        - Test/development cleanup
+
+        For normal archival, use archive_stream() instead.
+
+        Args:
+            aggregate_id: The aggregate ID
+            aggregate_type: The aggregate type
+            reason: Reason for permanent deletion (for logging/audit)
+
+        Returns:
+            True if deleted, False otherwise
+        """
+        stream_name = self._get_stream_name(aggregate_id, aggregate_type)
+
+        if not self._initialized or not self._client:
+            log.warning(f"EventStore not initialized, cannot delete stream {stream_name}")
+            return False
+
+        log.warning(
+            f"HARD DELETING stream '{stream_name}': {reason}. "
+            f"This stream name can NEVER be reused!"
+        )
+
+        try:
+            # KurrentDB hard delete - creates permanent tombstone
+            await self._client.delete_stream(stream_name)
+
+            # Also delete snapshot stream
+            snapshot_stream = self._get_snapshot_stream_name(aggregate_id, aggregate_type)
+            try:
+                await self._client.delete_stream(snapshot_stream)
+            except Exception:
+                pass
+
+            # Invalidate cache
+            if self._cache_manager:
+                cache_key = self._cache_manager._make_key(
+                    "event_store", "version", aggregate_type, str(aggregate_id)
+                )
+                await self._cache_manager.delete(cache_key)
+
+            log.info(f"Hard deleted stream '{stream_name}'")
+            return True
+
+        except StreamNotFoundError:
+            log.debug(f"Stream '{stream_name}' not found for deletion")
+            return True
+
+        except Exception as e:
+            log.error(f"Error hard deleting stream {stream_name}: {e}")
             return False
 
     # =========================================================================

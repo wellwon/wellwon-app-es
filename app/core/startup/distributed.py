@@ -249,6 +249,7 @@ async def register_sync_projections_phase(app: FastAPI) -> None:
     # Import all projector modules to trigger decorator registration
     modules_to_import = [
         "app.user_account.projectors",
+        "app.chat.projectors",
     ]
 
     for module in modules_to_import:
@@ -266,6 +267,13 @@ async def register_sync_projections_phase(app: FastAPI) -> None:
         from app.user_account.projectors import UserAccountProjector
         projector_instances["user_account"] = UserAccountProjector(
             app.state.user_account_read_repo
+        )
+
+    # Chat Projector
+    if hasattr(app.state, 'chat_read_repo'):
+        from app.chat.projectors import ChatProjector
+        projector_instances["chat"] = ChatProjector(
+            app.state.chat_read_repo
         )
 
     # Store projector instances in app state for debugging

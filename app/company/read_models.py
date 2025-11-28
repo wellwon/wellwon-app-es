@@ -86,15 +86,24 @@ class UserCompanyReadModel(BaseModel):
 
 
 class TelegramSupergroupReadModel(BaseModel):
-    """Read model for Telegram supergroups (PostgreSQL table: telegram_supergroups)"""
-    id: uuid.UUID
-    company_id: uuid.UUID
-    telegram_group_id: int
+    """
+    Read model for Telegram supergroups (PostgreSQL table: telegram_supergroups).
+
+    Note: The table uses BIGINT for id which IS the Telegram group ID.
+    company_id is also BIGINT (FK to companies.id which may be BIGINT).
+    """
+    id: int  # Telegram group ID (BIGINT primary key)
+    company_id: Optional[int] = None  # FK to companies.id (BIGINT)
     title: str
     username: Optional[str] = None
     description: Optional[str] = None
     invite_link: Optional[str] = None
-    is_forum: bool = True
+    member_count: int = 0
+    is_forum: bool = False
+    is_active: bool = True
+    bot_is_admin: bool = False
+    status_emoji: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -102,9 +111,13 @@ class TelegramSupergroupReadModel(BaseModel):
         from_attributes=True,
         json_encoders={
             datetime: lambda v: v.isoformat() if v else None,
-            uuid.UUID: lambda v: str(v)
         }
     )
+
+    @property
+    def telegram_group_id(self) -> int:
+        """Alias for id - the Telegram group ID."""
+        return self.id
 
 
 class BalanceTransactionReadModel(BaseModel):

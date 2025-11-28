@@ -29,7 +29,7 @@ class ChatReadModel(BaseModel):
     telegram_chat_id: Optional[int] = None
     telegram_topic_id: Optional[int] = None
     # Metadata
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
     version: int = 0
 
     model_config = ConfigDict(

@@ -10,6 +10,7 @@ from app.core.fastapi_types import FastAPI
 
 # Read repositories
 from app.infra.read_repos.user_account_read_repo import UserAccountReadRepo
+from app.infra.read_repos.chat_read_repo import ChatReadRepo
 
 # Services
 from app.services.application.user_auth_service import UserAuthenticationService
@@ -21,6 +22,7 @@ async def initialize_read_repositories(app: FastAPI) -> None:
     """Initialize read repositories"""
 
     app.state.user_account_read_repo = UserAccountReadRepo()
+    app.state.chat_read_repo = ChatReadRepo()
 
     logger.info("Read repositories initialized.")
 

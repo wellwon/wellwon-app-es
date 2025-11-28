@@ -92,7 +92,7 @@ def sync_projection(
             parts = module_name.split(".")
             for i, part in enumerate(parts):
                 if part in ["user_account", "broker_connection", "broker_account", "virtual_broker", "order",
-                            "position"]:
+                            "position", "chat", "company"]:
                     domain = part
                     break
 

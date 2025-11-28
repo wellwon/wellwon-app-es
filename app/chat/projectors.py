@@ -51,7 +51,7 @@ class ChatProjector:
             company_id=uuid.UUID(event_data['company_id']) if event_data.get('company_id') else None,
             telegram_chat_id=event_data.get('telegram_chat_id'),
             telegram_topic_id=event_data.get('telegram_topic_id'),
-            created_at=envelope.timestamp,
+            created_at=envelope.stored_at,
         )
 
     @sync_projection("ChatUpdated")
@@ -66,7 +66,7 @@ class ChatProjector:
             chat_id=chat_id,
             name=event_data.get('name'),
             metadata=event_data.get('metadata'),
-            updated_at=envelope.timestamp,
+            updated_at=envelope.stored_at,
         )
 
     @sync_projection("ChatArchived")
@@ -79,7 +79,7 @@ class ChatProjector:
         await self.chat_read_repo.update_chat_status(
             chat_id=chat_id,
             is_active=False,
-            updated_at=envelope.timestamp,
+            updated_at=envelope.stored_at,
         )
 
     @sync_projection("ChatRestored")
@@ -92,7 +92,7 @@ class ChatProjector:
         await self.chat_read_repo.update_chat_status(
             chat_id=chat_id,
             is_active=True,
-            updated_at=envelope.timestamp,
+            updated_at=envelope.stored_at,
         )
 
     # =========================================================================
@@ -113,7 +113,7 @@ class ChatProjector:
             chat_id=chat_id,
             user_id=user_id,
             role=event_data.get('role', 'member'),
-            joined_at=datetime.fromisoformat(event_data['joined_at']) if event_data.get('joined_at') else envelope.timestamp,
+            joined_at=datetime.fromisoformat(event_data['joined_at']) if event_data.get('joined_at') else envelope.stored_at,
         )
 
         # Update participant count on chat
@@ -207,13 +207,13 @@ class ChatProjector:
             telegram_forward_data=event_data.get('telegram_forward_data'),
             telegram_topic_id=event_data.get('telegram_topic_id'),
             sync_direction=sync_direction,
-            created_at=envelope.timestamp,
+            created_at=envelope.stored_at,
         )
 
         # Update chat's last message
         await self.chat_read_repo.update_chat_last_message(
             chat_id=uuid.UUID(event_data['chat_id']),
-            last_message_at=envelope.timestamp,
+            last_message_at=envelope.stored_at,
             last_message_content=event_data['content'][:100],  # Truncate for preview
             last_message_sender_id=sender_id,
         )
@@ -230,7 +230,7 @@ class ChatProjector:
             message_id=message_id,
             content=event_data['new_content'],
             is_edited=True,
-            updated_at=envelope.timestamp,
+            updated_at=envelope.stored_at,
         )
 
     @sync_projection("MessageDeleted")
@@ -243,7 +243,7 @@ class ChatProjector:
 
         await self.chat_read_repo.soft_delete_message(
             message_id=message_id,
-            updated_at=envelope.timestamp,
+            updated_at=envelope.stored_at,
         )
 
     @sync_projection("MessageReadStatusUpdated")
@@ -258,7 +258,7 @@ class ChatProjector:
         await self.chat_read_repo.insert_message_read(
             message_id=message_id,
             user_id=user_id,
-            read_at=datetime.fromisoformat(event_data['read_at']) if event_data.get('read_at') else envelope.timestamp,
+            read_at=datetime.fromisoformat(event_data['read_at']) if event_data.get('read_at') else envelope.stored_at,
         )
 
     @sync_projection("MessagesMarkedAsRead")
@@ -276,7 +276,7 @@ class ChatProjector:
             chat_id=chat_id,
             user_id=user_id,
             last_read_message_id=last_read_message_id,
-            last_read_at=envelope.timestamp,
+            last_read_at=envelope.stored_at,
         )
 
     # =========================================================================
@@ -335,13 +335,13 @@ class ChatProjector:
             telegram_message_id=event_data['telegram_message_id'],
             telegram_user_id=event_data.get('telegram_user_id'),
             sync_direction='telegram_to_web',
-            created_at=envelope.timestamp,
+            created_at=envelope.stored_at,
         )
 
         # Update chat's last message
         await self.chat_read_repo.update_chat_last_message(
             chat_id=chat_id,
-            last_message_at=envelope.timestamp,
+            last_message_at=envelope.stored_at,
             last_message_content=event_data['content'][:100],
             last_message_sender_id=None,
         )

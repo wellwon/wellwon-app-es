@@ -716,11 +716,11 @@ security_scheme = HTTPBearer(auto_error=False)
 async def get_current_user(
         credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
         request: Request = None,
-) -> str:
+) -> dict:
     """
     FastAPI dependency for HTTP endpoints.
     - Expects 'Authorization: Bearer <token>'.
-    - Returns subject (user_id) or raises HTTPException(401).
+    - Returns dict with user_id or raises HTTPException(401).
     - CQRS COMPLIANT: Uses Query Bus instead of direct repository access
     - SECURITY: Validates context fingerprint if enabled
     """
@@ -778,7 +778,7 @@ async def get_current_user(
         # Fallback for contexts where query_bus is not available (e.g., startup, tests)
         log.debug("Query bus not available in get_current_user, skipping user validation")
 
-    return user_id
+    return {"user_id": user_uuid}
 
 
 # =============================================================================

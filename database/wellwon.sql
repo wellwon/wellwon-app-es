@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS user_accounts (
     is_developer BOOLEAN DEFAULT FALSE,
     user_type user_type_enum DEFAULT 'client' NOT NULL,
     user_number INTEGER,
-    telegram_user_id BIGINT,  -- Link to tg_users.id for mentions
+    telegram_user_id BIGINT,  -- Link to telegram_users.id for mentions
 
     -- Event sourcing support
     aggregate_version INTEGER DEFAULT 1,
@@ -250,28 +250,6 @@ CREATE TRIGGER outbox_insert_notify
     AFTER INSERT ON event_outbox
     FOR EACH ROW
     EXECUTE FUNCTION notify_outbox_event();
-
--- ======================
--- CES OUTBOX (Compensating Event System - for external change detection)
--- ======================
--- NOTE: This table is DEPRECATED - we use event_outbox directly for CES events
--- Keeping for backwards compatibility
-CREATE TABLE IF NOT EXISTS cdc_outbox (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    aggregate_type TEXT NOT NULL,
-    aggregate_id UUID NOT NULL,
-    change_type TEXT NOT NULL,
-    changed_fields JSONB NOT NULL,
-    current_state JSONB NOT NULL,
-    metadata JSONB,
-    processed_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT cdc_outbox_unprocessed CHECK (processed_at IS NULL OR processed_at >= created_at)
-);
-
-CREATE INDEX IF NOT EXISTS idx_cdc_outbox_unprocessed ON cdc_outbox(created_at) WHERE processed_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_cdc_outbox_aggregate ON cdc_outbox(aggregate_id, aggregate_type);
 
 -- ======================
 -- CES TRIGGER FOR ADMIN FIELD CHANGES (Compensating Event System)
@@ -890,6 +868,7 @@ CREATE TABLE IF NOT EXISTS messages (
     telegram_topic_id INTEGER,
     telegram_forward_data JSONB,
     sync_direction TEXT,
+    source TEXT DEFAULT 'web',  -- web, telegram, api
 
     -- Status
     is_edited BOOLEAN DEFAULT FALSE,
@@ -1006,9 +985,9 @@ CREATE INDEX IF NOT EXISTS idx_telegram_group_members_supergroup_id ON telegram_
 CREATE INDEX IF NOT EXISTS idx_telegram_group_members_telegram_user_id ON telegram_group_members(telegram_user_id);
 
 -- ======================
--- TG_USERS (Telegram Users)
+-- TELEGRAM_USERS (Telegram Users)
 -- ======================
-CREATE TABLE IF NOT EXISTS tg_users (
+CREATE TABLE IF NOT EXISTS telegram_users (
     id BIGINT PRIMARY KEY,
     first_name TEXT NOT NULL,
     last_name TEXT,
@@ -1032,11 +1011,11 @@ CREATE TABLE IF NOT EXISTS tg_users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_tg_users_username ON tg_users(username);
+CREATE INDEX IF NOT EXISTS idx_telegram_users_username ON telegram_users(username);
 
-DROP TRIGGER IF EXISTS set_tg_users_updated_at ON tg_users;
-CREATE TRIGGER set_tg_users_updated_at
-    BEFORE UPDATE ON tg_users
+DROP TRIGGER IF EXISTS set_telegram_users_updated_at ON telegram_users;
+CREATE TRIGGER set_telegram_users_updated_at
+    BEFORE UPDATE ON telegram_users
     FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 
 -- ======================

@@ -44,18 +44,23 @@ class ChatReadRepo:
         telegram_topic_id: Optional[int] = None,
         created_at: Optional[datetime] = None,
     ) -> None:
-        """Insert a new chat record"""
+        """
+        Insert a new chat record.
+
+        Note: telegram_chat_id is mapped to telegram_supergroup_id in the database.
+        """
+        telegram_sync = telegram_chat_id is not None
         await pg_client.execute(
             """
             INSERT INTO chats (
-                id, name, chat_type, created_by, company_id,
-                telegram_chat_id, telegram_topic_id, created_at,
-                is_active, participant_count, version
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, 0, 1)
+                id, name, type, created_by, company_id,
+                telegram_supergroup_id, telegram_topic_id, telegram_sync, created_at,
+                is_active
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
             ON CONFLICT (id) DO NOTHING
             """,
             chat_id, name, chat_type, created_by, company_id,
-            telegram_chat_id, telegram_topic_id, created_at or datetime.utcnow(),
+            telegram_chat_id, telegram_topic_id, telegram_sync, created_at or datetime.utcnow(),
         )
 
     @staticmethod
@@ -135,11 +140,15 @@ class ChatReadRepo:
         telegram_chat_id: Optional[int],
         telegram_topic_id: Optional[int] = None,
     ) -> None:
-        """Update Telegram integration fields"""
+        """
+        Update Telegram integration fields.
+
+        Note: telegram_chat_id is mapped to telegram_supergroup_id in the database.
+        """
         await pg_client.execute(
             """
             UPDATE chats
-            SET telegram_chat_id = $1, telegram_topic_id = $2, updated_at = NOW()
+            SET telegram_supergroup_id = $1, telegram_topic_id = $2, telegram_sync = true, updated_at = NOW()
             WHERE id = $3
             """,
             telegram_chat_id, telegram_topic_id, chat_id
@@ -165,7 +174,19 @@ class ChatReadRepo:
     async def get_chat_by_id(chat_id: uuid.UUID) -> Optional[ChatReadModel]:
         """Get chat by ID"""
         row = await pg_client.fetchrow(
-            "SELECT * FROM chats WHERE id = $1",
+            """
+            SELECT
+                c.id, c.name, c.type as chat_type, c.company_id, c.created_by,
+                c.created_at, c.updated_at, c.is_active, c.metadata,
+                c.telegram_supergroup_id as telegram_chat_id,
+                c.telegram_topic_id,
+                0 as participant_count, 0 as version,
+                NULL::timestamp as last_message_at,
+                NULL::text as last_message_content,
+                NULL::uuid as last_message_sender_id
+            FROM chats c
+            WHERE c.id = $1
+            """,
             chat_id
         )
         if not row:
@@ -177,20 +198,43 @@ class ChatReadRepo:
         telegram_chat_id: int,
         telegram_topic_id: Optional[int] = None,
     ) -> Optional[ChatReadModel]:
-        """Get chat by Telegram chat ID"""
+        """
+        Get chat by Telegram supergroup ID.
+
+        Note: The database uses telegram_supergroup_id (foreign key to telegram_supergroups)
+        but we keep the interface name as telegram_chat_id for API compatibility.
+        """
         if telegram_topic_id:
             row = await pg_client.fetchrow(
                 """
-                SELECT * FROM chats
-                WHERE telegram_chat_id = $1 AND telegram_topic_id = $2
+                SELECT
+                    c.id, c.name, c.type as chat_type, c.company_id, c.created_by,
+                    c.created_at, c.updated_at, c.is_active, c.metadata,
+                    c.telegram_supergroup_id as telegram_chat_id,
+                    c.telegram_topic_id,
+                    0 as participant_count, 0 as version,
+                    NULL::timestamp as last_message_at,
+                    NULL::text as last_message_content,
+                    NULL::uuid as last_message_sender_id
+                FROM chats c
+                WHERE c.telegram_supergroup_id = $1 AND c.telegram_topic_id = $2
                 """,
                 telegram_chat_id, telegram_topic_id
             )
         else:
             row = await pg_client.fetchrow(
                 """
-                SELECT * FROM chats
-                WHERE telegram_chat_id = $1 AND telegram_topic_id IS NULL
+                SELECT
+                    c.id, c.name, c.type as chat_type, c.company_id, c.created_by,
+                    c.created_at, c.updated_at, c.is_active, c.metadata,
+                    c.telegram_supergroup_id as telegram_chat_id,
+                    c.telegram_topic_id,
+                    0 as participant_count, 0 as version,
+                    NULL::timestamp as last_message_at,
+                    NULL::text as last_message_content,
+                    NULL::uuid as last_message_sender_id
+                FROM chats c
+                WHERE c.telegram_supergroup_id = $1 AND (c.telegram_topic_id IS NULL OR c.telegram_sync = true)
                 """,
                 telegram_chat_id
             )

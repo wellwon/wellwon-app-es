@@ -38,6 +38,30 @@ log = logging.getLogger("wellwon.telegram.webhook")
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 
 
+def normalize_telegram_chat_id(chat_id: int) -> int:
+    """
+    Normalize Telegram chat ID to the supergroup ID format stored in database.
+
+    Telegram uses different ID formats:
+    - Supergroups: -100{group_id} (e.g., -1003190729022)
+    - Groups: negative numbers
+    - Users: positive numbers
+    - Channels: -100{channel_id}
+
+    Our database stores just the numeric part without -100 prefix for supergroups.
+
+    Examples:
+        -1003190729022 -> 3190729022  (supergroup)
+        -1234567890 -> -1234567890    (regular group, keep as-is)
+        123456789 -> 123456789        (user, keep as-is)
+    """
+    chat_id_str = str(chat_id)
+    if chat_id_str.startswith("-100") and len(chat_id_str) > 4:
+        # It's a supergroup/channel - extract the ID part
+        return int(chat_id_str[4:])
+    return chat_id
+
+
 # =============================================================================
 # Dependencies
 # =============================================================================
@@ -118,10 +142,11 @@ async def telegram_webhook(
     try:
         # Parse update data
         update_data = await request.json()
-        log.debug(f"Received Telegram update: {update_data.get('update_id')}")
+        log.info(f"Received Telegram webhook update: {update_data.get('update_id')}, chat_id: {update_data.get('message', {}).get('chat', {}).get('id')}")
 
         # Process through adapter
         telegram_message = await adapter.process_webhook_update(update_data)
+        log.info(f"Adapter processed message: {telegram_message is not None}")
 
         if telegram_message:
             log.info(
@@ -130,9 +155,12 @@ async def telegram_webhook(
                 f"user {telegram_message.from_username}"
             )
 
+            # Normalize chat ID (convert -100{id} to just {id} for supergroups)
+            normalized_chat_id = normalize_telegram_chat_id(telegram_message.chat_id)
+
             # Find WellWon chat by Telegram ID via Query Bus
             query = GetChatByTelegramIdQuery(
-                telegram_chat_id=telegram_message.chat_id,
+                telegram_chat_id=normalized_chat_id,
                 telegram_topic_id=telegram_message.topic_id,
             )
             chat_detail = await query_bus.query(query)
@@ -173,17 +201,21 @@ async def telegram_webhook(
                 log.info(f"Dispatched ProcessTelegramMessageCommand for chat {chat_detail.id}")
             else:
                 log.warning(
-                    f"No WellWon chat found for Telegram chat_id={telegram_message.chat_id}, "
-                    f"topic_id={telegram_message.topic_id}"
+                    f"No WellWon chat found for Telegram chat_id={telegram_message.chat_id} "
+                    f"(normalized: {normalized_chat_id}), topic_id={telegram_message.topic_id}"
                 )
 
         return WebhookResponse(ok=True)
 
     except Exception as e:
-        log.error(f"Error processing Telegram webhook: {e}", exc_info=True)
+        import traceback
+        error_detail = f"{type(e).__name__}: {str(e)}"
+        tb = traceback.format_exc()
+        log.error(f"Error processing Telegram webhook: {error_detail}\n{tb}")
         # Return ok=True to prevent Telegram from retrying
         # (errors should be handled internally)
-        return WebhookResponse(ok=True, message="Error logged")
+        # DEBUG: Include error detail in response for debugging
+        return WebhookResponse(ok=True, message=f"Error: {error_detail}")
 
 
 @router.get("/webhook/info", response_model=WebhookInfoResponse)

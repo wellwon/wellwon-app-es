@@ -228,6 +228,51 @@ class BaseCommandHandler(ABC):
 
         return new_version
 
+    async def publish_events(
+            self,
+            aggregate: AggregateProtocol,
+            aggregate_id: uuid.UUID,
+            command: Any,
+            aggregate_type: Optional[str] = None,
+    ) -> int:
+        """
+        Convenience method for publishing events with simpler signature.
+
+        This wraps publish_and_commit_events for handlers that use the
+        simplified (aggregate, aggregate_id, command) pattern.
+
+        Args:
+            aggregate: The aggregate containing uncommitted events
+            aggregate_id: ID of the aggregate (for logging/tracking)
+            command: The command that caused these events (for correlation)
+            aggregate_type: Type of aggregate. If not provided, derived from aggregate class name.
+
+        Returns:
+            The new version number after publishing
+        """
+        # Derive aggregate type from aggregate class name if not provided
+        if aggregate_type is None:
+            class_name = aggregate.__class__.__name__
+            # Remove 'Aggregate' suffix if present (e.g., ChatAggregate -> Chat)
+            aggregate_type = class_name.replace('Aggregate', '') if class_name.endswith('Aggregate') else class_name
+
+        # Extract correlation/causation from command if available
+        causation_id = getattr(command, 'command_id', None) or getattr(command, 'causation_id', None)
+        correlation_id = getattr(command, 'correlation_id', None)
+        saga_id = getattr(command, 'saga_id', None)
+
+        # Determine expected version - None for new aggregates, current version for existing
+        expected_version = None if aggregate.version == 0 else aggregate.version
+
+        return await self.publish_and_commit_events(
+            aggregate=aggregate,
+            aggregate_type=aggregate_type,
+            expected_version=expected_version,
+            causation_id=causation_id,
+            correlation_id=correlation_id,
+            saga_id=saga_id,
+        )
+
     @abstractmethod
     async def handle(self, command: Any) -> Any:
         """

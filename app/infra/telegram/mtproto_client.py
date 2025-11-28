@@ -456,15 +456,25 @@ class TelegramMTProtoClient:
             # Convert emoji to ID
             icon_emoji_id = EMOJI_MAP.get(icon_emoji) if icon_emoji else None
 
+            import random
             result = await self._client(CreateForumTopicRequest(
-                channel=group,
+                peer=group,
                 title=title,
                 icon_emoji_id=icon_emoji_id,
                 send_as=None,
-                random_id=None
+                random_id=random.randint(1, 2**63 - 1)
             ))
 
-            topic_id = result.updates[0].message.id if result.updates else None
+            # Extract topic_id from result
+            topic_id = None
+            if hasattr(result, 'updates'):
+                for update in result.updates:
+                    if hasattr(update, 'id'):
+                        topic_id = update.id
+                        break
+                    elif hasattr(update, 'message') and hasattr(update.message, 'id'):
+                        topic_id = update.message.id
+                        break
             log.info(f"Topic '{title}' created with ID: {topic_id}")
 
             return TopicInfo(
@@ -564,7 +574,7 @@ class TelegramMTProtoClient:
             group = await self._client.get_entity(group_id)
 
             result = await self._client(GetForumTopicsRequest(
-                channel=group,
+                peer=group,
                 offset_date=None,
                 offset_id=0,
                 offset_topic=0,

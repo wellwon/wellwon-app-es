@@ -414,7 +414,7 @@ async def register(
 
 @router.get("/me", response_model=UserProfileResponse)
 async def get_me(
-        current_user_id: Annotated[str, Depends(get_current_user)],
+        current_user: Annotated[dict, Depends(get_current_user)],
         request: Request,
         query_bus=Depends(get_query_bus)
 ) -> UserProfileResponse:
@@ -422,7 +422,7 @@ async def get_me(
     Get current user profile using query bus.
     """
     try:
-        user_uuid = uuid.UUID(current_user_id)
+        user_uuid = current_user["user_id"]
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user id") from exc
 
@@ -467,7 +467,7 @@ async def get_me(
 @router.patch("/profile", response_model=UserProfileResponse)
 async def update_profile(
         payload: UpdateProfileRequest,
-        current_user_id: Annotated[str, Depends(get_current_user)],
+        current_user: Annotated[dict, Depends(get_current_user)],
         request: Request,
         command_bus=Depends(get_command_bus),
         query_bus=Depends(get_query_bus)
@@ -476,7 +476,7 @@ async def update_profile(
     Update user profile (WellWon integrated).
     """
     try:
-        user_uuid = uuid.UUID(current_user_id)
+        user_uuid = current_user["user_id"]
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user id") from exc
 
@@ -500,19 +500,19 @@ async def update_profile(
         log.info(f"Profile updated for user {user_uuid}, fields: {list(update_fields.keys())}")
 
     # Return current profile
-    return await get_me(current_user_id, request, query_bus)
+    return await get_me(current_user, request, query_bus)
 
 
 @router.post("/verify-password", response_model=StatusResponse)
 async def verify_password(
         payload: VerifyPasswordPayload,
-        current_user_id: Annotated[str, Depends(get_current_user)],
+        current_user: Annotated[dict, Depends(get_current_user)],
         query_bus=Depends(get_query_bus)
 ) -> StatusResponse:
     """
     Verify user password using query bus.
     """
-    user_uuid = uuid.UUID(current_user_id)
+    user_uuid = current_user["user_id"]
 
     query = ValidateUserCredentialsQuery(
         user_id=user_uuid,
@@ -522,7 +522,7 @@ async def verify_password(
     result = await query_bus.query(query)
 
     if not result['valid']:
-        log.warning("Failed password verification for user=%s", current_user_id)
+        log.warning("Failed password verification for user=%s", current_user["user_id"])
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
 
     return StatusResponse(status="success", message="Password verified")
@@ -531,7 +531,7 @@ async def verify_password(
 @router.post("/change-password", response_model=StatusResponse)
 async def change_password(
         payload: ChangePasswordPayload,
-        current_user_id: Annotated[str, Depends(get_current_user)],
+        current_user: Annotated[dict, Depends(get_current_user)],
         request: Request,
         command_bus=Depends(get_command_bus),
         query_bus=Depends(get_query_bus)
@@ -539,7 +539,7 @@ async def change_password(
     """
     Change user password using command bus.
     """
-    user_uuid = uuid.UUID(current_user_id)
+    user_uuid = current_user["user_id"]
 
     # First verify old password
     validate_query = ValidateUserCredentialsQuery(
@@ -561,18 +561,18 @@ async def change_password(
     # Revoke all sessions if requested
     if payload.revoke_all_sessions:
         # Use JWT manager to revoke all refresh tokens
-        await jwt_manager.revoke_all_refresh_tokens(current_user_id)
+        await jwt_manager.revoke_all_refresh_tokens(current_user["user_id"])
 
         # Also invalidate session metadata
         invalidate_query = InvalidateAllUserSessionsQuery(user_id=user_uuid)
         await query_bus.query(invalidate_query)
-        log.info(f"Revoked all sessions for user {current_user_id} after password change")
+        log.info(f"Revoked all sessions for user {current_user["user_id"]} after password change")
 
     # Log security event
     device_info = _get_device_info(request)
     log_event_query = LogSecurityEventQuery(
         event_type="password_changed",
-        user_id=current_user_id,
+        user_id=current_user["user_id"],
         ip_address=device_info["ip_address"],
         user_agent=device_info["user_agent"],
         success=True,
@@ -580,7 +580,7 @@ async def change_password(
     )
     await query_bus.query(log_event_query)
 
-    log.info("Password changed for user=%s", current_user_id)
+    log.info("Password changed for user=%s", current_user["user_id"])
     return StatusResponse(status="success", message="Password updated successfully")
 
 
@@ -623,7 +623,7 @@ async def forgot_password(
 
 @router.post("/logout", response_model=StatusResponse)
 async def logout_user(
-        current_user_id: Annotated[str, Depends(get_current_user)],
+        current_user: Annotated[dict, Depends(get_current_user)],
         request: Request,
         response: Response,
         query_bus=Depends(get_query_bus)
@@ -658,7 +658,7 @@ async def logout_user(
     # Invalidate the current session
     if session_id:
         invalidate_query = InvalidateUserSessionQuery(
-            user_id=uuid.UUID(current_user_id),
+            user_id=current_user["user_id"],
             session_id=session_id,
             reason="User logout"
         )
@@ -685,7 +685,7 @@ async def logout_user(
     device_info = _get_device_info(request)
     log_event_query = LogSecurityEventQuery(
         event_type="logout",
-        user_id=current_user_id,
+        user_id=current_user["user_id"],
         ip_address=device_info["ip_address"],
         user_agent=device_info["user_agent"],
         success=True,
@@ -699,22 +699,22 @@ async def logout_user(
         if event_bus:
             await event_bus.publish("transport.user-account-events", {
                 "event_type": "UserLoggedOut",
-                "user_id": str(current_user_id),
+                "user_id": str(current_user["user_id"]),
                 "session_id": session_id,
                 "logout_at": datetime.now(timezone.utc).isoformat()
             })
-            log.debug(f"UserLoggedOut event emitted for user {current_user_id}")
+            log.debug(f"UserLoggedOut event emitted for user {current_user["user_id"]}")
     except Exception as e:
         # Log error but don't fail logout operation
-        log.error(f"Failed to emit UserLoggedOut event for user {current_user_id}: {e}")
+        log.error(f"Failed to emit UserLoggedOut event for user {current_user["user_id"]}: {e}")
 
-    log.info(f"User logged out: {current_user_id}")
+    log.info(f"User logged out: {current_user["user_id"]}")
     return StatusResponse(status="success", message="Logged out successfully")
 
 
 @router.post("/logout-all", response_model=StatusResponse)
 async def logout_all_sessions(
-        current_user_id: Annotated[str, Depends(get_current_user)],
+        current_user: Annotated[dict, Depends(get_current_user)],
         response: Response,
         request: Request,
         query_bus=Depends(get_query_bus)
@@ -723,10 +723,10 @@ async def logout_all_sessions(
     Logout from all devices/sessions using queries.
     """
     # Revoke all refresh tokens via JWT manager
-    await jwt_manager.revoke_all_refresh_tokens(current_user_id)
+    await jwt_manager.revoke_all_refresh_tokens(current_user["user_id"])
 
     # Invalidate all session metadata
-    invalidate_query = InvalidateAllUserSessionsQuery(user_id=uuid.UUID(current_user_id))
+    invalidate_query = InvalidateAllUserSessionsQuery(user_id=current_user["user_id"])
     result = await query_bus.query(invalidate_query)
 
     # Clear cookies from current session
@@ -750,7 +750,7 @@ async def logout_all_sessions(
     device_info = _get_device_info(request)
     log_event_query = LogSecurityEventQuery(
         event_type="logout_all",
-        user_id=current_user_id,
+        user_id=current_user["user_id"],
         ip_address=device_info["ip_address"],
         user_agent=device_info["user_agent"],
         success=True,
@@ -758,20 +758,20 @@ async def logout_all_sessions(
     )
     await query_bus.query(log_event_query)
 
-    log.info(f"All sessions terminated for user: {current_user_id}")
+    log.info(f"All sessions terminated for user: {current_user["user_id"]}")
     return StatusResponse(status="success", message="Logged out from all devices")
 
 
 @router.get("/sessions", response_model=ActiveSessionsResponse)
 async def get_active_sessions(
-        current_user_id: Annotated[str, Depends(get_current_user)],
+        current_user: Annotated[dict, Depends(get_current_user)],
         request: Request,
         query_bus=Depends(get_query_bus)
 ) -> ActiveSessionsResponse:
     """
     Get list of active sessions using query bus.
     """
-    user_uuid = uuid.UUID(current_user_id)
+    user_uuid = current_user["user_id"]
 
     # Query active sessions
     sessions_query = GetUserActiveSessionsQuery(user_id=user_uuid)
@@ -816,7 +816,7 @@ async def get_active_sessions(
 @router.post("/sessions/{session_id}/terminate", response_model=StatusResponse)
 async def terminate_session(
         session_id: str,
-        current_user_id: Annotated[str, Depends(get_current_user)],
+        current_user: Annotated[dict, Depends(get_current_user)],
         request: Request,
         query_bus=Depends(get_query_bus)
 ) -> StatusResponse:
@@ -825,7 +825,7 @@ async def terminate_session(
     """
     # Invalidate the specific session
     invalidate_query = InvalidateUserSessionQuery(
-        user_id=uuid.UUID(current_user_id),
+        user_id=current_user["user_id"],
         session_id=session_id,
         reason="User terminated session"
     )
@@ -837,14 +837,14 @@ async def terminate_session(
             detail="Session not found or already terminated"
         )
 
-    log.info(f"Session {session_id} terminated for user {current_user_id}")
+    log.info(f"Session {session_id} terminated for user {current_user["user_id"]}")
     return StatusResponse(status="success", message="Session terminated successfully")
 
 
 @router.post("/delete", response_model=StatusResponse)
 async def delete_account(
         payload: DeleteAccountPayload,
-        current_user_id: Annotated[str, Depends(get_current_user)],
+        current_user: Annotated[dict, Depends(get_current_user)],
         response: Response,
         request: Request,
         command_bus=Depends(get_command_bus),
@@ -853,7 +853,7 @@ async def delete_account(
     """
     Delete user account using command bus.
     """
-    user_uuid = uuid.UUID(current_user_id)
+    user_uuid = current_user["user_id"]
 
     # Verify password
     validate_query = ValidateUserCredentialsQuery(
@@ -863,11 +863,11 @@ async def delete_account(
 
     validation_result = await query_bus.query(validate_query)
     if not validation_result['valid']:
-        log.warning("Failed account deletion attempt for user=%s", current_user_id)
+        log.warning("Failed account deletion attempt for user=%s", current_user["user_id"])
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
 
     # Revoke all refresh tokens
-    await jwt_manager.revoke_all_refresh_tokens(current_user_id)
+    await jwt_manager.revoke_all_refresh_tokens(current_user["user_id"])
 
     # Clear all sessions
     invalidate_query = InvalidateAllUserSessionsQuery(user_id=user_uuid)
@@ -898,7 +898,7 @@ async def delete_account(
     device_info = _get_device_info(request)
     log_event_query = LogSecurityEventQuery(
         event_type="account_deleted",
-        user_id=current_user_id,
+        user_id=current_user["user_id"],
         ip_address=device_info["ip_address"],
         user_agent=device_info["user_agent"],
         success=True,
@@ -906,7 +906,7 @@ async def delete_account(
     )
     await query_bus.query(log_event_query)
 
-    log.info("Account deletion initiated for user=%s", current_user_id)
+    log.info("Account deletion initiated for user=%s", current_user["user_id"])
     return StatusResponse(
         status="accepted",
         message="Account scheduled for deletion. You have 30 days to reactivate.",
@@ -976,7 +976,7 @@ async def refresh_access_token(
 
 @router.get("/profiles/with-telegram", response_model=list[ProfileWithTelegramResponse])
 async def get_profiles_with_telegram(
-        current_user_id: Annotated[str, Depends(get_current_user)],
+        current_user: Annotated[dict, Depends(get_current_user)],
 ) -> list[ProfileWithTelegramResponse]:
     """
     Get all user profiles for mentions feature.
@@ -1012,7 +1012,7 @@ async def get_profiles_with_telegram(
 @router.post("/link-telegram", response_model=StatusResponse)
 async def link_telegram_account(
         payload: LinkTelegramRequest,
-        current_user_id: Annotated[str, Depends(get_current_user)],
+        current_user: Annotated[dict, Depends(get_current_user)],
 ) -> StatusResponse:
     """
     Link a Telegram user ID to the current WellWon account.
@@ -1022,14 +1022,14 @@ async def link_telegram_account(
     from app.infra.read_repos.user_account_read_repo import UserAccountReadRepo
 
     try:
-        user_uuid = uuid.UUID(current_user_id)
+        user_uuid = current_user["user_id"]
         success = await UserAccountReadRepo.update_telegram_user_id(
             user_id=user_uuid,
             telegram_user_id=payload.telegram_user_id
         )
 
         if success:
-            log.info(f"User {current_user_id} linked to Telegram user {payload.telegram_user_id}")
+            log.info(f"User {current_user["user_id"]} linked to Telegram user {payload.telegram_user_id}")
             return StatusResponse(
                 status="success",
                 message="Telegram account linked successfully"

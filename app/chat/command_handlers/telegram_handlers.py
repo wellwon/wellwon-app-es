@@ -104,15 +104,80 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
+        self._chat_read_repo = None
+
+    async def _bootstrap_aggregate_from_read_model(
+        self,
+        aggregate: ChatAggregate,
+        chat_id: uuid.UUID
+    ) -> None:
+        """
+        Bootstrap aggregate state from read model for legacy/migrated chats.
+
+        This creates a ChatCreated event to properly initialize the aggregate state.
+        This event will be stored in Event Store so subsequent replays work correctly.
+
+        This is a migration support feature for chats that were created
+        before Event Sourcing was implemented.
+        """
+        try:
+            from app.infra.read_repos.chat_read_repo import ChatReadRepo
+            chat = await ChatReadRepo.get_chat_by_id(chat_id)
+
+            if chat:
+                log.info(
+                    f"Bootstrapping aggregate from read model: {chat_id}, "
+                    f"name={chat.name}, type={chat.chat_type}, "
+                    f"telegram_chat_id={chat.telegram_chat_id}, telegram_topic_id={chat.telegram_topic_id}"
+                )
+                # Create the chat event to establish proper aggregate state
+                # This will be stored in Event Store for future replays
+                aggregate.create_chat(
+                    name=chat.name,
+                    chat_type=chat.chat_type,
+                    created_by=chat.created_by,
+                    company_id=chat.company_id,
+                    telegram_chat_id=chat.telegram_chat_id,
+                    telegram_topic_id=chat.telegram_topic_id,
+                )
+                log.info(f"Created ChatCreated event for bootstrapped chat: {chat_id}, state.telegram_chat_id={aggregate.state.telegram_chat_id}")
+        except Exception as e:
+            log.warning(f"Failed to bootstrap aggregate from read model: {e}")
 
     async def handle(self, command: ProcessTelegramMessageCommand) -> uuid.UUID:
-        log.info(
-            f"Processing Telegram message {command.telegram_message_id} "
-            f"from user {command.telegram_user_id} in chat {command.chat_id}"
+        log.error(
+            f"=== ProcessTelegramMessageHandler START === "
+            f"msg_id={command.telegram_message_id} chat_id={command.chat_id}"
         )
 
         events = await self.event_store.get_events(command.chat_id, "chat")
+        log.error(f"EVENTS: Got {len(events)} events from event store for chat {command.chat_id}")
+
+        if events:
+            for i, e in enumerate(events):
+                # Log event details including telegram_chat_id if present
+                event_data = e.event_data if hasattr(e, 'event_data') else {}
+                tg_chat_id = event_data.get('telegram_chat_id', 'N/A') if isinstance(event_data, dict) else 'N/A'
+                log.info(f"  Event {i}: type={e.event_type}, telegram_chat_id={tg_chat_id}")
+        else:
+            log.info("  No events found - will bootstrap from read model")
+
         chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+        log.info(
+            f"AGGREGATE STATE after replay: "
+            f"version={chat_aggregate.version}, "
+            f"is_active={chat_aggregate.state.is_active}, "
+            f"telegram_chat_id={chat_aggregate.state.telegram_chat_id}, "
+            f"telegram_topic_id={chat_aggregate.state.telegram_topic_id}"
+        )
+
+        # Track if this is a bootstrapped aggregate (no event history)
+        is_bootstrapped = not events
+
+        # MIGRATION SUPPORT: If no events exist, check if chat exists in read model
+        # and bootstrap the aggregate state from it
+        if is_bootstrapped:
+            await self._bootstrap_aggregate_from_read_model(chat_aggregate, command.chat_id)
 
         if command.sender_id:
             # Mapped WellWon user - use regular message flow (requires participant)
@@ -154,11 +219,21 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
             )
 
         # Both paths go through aggregate - publish events uniformly
-        await self.publish_events(
-            aggregate=chat_aggregate,
-            aggregate_id=command.chat_id,
-            command=command
-        )
+        # For bootstrapped aggregates, use expected_version=None (new stream)
+        if is_bootstrapped:
+            # Bootstrapped from read model - create new event stream
+            await self.publish_and_commit_events(
+                aggregate=chat_aggregate,
+                aggregate_type="Chat",
+                expected_version=None,  # New stream
+            )
+        else:
+            # Normal flow - use version tracking
+            await self.publish_events(
+                aggregate=chat_aggregate,
+                aggregate_id=command.chat_id,
+                command=command
+            )
 
         log.info(f"Telegram message processed: {command.message_id}")
         return command.message_id
