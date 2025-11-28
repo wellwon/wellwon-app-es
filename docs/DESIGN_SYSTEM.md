@@ -1,8 +1,8 @@
 # WellWon Design System
 
-**Version:** 3.0  
-**Based on:** `/test-app` implementation  
-**Last Updated:** 2025-11-25
+**Version:** 4.0
+**Based on:** Declarant page implementation (`/platform-pro/declarant`)
+**Last Updated:** 2025-11-28
 
 ---
 
@@ -16,76 +16,65 @@
 6. [Shadows](#6-shadows)
 7. [Hybrid Theme Architecture](#7-hybrid-theme-architecture)
 8. [Animation Policy](#8-animation-policy)
-9. [Status Color Mapping](#9-status-color-mapping)
-10. [Component Patterns](#10-component-patterns)
-11. [Accessibility Guidelines](#11-accessibility-guidelines)
-12. [Tailwind CSS Mapping](#12-tailwind-css-mapping)
-13. [UI State Persistence](#13-ui-state-persistence)
-14. [Select Component Styling](#14-select-component-styling)
-15. [Pagination Component](#15-pagination-component)
-16. [Table Action Buttons](#16-table-action-buttons)
-17. [Filter Section Component](#17-filter-section-component)
+9. [Button System](#9-button-system)
+10. [Form Input Fields](#10-form-input-fields)
+11. [Select Components](#11-select-components)
+12. [Filter Section](#12-filter-section)
+13. [Modal Forms](#13-modal-forms)
+14. [Data Tables](#14-data-tables)
+15. [Pagination](#15-pagination)
+16. [Status Colors & Badges](#16-status-colors--badges)
+17. [Sidebar Navigation](#17-sidebar-navigation)
+18. [UI State Persistence](#18-ui-state-persistence)
+19. [Accessibility](#19-accessibility)
 
 ---
 
 ## 1. Color Palette
 
-All colors are defined in HEX format for precision and universality.
+### 1.1 Background Colors (Three-Level Hierarchy)
 
-### 1.1 Theme Colors (Light/Dark Toggle)
+| Level | Element | Dark Mode | Light Mode | Tailwind |
+|-------|---------|-----------|------------|----------|
+| **1** | Page background | `#1a1a1e` | `#f4f4f4` | `bg-[#1a1a1e]` / `bg-[#f4f4f4]` |
+| **2** | Cards, panels | `#232328` | `#ffffff` | `bg-[#232328]` / `bg-white` |
+| **3** | Input fields | `#1e1e22` | `#f9fafb` | `bg-[#1e1e22]` / `bg-gray-50` |
 
-| Token | Light Mode | Dark Mode | Usage |
-|-------|------------|-----------|-------|
-| **Page Background** | `#f4f4f4` | `#1a1a1d` | Main application background |
-| **Card Background** | `#ffffff` | `#232328` | Cards, panels, containers |
-| **Header Background** | `#ffffff` | `#232328` | Top header bar |
+### 1.2 Text Colors
 
-### 1.2 Sidebar Colors (Always Dark)
+| Token | Dark Mode | Light Mode | Tailwind |
+|-------|-----------|------------|----------|
+| **Primary** | `#ffffff` | `#111827` | `text-white` / `text-gray-900` |
+| **Secondary** | `#9ca3af` | `#6b7280` | `text-gray-400` / `text-gray-600` |
+| **Muted** | `#6b7280` | `#9ca3af` | `text-gray-500` |
 
-The sidebar **always uses dark theme** regardless of content area theme.
+### 1.3 Border Colors
 
-| Token | HEX Value | Usage |
-|-------|-----------|-------|
-| **Background** | `#232328` | Sidebar main background |
-| **Hover Background** | `#2a2a30` | Interactive element hover state |
-| **Border** | `rgba(255, 255, 255, 0.1)` | Dividers, borders (translucent white) |
-
-### 1.3 Text Colors
-
-| Token | Light Mode | Dark Mode | Usage |
-|-------|------------|-----------|-------|
-| **Primary Text** | `#111827` | `#ffffff` | Headings, main content |
-| **Secondary Text** | `#6b7280` | `#9ca3af` | Descriptions, labels, metadata |
-| **Muted Text** | `#9ca3af` | `#6b7280` | Disabled, inactive text |
+| Theme | Value | Tailwind |
+|-------|-------|----------|
+| **Dark** | `rgba(255,255,255,0.1)` | `border-white/10` |
+| **Dark hover** | `rgba(255,255,255,0.2)` | `border-white/20` |
+| **Light** | `#d1d5db` | `border-gray-300` |
+| **Light hover** | `#9ca3af` | `border-gray-400` |
 
 ### 1.4 Accent Colors (Theme-Independent)
 
-These colors remain consistent across light and dark themes.
+| Name | HEX | Tailwind | Usage |
+|------|-----|----------|-------|
+| **Red** | `#ea3857` | `bg-accent-red` / `text-accent-red` | Primary CTA, errors, delete |
+| **Green** | `#13b981` | `text-green-500` | Success, validation |
+| **Yellow** | `#f59e0b` | `text-yellow-500` | Warnings, processing |
+| **Purple** | `#a855f7` | `text-purple-500` | Info, documents |
 
-| Name | HEX Value | RGB | Usage |
-|------|-----------|-----|-------|
-| **Red (Primary)** | `#ea3857` | `rgb(234, 56, 87)` | Primary CTA, active states, errors, critical actions |
-| **Green (Success)** | `#13b981` | `rgb(19, 185, 129)` | Success states, completed tasks, positive metrics |
-| **Yellow (Warning)** | `#f59e0b` | `rgb(245, 158, 11)` | Warnings, processing states, attention needed |
-| **Purple (Info)** | `#a855f7` | `rgb(168, 85, 247)` | Informational badges, documents, neutral states |
+### 1.5 Opacity Patterns (Dark Theme)
 
-### 1.5 Border Colors
-
-| Theme | HEX Value | Usage |
-|-------|-----------|-------|
-| **Light Mode** | `#d1d5db` | Card borders, dividers, input borders |
-| **Dark Mode** | `rgba(255, 255, 255, 0.1)` | Translucent white borders (glassmorphism effect) |
-
-### 1.6 Stats Card Icon Backgrounds
-
-Icon backgrounds use accent colors with 10% opacity:
-
-| Color | Base HEX | Background with 10% Opacity | Usage |
-|-------|----------|------------------------------|-------|
-| **Red** | `#ea3857` | `rgba(234, 56, 87, 0.1)` | Revenue, critical metrics icons |
-| **Green** | `#13b981` | `rgba(19, 185, 129, 0.1)` | Shipments, success metrics icons |
-| **Yellow** | `#f59e0b` | `rgba(245, 158, 11, 0.1)` | Pending tasks, processing icons |
-| **Purple** | `#a855f7` | `rgba(168, 85, 247, 0.1)` | Documents, informational icons |
+| Opacity | Usage | Example |
+|---------|-------|---------|
+| `white/5` | Button backgrounds, table rows | `bg-white/5` |
+| `white/10` | Borders, hover backgrounds | `border-white/10`, `hover:bg-white/10` |
+| `white/20` | Hover borders | `hover:border-white/20` |
+| `accent-red/10` | Danger button backgrounds | `bg-accent-red/10` |
+| `accent-red/20` | Danger button hover | `hover:bg-accent-red/20` |
 
 ---
 
@@ -95,71 +84,67 @@ Icon backgrounds use accent colors with 10% opacity:
 
 | Token | Font Stack | Usage |
 |-------|------------|-------|
-| **Sans (UI)** | `Inter, system-ui, -apple-system, sans-serif` | All UI text, headings, body content |
-| **Mono (Data)** | `"JetBrains Mono", "Courier New", monospace` | IDs, codes, numbers, technical data |
+| **Sans** | `Inter, system-ui, sans-serif` | All UI text |
+| **Mono** | `"JetBrains Mono", monospace` | IDs, codes, numbers |
 
 ### 2.2 Type Scale
 
-| Token | Size (px) | Size (rem) | Usage |
-|-------|-----------|------------|-------|
-| **xs** | 12px | 0.75rem | Small labels, badges, metadata |
-| **sm** | 14px | 0.875rem | Body text, secondary content |
-| **base** | 16px | 1rem | Default body text |
-| **lg** | 18px | 1.125rem | Subheadings, prominent text |
-| **xl** | 20px | 1.25rem | Card titles, section headers |
-| **2xl** | 24px | 1.5rem | **Stats values, large numbers** |
-| **3xl** | 30px | 1.875rem | Page titles, hero text |
-| **4xl** | 36px | 2.25rem | Main dashboard headings |
+| Token | Size | Tailwind | Usage |
+|-------|------|----------|-------|
+| **xs** | 12px | `text-xs` | Badges, small labels |
+| **sm** | 14px | `text-sm` | **Buttons, body text, inputs** |
+| **base** | 16px | `text-base` | Default body |
+| **lg** | 18px | `text-lg` | Subheadings |
+| **xl** | 20px | `text-xl` | Card titles |
+| **2xl** | 24px | `text-2xl` | Stats values |
+| **3xl** | 30px | `text-3xl` | Page titles |
 
 ### 2.3 Font Weights
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| **Normal** | 400 | Body text, paragraphs |
-| **Medium** | 500 | UI elements, buttons, navigation |
-| **Semibold** | 600 | Headings, card titles |
-| **Bold** | 700 | Stats values, emphasis, important text |
+| Token | Value | Tailwind | Usage |
+|-------|-------|----------|-------|
+| **Normal** | 400 | `font-normal` | Body text |
+| **Medium** | 500 | `font-medium` | **Buttons, labels, UI elements** |
+| **Semibold** | 600 | `font-semibold` | Headings |
+| **Bold** | 700 | `font-bold` | Stats, emphasis |
 
-### 2.4 Line Heights
+### 2.4 Button Typography Standard
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| **Tight** | 1.25 | Headings, stats values |
-| **Normal** | 1.5 | Default body text |
-| **Relaxed** | 1.75 | Long-form content, descriptions |
+**All buttons with text must use:**
+```tsx
+className="text-sm font-medium"
+// text-sm = 14px
+// font-medium = 500
+```
 
 ---
 
 ## 3. Spacing System
 
-Based on **4px base unit** for consistent rhythm.
+Based on **4px base unit**.
 
-| Token | px | rem | Usage |
-|-------|-----|-----|-------|
-| **xs** | 4px | 0.25rem | Tight spacing, badges |
-| **sm** | 8px | 0.5rem | Small gaps, icon spacing |
-| **md** | 12px | 0.75rem | Standard gaps, form fields |
-| **base** | 16px | 1rem | Default spacing, padding |
-| **lg** | 24px | 1.5rem | **Card padding (standard)** |
-| **xl** | 32px | 2rem | Section spacing, page margins |
-| **2xl** | 48px | 3rem | Large section gaps |
-| **3xl** | 64px | 4rem | Hero sections, page separators |
+| Token | px | Tailwind | Usage |
+|-------|-----|----------|-------|
+| **xs** | 4px | `p-1` / `gap-1` | Tight spacing |
+| **sm** | 8px | `p-2` / `gap-2` | Icon spacing, button gaps |
+| **md** | 12px | `p-3` / `gap-3` | Element gaps |
+| **base** | 16px | `p-4` / `gap-4` | Section gaps |
+| **lg** | 24px | `p-6` / `gap-6` | **Card padding** |
+| **xl** | 32px | `p-8` / `gap-8` | Page margins |
 
 ---
 
 ## 4. Border Radius
 
-| Token | px | Tailwind Class | Usage |
-|-------|-----|----------------|-------|
-| **sm** | 6px | `rounded-sm` | Inputs, small buttons, badges |
-| **md** | 12px | `rounded-md` | Buttons, dropdowns, tabs |
-| **lg** | 16px | `rounded-lg` | Small cards, panels |
-| **xl** | 12px | `rounded-xl` | ⚠️ Tailwind default (not 24px) |
-| **2xl** | 16px | `rounded-2xl` | **STANDARD FOR CARDS** (default) |
-| **3xl** | 24px | `rounded-3xl` | Large hero cards, modals |
-| **full** | 9999px | `rounded-full` | Circles, pills, avatar badges |
-
-**⚠️ Important:** Tailwind CSS default border radius values differ from custom design tokens. The standard card border radius is `rounded-2xl` (**16px**), not 24px. If you need 24px radius, use `rounded-3xl` or define custom values in `tailwind.config.ts`.
+| Token | px | Tailwind | Usage |
+|-------|-----|----------|-------|
+| **sm** | 2px | `rounded-sm` | — |
+| **md** | 6px | `rounded-md` | Small elements |
+| **lg** | 8px | `rounded-lg` | **Small buttons (h-8)**, icon buttons |
+| **xl** | 12px | `rounded-xl` | **Medium buttons (h-10)**, inputs |
+| **2xl** | 16px | `rounded-2xl` | **Cards, panels** |
+| **3xl** | 24px | `rounded-3xl` | Large modals |
+| **full** | 9999px | `rounded-full` | Pills, badges |
 
 ---
 
@@ -167,501 +152,156 @@ Based on **4px base unit** for consistent rhythm.
 
 ### 5.1 Sidebar
 
-| State | Width | Tailwind Class | Usage |
-|-------|-------|----------------|-------|
-| **Expanded** | 264px | `w-[264px]` | Full navigation with labels |
-| **Collapsed** | 80px | `w-20` | Icons only |
+| State | Width | Tailwind |
+|-------|-------|----------|
+| **Expanded** | 264px | `w-[264px]` |
+| **Collapsed** | 80px | `w-20` |
 
-### 5.2 Header
+### 5.2 Common Dimensions
 
-| Element | Height | Tailwind Class |
-|---------|--------|----------------|
-| **Header Bar** | 64px | `h-16` |
-
-### 5.3 Content Padding
-
-| Element | Padding | Tailwind Class |
-|---------|---------|----------------|
-| **Main Content Area** | 32px | `p-8` |
-| **Card Internal Padding** | 24px | `p-6` |
+| Element | Size | Tailwind |
+|---------|------|----------|
+| Header height | 64px | `h-16` |
+| Content padding | 32px | `p-8` |
+| Card padding | 24px | `p-6` |
 
 ---
 
 ## 6. Shadows
 
-### 6.1 Light Theme Shadows
+| Theme | Shadow | Usage |
+|-------|--------|-------|
+| **Light** | `shadow-sm` | Cards, buttons |
+| **Dark** | None | Glassmorphism aesthetic |
 
-| Token | CSS Value | Usage |
-|-------|-----------|-------|
-| **sm** | `0 1px 2px rgba(0, 0, 0, 0.05)` | Subtle elevation (cards, inputs) |
-| **DEFAULT** | `0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06)` | Standard cards |
-| **md** | `0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.05)` | Hover states, dropdowns |
-
-### 6.2 Dark Theme Shadows
-
-Dark theme uses **minimal shadows** to preserve glassmorphism aesthetic.
-
-| Token | CSS Value | Usage |
-|-------|-----------|-------|
-| **Subtle** | `0 2px 8px rgba(0, 0, 0, 0.3)` | Cards, modals |
+**Pattern:**
+```tsx
+className={`... ${!isDark ? 'shadow-sm' : ''}`}
+```
 
 ---
 
 ## 7. Hybrid Theme Architecture
 
-**Critical Design Decision:** The application uses a **hybrid theme system**.
-
 ### 7.1 Theme Zones
 
-| Zone | Theme Behavior | Background Color |
-|------|----------------|------------------|
-| **Sidebar** | **ALWAYS DARK** (never changes) | `#232328` |
-| **Content Area** | Toggles Light/Dark | `#f4f4f4` (Light) / `#1a1a1e` (Dark) |
-| **Header** | Follows Content Area theme | `#ffffff` (Light) / `#232328` (Dark) |
+| Zone | Behavior | Background |
+|------|----------|------------|
+| **Sidebar** | **Always dark** | `#232328` |
+| **Content** | Toggles | `#f4f4f4` / `#1a1a1e` |
+| **Header** | Follows content | `#ffffff` / `#232328` |
 
-### 7.2 Theme Toggle Button
+### 7.2 Theme Object Pattern
 
-Located in the **Header Bar** (top right).
-
-- **Light Mode Icon:** Moon (🌙)
-- **Dark Mode Icon:** Sun (☀️)
+```tsx
+const theme = isDark ? {
+  page: 'bg-[#1a1a1e]',
+  card: { background: 'bg-[#232328]', border: 'border-white/10' },
+  text: { primary: 'text-white', secondary: 'text-gray-400' },
+  button: { default: 'text-gray-300 hover:text-white hover:bg-white/10' },
+  table: { row: 'hover:bg-white/5', border: 'border-white/10' }
+} : {
+  page: 'bg-[#f4f4f4]',
+  card: { background: 'bg-white', border: 'border-gray-300 shadow-sm' },
+  text: { primary: 'text-gray-900', secondary: 'text-gray-600' },
+  button: { default: 'text-gray-600 hover:text-gray-900 hover:bg-gray-100' },
+  table: { row: 'hover:bg-gray-50', border: 'border-gray-300' }
+};
+```
 
 ---
 
 ## 8. Animation Policy
 
-### 8.1 Instant Transitions (No Animation)
+### 8.1 No Animation (Instant)
 
-These elements **MUST transition instantly** without animation:
+| Element | Rule |
+|---------|------|
+| Theme toggle | `transition-none` |
+| Sidebar collapse | `transition-none` |
+| Input focus | `transition-none` |
 
-| Element | Duration | Rule |
-|---------|----------|------|
-| **Theme Toggle** | `0ms` | `transition: none` |
-| **Sidebar Expand/Collapse** | `0ms` | `transition: none` |
+### 8.2 Allowed Animations
 
-**Rationale:** Provides immediate visual feedback, similar to VS Code and modern IDEs.
-
-### 8.2 Fast Transitions (Micro-Interactions)
-
-| Element | Duration | Timing Function |
-|---------|----------|-----------------|
-| **Button Hover** | `200ms` | `ease-out` |
-| **Table Row Hover** | `150ms` | `ease-out` |
-| **Input Focus** | `150ms` | `ease-out` |
-| **Dropdown Open** | `200ms` | `ease-out` |
-
-**Maximum Duration:** 200ms for any hover/focus effect.
+| Element | Duration | Class |
+|---------|----------|-------|
+| Button hover | 150ms | `transition-all` |
+| Dropdown chevron | 150ms | `transition-transform` |
+| Icon button scale | 150ms | `hover:scale-105 transition-all` |
 
 ---
 
-## 9. Status Color Mapping
+## 9. Button System
 
-Consistent status colors across all components.
+### 9.1 Button Sizes
 
-| Status | Color Name | HEX Value | Usage |
-|--------|-----------|-----------|-------|
-| **Completed / Success** | Green | `#13b981` | Completed shipments, successful operations |
-| **Processing / Warning** | Yellow | `#f59e0b` | In-transit, pending approval, processing |
-| **Error / Failed** | Red | `#ea3857` | Failed operations, errors, critical alerts |
-| **Pending / Inactive** | Gray | `#9ca3af` | Inactive, draft, pending start |
-| **Info / Documents** | Purple | `#a855f7` | Informational badges, document types |
+| Size | Height | Padding | Radius | Usage |
+|------|--------|---------|--------|-------|
+| **Large** | h-12 (48px) | px-6 | rounded-xl | Modal forms |
+| **Medium** | h-10 (40px) | px-4 | rounded-xl | Action panels |
+| **Small** | h-8 (32px) | px-3 | rounded-lg | Tables |
+| **Icon** | w-8 h-8 / w-10 h-10 | — | rounded-lg / rounded-xl | Icon only |
 
----
-
-## 10. Component Patterns
-
-### 10.1 Stats Cards
-
-**Structure:**
-
-```
-┌─────────────────────────────────────┐
-│ [Icon] Revenue                      │
-│ $128,459   +12.5%                   │
-└─────────────────────────────────────┘
-```
-
-**Specifications:**
-
-- **Icon Background:** Accent color at 10% opacity (see §1.6)
-- **Value:** `text-2xl font-mono font-bold` (24px, monospace, bold)
-- **Label:** `text-sm font-medium` (14px, medium weight)
-- **Change Badge:** Small pill with green/red background
-
-### 10.2 Data Tables
-
-**Specifications:**
-
-- **Header Background:** 
-  - Light: `#f9fafb`
-  - Dark: `rgba(255, 255, 255, 0.05)`
-- **Row Hover:**
-  - Light: `#f9fafb`
-  - Dark: `rgba(255, 255, 255, 0.05)`
-- **Border:**
-  - Light: `#d1d5db`
-  - Dark: `rgba(255, 255, 255, 0.1)`
-
-### 10.3 Status Badges
-
-**Specifications:**
-
-- **Border Radius:** `rounded-full` (pill shape)
-- **Padding:** `px-2.5 py-1` (10px horizontal, 4px vertical)
-- **Font:** `text-xs font-medium` (12px, medium weight)
-- **Colors:** Follow Status Color Mapping (§9)
-
-### 10.4 Navigation (Sidebar)
-
-**Active State:**
-
-- **Border:** Left border, 2px, accent red (`#ea3857`)
-- **Background:** Slightly lighter than sidebar (`#2a2a30`)
-- **Text Color:** Accent red (`#ea3857`)
-
-**Inactive State (Collapsed):**
-
-- **Border:** `border border-white/10` (translucent white)
-- **Background:** Transparent
-- **Text Color:** Secondary text color
-
-**Hover State:**
-
-- **Border:** `hover:border-accent-red/50` (50% opacity red)
-- **Background:** `hover:bg-medium-gray/80`
-- **Text Color:** `hover:text-accent-red`
-
----
-
-## 11. Accessibility Guidelines
-
-### 11.1 Contrast Ratios
-
-All text must meet **WCAG 2.1 AA** standards:
-
-| Text Size | Minimum Contrast Ratio |
-|-----------|------------------------|
-| **Normal Text** (<18px) | 4.5:1 |
-| **Large Text** (≥18px or ≥14px bold) | 3:1 |
-
-### 11.2 Color Contrast Verification
-
-| Combination | Light Mode | Dark Mode | Contrast Ratio |
-|-------------|------------|-----------|----------------|
-| Primary Text / Page BG | `#111827` / `#f4f4f4` | `#ffffff` / `#1a1a1e` | ✅ >7:1 |
-| Secondary Text / Page BG | `#6b7280` / `#f4f4f4` | `#9ca3af` / `#1a1a1e` | ✅ >4.5:1 |
-| Accent Red / Page BG | `#ea3857` / `#f4f4f4` | `#ea3857` / `#1a1a1e` | ✅ >4.5:1 |
-
-### 11.3 Focus States
-
-All interactive elements must have visible focus indicators:
-
-- **Outline:** `ring-2 ring-accent-red ring-offset-2`
-- **Offset Color:** Matches background (light: white, dark: `#1a1a1e`)
-
-### 11.4 Keyboard Navigation
-
-- **Tab Order:** Logical, follows visual hierarchy
-- **Skip Links:** Provide "Skip to main content" for screen readers
-- **Escape Key:** Closes modals and dropdowns
-
-### 11.5 ARIA Labels
-
-All icons and interactive elements without visible text must have:
-
-- `aria-label` attribute describing the action
-- Example: `<button aria-label="Toggle theme">🌙</button>`
-
----
-
-## Appendix: Design Tokens Summary
-
-### Quick Reference Table
-
-| Category | Token Example | Value | Section |
-|----------|---------------|-------|---------|
-| **Color** | Page BG (Dark) | `#1a1a1d` | §1.1 |
-| **Color** | Sidebar BG | `#232328` | §1.2 |
-| **Color** | Accent Red | `#ea3857` | §1.4 |
-| **Typography** | Sans Font | Inter | §2.1 |
-| **Typography** | Mono Font | JetBrains Mono | §2.1 |
-| **Typography** | Stats Value | 24px / 2xl | §2.2 |
-| **Spacing** | Card Padding | 24px / lg | §3 |
-| **Radius** | Card Standard | 16px / 2xl | §4 |
-| **Layout** | Sidebar Expanded | 264px | §5.1 |
-| **Animation** | Theme Toggle | 0ms (instant) | §8.1 |
-| **Status** | Success | Green `#13b981` | §9 |
-
----
-
-## Version History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| **3.0** | 2025-11-25 | Complete rewrite with HEX colors from `/test-app` audit |
-| **2.0** | 2025-10-15 | Added hybrid theme architecture, glassmorphism specs |
-| **1.0** | 2025-08-01 | Initial design system documentation |
-
----
-
-## 12. Tailwind CSS Mapping
-
-This section maps design tokens to their exact Tailwind CSS classes for clarity.
-
-### 12.1 Color Classes
-
-| Design Token | HEX | Tailwind Class (Light) | Tailwind Class (Dark) |
-|--------------|-----|------------------------|-----------------------|
-| Page Background | `#f4f4f4` / `#1a1a1d` | `bg-[#f4f4f4]` | `bg-[#1a1a1d]` |
-| Card Background | `#ffffff` / `#232328` | `bg-white` | `bg-[#232328]` |
-| Primary Text | `#111827` / `#ffffff` | `text-gray-900` | `text-white` |
-| Secondary Text | `#6b7280` / `#9ca3af` | `text-gray-500` | `text-gray-400` |
-| Accent Red | `#ea3857` | `text-[#ea3857]` / `bg-[#ea3857]` | Same |
-| Accent Green | `#13b981` | `text-[#13b981]` / `bg-[#13b981]` | Same |
-| Accent Yellow | `#f59e0b` | `text-[#f59e0b]` / `bg-[#f59e0b]` | Same |
-| Accent Purple | `#a855f7` | `text-[#a855f7]` / `bg-[#a855f7]` | Same |
-
-**Note:** Use CSS variables from `index.css` (`--accent-red`, `--dark-gray`, etc.) when possible for better theme consistency.
-
-**HSL to HEX Reference:**
-- `--dark-gray: 240 6% 11%` = `#1a1a1d`
-- `--medium-gray: 240 7% 15%` = `#232328`
-
-### 12.2 Typography Classes
-
-| Design Token | Tailwind Class | Usage |
-|--------------|----------------|-------|
-| Sans Font | `font-sans` | All UI text |
-| Mono Font | `font-mono` | IDs, numbers, technical data |
-| Text xs | `text-xs` | 12px, badges, labels |
-| Text sm | `text-sm` | 14px, body text |
-| Text base | `text-base` | 16px, default |
-| Text lg | `text-lg` | 18px, subheadings |
-| Text xl | `text-xl` | 20px, card titles |
-| Text 2xl | `text-2xl` | 24px, stats values |
-| Text 3xl | `text-3xl` | 30px, page titles |
-| Font Normal | `font-normal` | 400 weight |
-| Font Medium | `font-medium` | 500 weight |
-| Font Semibold | `font-semibold` | 600 weight |
-| Font Bold | `font-bold` | 700 weight |
-
-### 12.3 Spacing Classes
-
-| Design Token | Tailwind Class | px Value |
-|--------------|----------------|----------|
-| xs | `p-1` / `m-1` | 4px |
-| sm | `p-2` / `m-2` | 8px |
-| md | `p-3` / `m-3` | 12px |
-| base | `p-4` / `m-4` | 16px |
-| lg | `p-6` / `m-6` | 24px |
-| xl | `p-8` / `m-8` | 32px |
-| 2xl | `p-12` / `m-12` | 48px |
-| 3xl | `p-16` / `m-16` | 64px |
-
-### 12.4 Border Radius Classes
-
-| Design Token | Tailwind Class | px Value |
-|--------------|----------------|----------|
-| sm | `rounded-sm` | 6px |
-| md | `rounded-md` | 12px |
-| lg | `rounded-lg` | 16px |
-| xl | `rounded-xl` | 12px ⚠️ |
-| 2xl | `rounded-2xl` | **16px** (standard for cards) |
-| 3xl | `rounded-3xl` | 24px |
-| full | `rounded-full` | 9999px |
-
-**⚠️ Critical:** Default Tailwind `rounded-xl` is **12px**, NOT 24px. Use `rounded-2xl` (16px) for standard cards.
-
-### 12.5 Layout Classes
-
-| Design Token | Tailwind Class | Value |
-|--------------|----------------|-------|
-| Sidebar Expanded | `w-[264px]` | 264px |
-| Sidebar Collapsed | `w-20` | 80px |
-| Header Height | `h-16` | 64px |
-| Content Padding | `p-8` | 32px |
-| Card Padding | `p-6` | 24px |
-
-### 12.6 Animation Classes
-
-| Design Token | Tailwind Class | Duration |
-|--------------|----------------|----------|
-| No Animation | `transition-none` | 0ms (instant) |
-| Fast Transition | `transition-colors duration-200` | 200ms |
-| Hover Effects | `transition-all duration-150` | 150ms |
-
----
-
-## 13. UI State Persistence
-
-### 13.1 Storage Strategy
-
-Используем `localStorage` для сохранения пользовательских настроек UI между сессиями браузера.
-
-**Важно:** НЕ использовать `sessionStorage` - он сбрасывается при закрытии вкладки.
-
-### 13.2 Стандартные ключи
-
-| Ключ | Тип | Default | Описание |
-|------|-----|---------|----------|
-| `{module}_theme` | `'dark' \| 'light'` | `'light'` | Выбранная тема модуля |
-| `{module}_sidebarCollapsed` | `boolean` | `false` | Состояние sidebar (свёрнут/развёрнут) |
-| `{module}_rowsPerPage` | `number` | `10` | Количество строк в таблицах |
-
-**Примеры ключей:**
-- `declarant_theme`
-- `platformPro_sidebarCollapsed`
-- `declarant_rowsPerPage`
-
-### 13.3 Паттерн инициализации
+### 9.2 Primary Button (CTA)
 
 ```tsx
-const [isDark, setIsDark] = useState(() => {
-  const saved = localStorage.getItem('module_theme');
-  return saved === 'dark';
-});
-
-const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-  const saved = localStorage.getItem('module_sidebarCollapsed');
-  return saved ? JSON.parse(saved) : false;
-});
-
-const [rowsPerPage, setRowsPerPage] = useState(() => {
-  const saved = localStorage.getItem('module_rowsPerPage');
-  return saved ? Number(saved) : 10;
-});
+<button className={`px-4 h-10 rounded-xl flex items-center gap-2 text-sm font-medium
+  bg-accent-red text-white hover:bg-accent-red/90 ${!isDark ? 'shadow-sm' : ''}`}>
+  <Plus className="w-4 h-4" />
+  Создать
+</button>
 ```
 
-### 13.4 Паттерн сохранения
+### 9.3 Secondary Button (Text only)
 
 ```tsx
-const toggleTheme = () => {
-  const newValue = !isDark;
-  setIsDark(newValue);
-  localStorage.setItem('module_theme', newValue ? 'dark' : 'light');
-};
-
-const toggleSidebar = () => {
-  const newValue = !sidebarCollapsed;
-  setSidebarCollapsed(newValue);
-  localStorage.setItem('module_sidebarCollapsed', JSON.stringify(newValue));
-};
-
-const handleRowsPerPageChange = (value: string) => {
-  setRowsPerPage(Number(value));
-  localStorage.setItem('module_rowsPerPage', value);
-};
-```
-
----
-
-## 14. Select Component Styling
-
-### 14.1 Проблема
-
-Стандартный shadcn/ui Select использует красный `ring` при фокусе из CSS переменной `--ring`. Для нейтрального вида нужно переопределить стили.
-
-### 14.2 Нейтральные стили (без цветового акцента)
-
-```tsx
-<SelectTrigger className={`focus:outline-none focus:ring-0 focus:ring-offset-0 focus:ring-transparent ${
+<button className={`px-4 h-10 rounded-xl flex items-center gap-2 text-sm font-medium ${
   isDark
-    ? 'bg-[#232328] border-white/10 text-white focus:border-white/10 data-[state=open]:border-white/10'
-    : 'bg-white border-gray-200 text-gray-900 focus:border-gray-200 data-[state=open]:border-gray-200'
+    ? 'text-gray-300 hover:text-white hover:bg-white/10'
+    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
 }`}>
-  <SelectValue />
-</SelectTrigger>
-
-<SelectContent className={isDark
-  ? 'bg-[#232328] border-white/10'
-  : 'bg-white border-gray-200'
-}>
-  <SelectItem className={isDark
-    ? 'focus:bg-white/10 focus:text-white text-white'
-    : 'focus:bg-gray-100 focus:text-gray-900 text-gray-900'
-  }>
-    Option
-  </SelectItem>
-</SelectContent>
+  <Download className="w-4 h-4" />
+  Экспорт
+</button>
 ```
 
-### 14.3 Ключевые классы
-
-| Класс | Назначение |
-|-------|-----------|
-| `focus:outline-none` | Убрать outline браузера |
-| `focus:ring-0` | Убрать ring |
-| `focus:ring-offset-0` | Убрать offset ring |
-| `focus:ring-transparent` | Прозрачный ring (fallback) |
-| `data-[state=open]:border-*` | Бордер при открытом состоянии |
-
----
-
-## 15. Pagination Component
-
-### 15.1 Структура
-
-```
-┌────────────────────────────────────────────────────────────┐
-│ [10 ▼] строк на странице   Показано 1-10 из 25    [<][1][2][>] │
-└────────────────────────────────────────────────────────────┘
-```
-
-### 15.2 Стили кнопок навигации
-
-**Disabled (неактивная):**
-```tsx
-isDark
-  ? 'text-gray-600 bg-white/5 cursor-not-allowed'
-  : 'text-gray-400 bg-gray-100 cursor-not-allowed'
-```
-
-**Active (кликабельная):**
-```tsx
-isDark
-  ? 'text-gray-300 bg-white/5 hover:bg-white/10 cursor-pointer'
-  : 'text-gray-600 bg-gray-100 hover:bg-gray-200 cursor-pointer'
-```
-
-**Current page (текущая страница):**
-```tsx
-'bg-accent-red text-white'
-```
-
-### 15.3 Размеры
-
-| Элемент | Размер | Классы |
-|---------|--------|--------|
-| Кнопки навигации | 32×32px | `w-8 h-8 rounded-lg` |
-| Select количества | 70×32px | `w-[70px] h-8` |
-
-### 15.4 Логика пагинации
+### 9.4 Ghost Button (With border)
 
 ```tsx
-const [rowsPerPage, setRowsPerPage] = useState(10);
-const [currentPage, setCurrentPage] = useState(1);
-
-const totalItems = data.length;
-const totalPages = Math.ceil(totalItems / rowsPerPage);
-const startIndex = (currentPage - 1) * rowsPerPage;
-const endIndex = Math.min(startIndex + rowsPerPage, totalItems);
-const paginatedData = data.slice(startIndex, endIndex);
-
-// При смене количества строк - сброс на первую страницу
-const handleRowsPerPageChange = (value: string) => {
-  setRowsPerPage(Number(value));
-  setCurrentPage(1);
-  localStorage.setItem('module_rowsPerPage', value);
-};
+<button className={`px-4 h-10 rounded-xl flex items-center gap-2 text-sm font-medium border ${
+  isDark
+    ? 'bg-[#1e1e22] border-white/10 text-gray-300 hover:bg-[#252529] hover:text-white'
+    : 'bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+}`}>
+  <SlidersHorizontal className="w-4 h-4" />
+  Фильтры
+</button>
 ```
 
----
+### 9.5 Danger Button
 
-## 16. Table Action Buttons
+```tsx
+<button className="h-8 px-3 rounded-lg flex items-center justify-center
+  bg-accent-red/10 text-accent-red border border-accent-red/20
+  hover:bg-accent-red/20 hover:border-accent-red/30">
+  <Trash2 className="h-4 w-4" />
+</button>
+```
 
-### 16.1 Glass Button (копирование, редактирование, просмотр)
+### 9.6 Icon Button (Sidebar/Toolbar)
 
-Используется для нейтральных действий без деструктивного эффекта.
+```tsx
+// Size: h-8 w-8 with hover:scale-105
+<button className={`h-8 w-8 rounded-lg flex items-center justify-center border transition-all ${
+  isDark
+    ? 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:border-white/20 hover:text-white hover:scale-105'
+    : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400 hover:text-gray-900 hover:scale-105'
+}`}>
+  <ChevronLeft className="w-4 h-4" />
+</button>
+```
+
+### 9.7 Table Action Button (Glass)
 
 ```tsx
 <button className={`h-8 px-3 rounded-lg flex items-center justify-center border ${
@@ -673,232 +313,403 @@ const handleRowsPerPageChange = (value: string) => {
 </button>
 ```
 
-### 16.2 Danger Button (удаление)
-
-Используется для деструктивных действий. Всегда красный независимо от темы.
+### 9.8 Cancel Button (Modal)
 
 ```tsx
-<button className="h-8 px-3 rounded-lg flex items-center justify-center
-  bg-accent-red/10 text-accent-red border border-accent-red/20
-  hover:bg-accent-red/20 hover:border-accent-red/25">
-  <Trash2 className="h-4 w-4" />
+<button className={`h-12 px-6 rounded-xl flex items-center gap-2 border text-sm font-medium ${
+  isDark
+    ? 'bg-[#232328] text-gray-300 border-white/10 hover:bg-[#2a2a30]'
+    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+}`}>
+  <X className="h-4 w-4" />
+  Отмена
 </button>
 ```
 
-### 16.3 Размеры кнопок действий
+---
 
-| Размер | Классы | Использование |
-|--------|--------|---------------|
-| Стандартный | `h-8 px-3 rounded-lg` | Кнопки в таблицах |
-| Компактный | `h-7 px-2 rounded-md` | Плотные списки |
-| Иконка | `w-8 h-8 rounded-lg` | Только иконка |
+## 10. Form Input Fields
 
-### 16.4 Важно: Без анимации при переключении темы
+### 10.1 Standard Input
 
-Убрать `transition-colors` с кнопок для мгновенного переключения темы:
+| Property | Value |
+|----------|-------|
+| Height | `h-10` (40px) |
+| Radius | `rounded-xl` |
+| Padding | `px-3 py-2` |
+| Font | `text-sm` |
+| Focus | `focus:outline-none focus:ring-0 transition-none` |
 
 ```tsx
-// ❌ Неправильно
-className="... transition-colors"
-
-// ✅ Правильно
-className="..." // без transition
+<input className={`h-10 w-full rounded-xl border px-3 py-2 text-sm
+  focus:outline-none focus:ring-0 transition-none ${
+  isDark
+    ? 'bg-[#1e1e22] border-white/10 text-white placeholder:text-gray-500 hover:border-white/20'
+    : 'bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400 hover:border-gray-400'
+}`} />
 ```
 
----
+### 10.2 Label
 
-## Version History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| **3.1** | 2025-11-25 | Added §13-§16: UI State Persistence, Select, Pagination, Action Buttons |
-| **3.0** | 2025-11-25 | Complete rewrite with HEX colors from `/test-app` audit |
-| **2.0** | 2025-10-15 | Added hybrid theme architecture, glassmorphism specs |
-| **1.0** | 2025-08-01 | Initial design system documentation |
-
----
-
-## 17. Filter Section Component
-
-### 17.1 Структура секции фильтров
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│ [🔍 Поиск...                    ] [⚙ Фильтры ▼] [✕]                 │
-│                                                                       │
-│ (при открытии фильтров)                                              │
-│ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                     │
-│ │ Документ ▼  │ │ Статус ▼    │ │ Дата ▼      │                     │
-│ └─────────────┘ └─────────────┘ └─────────────┘                     │
-└──────────────────────────────────────────────────────────────────────┘
+```tsx
+<label className={`text-sm ${isDark ? 'text-white' : 'text-gray-700'}`}>
+  Label *
+</label>
 ```
 
-### 17.2 Поле поиска
+**Spacing:** `space-y-1.5` between label and input
+
+### 10.3 Validation States
+
+| State | Border |
+|-------|--------|
+| Default | `border-white/10` / `border-gray-300` |
+| Error | `border-red-500/50` |
+| Success | `border-green-500/50` |
+
+### 10.4 Search Input with Icon
 
 ```tsx
 <div className="relative flex-1">
-  <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${theme.text.secondary}`} />
-  <Input
-    placeholder="Поиск..."
-    value={searchQuery}
-    onChange={(e) => setSearchQuery(e.target.value)}
-    className={`pl-10 h-10 rounded-xl transition-none ${
-      isDark
-        ? 'bg-[#1a1a1e] border-white/10 text-white placeholder:text-gray-500'
-        : 'bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400'
-    }`}
-  />
+  <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${
+    isDark ? 'text-gray-400' : 'text-gray-500'
+  }`} />
+  <input className={`pl-10 h-10 w-full rounded-xl border text-sm
+    focus:outline-none focus:ring-0 transition-none ${
+    isDark
+      ? 'bg-[#1e1e22] border-white/10 text-white placeholder:text-gray-500'
+      : 'bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400'
+  }`} placeholder="Поиск..." />
 </div>
 ```
 
-### 17.3 Кнопка "Фильтры"
+### 10.5 Action Button with Validation
 
-Кнопка с бордером, высота совпадает с полем поиска (h-10).
+Кнопка меняет состояние в зависимости от валидности данных (например, поиск по ИНН).
 
 ```tsx
+const isValid = /^\d{10,12}$/.test(value);
+
 <button
-  onClick={() => setFiltersOpen(!filtersOpen)}
-  className={`flex items-center gap-2 px-4 h-10 rounded-xl border ${
-    isDark
-      ? 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border-white/10'
-      : 'bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-900 border-gray-300'
+  disabled={!isValid}
+  className={`h-10 w-10 shrink-0 rounded-xl border flex items-center justify-center transition-none ${
+    isValid
+      ? 'bg-green-500/10 border-green-500 hover:bg-green-500/20'
+      : isDark
+        ? 'bg-[#1e1e22] border-white/10 opacity-50 cursor-not-allowed'
+        : 'bg-white border-gray-300 opacity-50 cursor-not-allowed'
   }`}
 >
-  <SlidersHorizontal size={16} />
-  <span className="font-medium">Фильтры</span>
-  <ChevronDown size={16} className={`transition-transform ${filtersOpen ? 'rotate-180' : ''}`} />
+  <Search className={`h-4 w-4 ${isValid ? 'text-green-500' : 'text-gray-400'}`} />
 </button>
 ```
 
-### 17.4 Кнопка сброса фильтров (условная)
+---
 
-**Важно:** Кнопка появляется ТОЛЬКО когда есть активные фильтры.
+## 11. Select Components
 
-Стиль: Danger Button (как кнопка удаления в таблицах).
+### 11.1 Standard Select (Form)
 
 ```tsx
-const hasActiveFilters =
-  searchQuery !== '' ||
-  filter1 !== 'all' ||
-  filter2 !== 'all' ||
-  filterN !== 'all';
+<SelectTrigger className={`w-full h-10 rounded-xl focus:outline-none focus:ring-0 transition-none ${
+  isDark
+    ? 'bg-[#1e1e22] border-white/10 text-white'
+    : 'bg-gray-50 border-gray-300 text-gray-900'
+}`}>
+  <SelectValue />
+</SelectTrigger>
 
+<SelectContent className={isDark ? 'bg-[#232328] border-white/10' : 'bg-white border-gray-200'}>
+  <SelectItem className={isDark ? 'focus:bg-white/10 text-white' : 'focus:bg-gray-100 text-gray-900'}>
+    Option
+  </SelectItem>
+</SelectContent>
+```
+
+### 11.2 Rows Per Page Select (Pagination)
+
+Без бордера, как кнопки пагинации:
+
+```tsx
+<SelectTrigger className={`w-[70px] h-8 border-0 focus:outline-none focus:ring-0 transition-none ${
+  isDark
+    ? 'bg-white/5 text-white hover:bg-white/10'
+    : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
+}`}>
+  <SelectValue />
+</SelectTrigger>
+```
+
+---
+
+## 12. Filter Section
+
+### 12.1 Structure
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ [🔍 Поиск...              ] [⚙ Фильтры ▼] [✕]           │
+│                                                          │
+│ ┌───────────┐ ┌───────────┐ ┌───────────┐               │
+│ │ Статус ▼  │ │ Дата ▼    │ │ Тип ▼     │               │
+│ └───────────┘ └───────────┘ └───────────┘               │
+└──────────────────────────────────────────────────────────┘
+```
+
+### 12.2 Height Consistency
+
+Все элементы в строке фильтров: **h-10** (40px)
+
+| Element | Classes |
+|---------|---------|
+| Search input | `h-10 rounded-xl` |
+| Filter button | `h-10 rounded-xl` |
+| Reset button | `w-10 h-10 rounded-lg` |
+
+### 12.3 Reset Filter Button (Conditional)
+
+Появляется только при активных фильтрах:
+
+```tsx
 {hasActiveFilters && (
-  <button
-    onClick={resetAllFilters}
-    className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent-red/10 text-accent-red border border-accent-red/20 hover:bg-accent-red/20 hover:border-accent-red/30"
-    title="Сбросить фильтры"
-  >
+  <button className="w-10 h-10 rounded-lg flex items-center justify-center
+    bg-accent-red/10 text-accent-red border border-accent-red/20
+    hover:bg-accent-red/20 hover:border-accent-red/30">
     <X size={16} />
   </button>
 )}
 ```
 
-### 17.5 Раскрывающиеся фильтры (Collapsible)
+---
+
+## 13. Modal Forms
+
+### 13.1 Color Hierarchy
+
+| Level | Element | Dark | Light |
+|-------|---------|------|-------|
+| 1 | Modal background | `#1a1a1e` | `#f4f4f4` |
+| 2 | Card sections | `#232328` | `#ffffff` |
+| 3 | Input fields | `#1e1e22` | `#f9fafb` |
+
+### 13.2 Theme Object
 
 ```tsx
-<Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
-  <CollapsibleContent className="pt-4">
-    <div className="grid grid-cols-3 gap-4">
-      {/* Select фильтры */}
-    </div>
-  </CollapsibleContent>
-</Collapsible>
-```
-
-### 17.6 Функция сброса всех фильтров
-
-```tsx
-const resetAllFilters = () => {
-  setSearchQuery('');
-  setFilter1('all');
-  setFilter2('all');
-  // ... остальные фильтры
-  setFilterN('all');
+const theme = isLightTheme ? {
+  modal: { bg: 'bg-[#f4f4f4]', border: 'border-gray-300' },
+  card: { bg: 'bg-white', border: 'border-gray-300', shadow: 'shadow-sm' },
+  text: { primary: 'text-gray-900', secondary: 'text-gray-600' },
+  closeButton: 'hover:bg-gray-100 text-gray-500'
+} : {
+  modal: { bg: 'bg-[#1a1a1e]', border: 'border-white/10' },
+  card: { bg: 'bg-[#232328]', border: 'border-white/10', shadow: '' },
+  text: { primary: 'text-white', secondary: 'text-gray-400' },
+  closeButton: 'hover:bg-white/10 text-gray-400'
 };
 ```
 
-### 17.7 Консистентность высоты элементов
+### 13.3 Form Actions
 
-Все элементы в строке фильтров должны иметь **одинаковую высоту h-10** (40px):
+**Container:** `flex justify-center gap-3`
 
-| Элемент | Высота | Классы |
-|---------|--------|--------|
-| Input поиска | 40px | `h-10 rounded-xl` |
-| Кнопка "Фильтры" | 40px | `h-10 rounded-xl` |
-| Кнопка сброса | 40px | `w-10 h-10 rounded-lg` |
+**Buttons:** h-12 px-6 rounded-xl (Large size)
 
-### 17.8 Полный пример секции фильтров
+---
+
+## 14. Data Tables
+
+### 14.1 Table Styles
 
 ```tsx
-const [searchQuery, setSearchQuery] = useState('');
-const [statusFilter, setStatusFilter] = useState('all');
-const [dateFilter, setDateFilter] = useState('all');
-const [filtersOpen, setFiltersOpen] = useState(false);
+// Header
+<th className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wider ${
+  isDark ? 'text-gray-400 border-white/10' : 'text-gray-500 border-gray-300'
+}`}>
 
-const hasActiveFilters = searchQuery !== '' || statusFilter !== 'all' || dateFilter !== 'all';
+// Row
+<tr className={`${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-50'}`}>
 
-const resetFilters = () => {
-  setSearchQuery('');
-  setStatusFilter('all');
-  setDateFilter('all');
-};
-
-return (
-  <div className={`rounded-2xl p-6 border ${theme.card.background} ${theme.card.border}`}>
-    <div className="flex items-center gap-3">
-      {/* Поиск */}
-      <div className="relative flex-1">
-        <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${theme.text.secondary}`} />
-        <Input
-          placeholder="Поиск..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className={`pl-10 h-10 rounded-xl transition-none ${
-            isDark
-              ? 'bg-[#1a1a1e] border-white/10 text-white placeholder:text-gray-500'
-              : 'bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400'
-          }`}
-        />
-      </div>
-
-      {/* Кнопка фильтров */}
-      <button
-        onClick={() => setFiltersOpen(!filtersOpen)}
-        className={`flex items-center gap-2 px-4 h-10 rounded-xl border ${
-          isDark
-            ? 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border-white/10'
-            : 'bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-900 border-gray-300'
-        }`}
-      >
-        <SlidersHorizontal size={16} />
-        <span className="font-medium">Фильтры</span>
-        <ChevronDown size={16} className={`transition-transform ${filtersOpen ? 'rotate-180' : ''}`} />
-      </button>
-
-      {/* Кнопка сброса (условная) */}
-      {hasActiveFilters && (
-        <button
-          onClick={resetFilters}
-          className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent-red/10 text-accent-red border border-accent-red/20 hover:bg-accent-red/20 hover:border-accent-red/30"
-          title="Сбросить фильтры"
-        >
-          <X size={16} />
-        </button>
-      )}
-    </div>
-
-    {/* Раскрывающиеся фильтры */}
-    <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
-      <CollapsibleContent className="pt-4">
-        <div className="grid grid-cols-3 gap-4">
-          {/* Select фильтры */}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  </div>
-);
+// Cell
+<td className={`px-4 py-3 text-sm ${isDark ? 'text-white' : 'text-gray-900'}`}>
 ```
+
+### 14.2 Row Actions
+
+Use **h-8** buttons with **rounded-lg**:
+- Glass button for neutral actions (copy, edit, view)
+- Danger button for delete
+
+---
+
+## 15. Pagination
+
+### 15.1 Structure
+
+```
+[10 ▼] строк на странице   Показано 1-10 из 25   [<] [1] [2] [>]
+```
+
+### 15.2 Navigation Buttons
+
+| State | Classes |
+|-------|---------|
+| Active | `bg-white/5 hover:bg-white/10` (dark) / `bg-gray-100 hover:bg-gray-200` (light) |
+| Disabled | `opacity-50 cursor-not-allowed` |
+| Current page | `bg-accent-red text-white` |
+
+**Size:** `w-8 h-8 rounded-lg`
+
+---
+
+## 16. Status Colors & Badges
+
+### 16.1 Status Mapping
+
+| Status | Color | HEX |
+|--------|-------|-----|
+| Success | Green | `#13b981` |
+| Warning | Yellow | `#f59e0b` |
+| Error | Red | `#ea3857` |
+| Info | Purple | `#a855f7` |
+| Inactive | Gray | `#9ca3af` |
+
+### 16.2 Badge Style
+
+```tsx
+<span className="px-2.5 py-1 rounded-full text-xs font-medium bg-green-500/10 text-green-500">
+  Завершено
+</span>
+```
+
+---
+
+## 17. Sidebar Navigation
+
+### 17.1 Collapsed State (Icon only)
+
+```tsx
+<button className={`w-12 h-12 flex items-center justify-center rounded-xl border ${
+  active
+    ? 'bg-accent-red/20 border-accent-red/30 text-accent-red'
+    : 'border-white/10 text-gray-400 hover:bg-white/10 hover:border-accent-red/50 hover:text-accent-red'
+}`}>
+  <Icon className="w-5 h-5" />
+</button>
+```
+
+### 17.2 Expanded State
+
+```tsx
+<div className={`flex items-center px-3 py-2.5 rounded-xl cursor-pointer ${
+  active
+    ? 'bg-accent-red/10 border border-accent-red/30 text-accent-red shadow-sm'
+    : `${theme.button.default}`
+}`}>
+  <Icon className="w-5 h-5 mr-3" />
+  <span className="text-sm font-medium">Label</span>
+</div>
+```
+
+---
+
+## 18. UI State Persistence
+
+### 18.1 Storage Keys
+
+| Key | Type | Default |
+|-----|------|---------|
+| `{module}_theme` | `'dark' \| 'light'` | `'light'` |
+| `{module}_sidebarCollapsed` | `boolean` | `false` |
+| `{module}_rowsPerPage` | `number` | `10` |
+
+### 18.2 Pattern
+
+```tsx
+const [isDark, setIsDark] = useState(() => {
+  return localStorage.getItem('module_theme') === 'dark';
+});
+
+const toggleTheme = () => {
+  const newValue = !isDark;
+  setIsDark(newValue);
+  localStorage.setItem('module_theme', newValue ? 'dark' : 'light');
+};
+```
+
+---
+
+## 19. Accessibility
+
+### 19.1 Focus States
+
+**Important:** No colored ring on focus. Use neutral approach:
+
+```tsx
+className="focus:outline-none focus:ring-0"
+```
+
+### 19.2 Contrast Ratios
+
+All text meets WCAG 2.1 AA (4.5:1 for normal, 3:1 for large text).
+
+### 19.3 Keyboard Navigation
+
+- Tab order follows visual hierarchy
+- Escape closes modals/dropdowns
+- Enter activates buttons
+
+### 19.4 ARIA Labels
+
+```tsx
+<button aria-label="Toggle theme">
+  <Moon className="w-4 h-4" />
+</button>
+```
+
+---
+
+## Quick Reference
+
+### Button Sizes
+
+| Size | Height | Padding | Radius | Usage |
+|------|--------|---------|--------|-------|
+| Large | h-12 | px-6 | rounded-xl | Modals |
+| Medium | h-10 | px-4 | rounded-xl | Actions |
+| Small | h-8 | px-3 | rounded-lg | Tables |
+| Icon | h-8/h-10 | — | rounded-lg | Icon only |
+
+### Common Patterns
+
+```tsx
+// All buttons with text
+className="text-sm font-medium"
+
+// No focus ring
+className="focus:outline-none focus:ring-0"
+
+// No transition on theme switch
+className="transition-none"
+
+// Icon button hover
+className="hover:scale-105 transition-all"
+
+// Flex centering
+className="flex items-center justify-center"
+className="flex items-center gap-2"
+```
+
+### Color Reference
+
+| Element | Dark | Light |
+|---------|------|-------|
+| Page bg | `#1a1a1e` | `#f4f4f4` |
+| Card bg | `#232328` | `#ffffff` |
+| Input bg | `#1e1e22` | `gray-50` |
+| Border | `white/10` | `gray-300` |
+| Primary text | `white` | `gray-900` |
+| Secondary text | `gray-400` | `gray-600` |
+| Accent | `#ea3857` | `#ea3857` |
 
 ---
 
@@ -906,11 +717,10 @@ return (
 
 | Version | Date | Changes |
 |---------|------|---------|
-| **3.2** | 2025-11-26 | Added §17: Filter Section Component with conditional reset button |
-| **3.1** | 2025-11-25 | Added §13-§16: UI State Persistence, Select, Pagination, Action Buttons |
-| **3.0** | 2025-11-25 | Complete rewrite with HEX colors from `/test-app` audit |
-| **2.0** | 2025-10-15 | Added hybrid theme architecture, glassmorphism specs |
-| **1.0** | 2025-08-01 | Initial design system documentation |
+| **4.0** | 2025-11-28 | Complete rewrite: consolidated duplicates, removed outdated info, aligned with declarant implementation |
+| **3.4** | 2025-11-28 | Button System consolidation |
+| **3.3** | 2025-11-28 | Added Form Inputs, Modal Forms, Validation Buttons |
+| **3.0** | 2025-11-25 | Initial v3 with HEX colors |
 
 ---
 
