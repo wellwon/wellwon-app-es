@@ -791,7 +791,7 @@ export function useRealtimeChat(): RealtimeChatContextType {
   }, [chats, activeChat, loadChatMessages, user?.id, messages, subscribeToChat, setActiveSection]);
 
   // Создание нового чата с привязкой к выбранной компании
-  const createChat = useCallback(async (name: string, type: Chat['type'], participantIds: string[] = []): Promise<Chat> => {
+  const createChat = useCallback(async (name: string, type: 'direct' | 'group' | 'company' = 'direct', participantIds: string[] = []): Promise<Chat> => {
     if (!user) {
       throw new Error('Пользователь не авторизован');
     }
@@ -977,15 +977,155 @@ export function useRealtimeChat(): RealtimeChatContextType {
   const sendFile = useCallback(async (file: File, replyToId?: string) => {
     if (!user || !activeChat) return;
 
-    await chatApi.uploadChatFile(activeChat.id, file);
-  }, [user, activeChat]);
+    // Determine message type based on file
+    const isImage = file.type.startsWith('image/');
+    const messageType = isImage ? 'image' : 'file';
+
+    // Create optimistic message
+    const tempId = `temp-${Date.now()}-${Math.random()}`;
+    const optimisticMessage: Message = {
+      id: tempId,
+      chat_id: activeChat.id,
+      sender_id: user.id,
+      content: file.name,
+      message_type: messageType,
+      reply_to_id: replyToId || null,
+      file_url: URL.createObjectURL(file), // Temporary local URL for preview
+      file_name: file.name,
+      file_size: file.size,
+      file_type: file.type,
+      voice_duration: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      is_edited: false,
+      is_deleted: false,
+      metadata: { uploading: true },
+      sender_profile: {
+        first_name: user.user_metadata?.first_name || 'You',
+        last_name: user.user_metadata?.last_name || '',
+        avatar_url: user.user_metadata?.avatar_url || null,
+        type: user.user_metadata?.user_type || 'ww_manager'
+      },
+      reply_to: replyToId ? messages.find(m => m.id === replyToId) : undefined
+    };
+
+    setMessages(prev => [...prev, optimisticMessage]);
+    setSendingMessages(prev => new Set([...prev, tempId]));
+
+    try {
+      // Upload file first
+      const uploadResult = await chatApi.uploadChatFile(activeChat.id, file);
+
+      if (!uploadResult.success || !uploadResult.file_url) {
+        throw new Error(uploadResult.error || 'File upload failed');
+      }
+
+      // Send message with file URL
+      await chatApi.sendMessage(activeChat.id, {
+        content: file.name,
+        message_type: messageType,
+        reply_to_id: replyToId,
+        file_url: uploadResult.file_url,
+        file_name: uploadResult.file_name,
+        file_size: uploadResult.file_size,
+        file_type: uploadResult.file_type,
+      });
+
+      // Remove optimistic message - WSE will bring the real one
+      setSendingMessages(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(tempId);
+        return newSet;
+      });
+
+      logger.debug('File message sent', { chatId: activeChat.id, fileName: file.name, component: 'useRealtimeChat' });
+
+    } catch (error) {
+      logger.error('Error sending file', error, { component: 'useRealtimeChat', chatId: activeChat.id });
+
+      // Remove failed optimistic message
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+      setSendingMessages(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(tempId);
+        return newSet;
+      });
+    }
+  }, [user, activeChat, messages]);
 
   // Отправка голосового сообщения
   const sendVoice = useCallback(async (audioBlob: Blob, duration: number, replyToId?: string) => {
     if (!user || !activeChat) return;
 
-    await chatApi.uploadVoiceMessage(activeChat.id, audioBlob, duration);
-  }, [user, activeChat]);
+    // Create optimistic message
+    const tempId = `temp-voice-${Date.now()}-${Math.random()}`;
+    const optimisticMessage: Message = {
+      id: tempId,
+      chat_id: activeChat.id,
+      sender_id: user.id,
+      content: '',
+      message_type: 'voice',
+      reply_to_id: replyToId || null,
+      file_url: URL.createObjectURL(audioBlob),
+      file_name: 'voice-message.webm',
+      file_size: audioBlob.size,
+      file_type: 'audio/webm',
+      voice_duration: duration,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      is_edited: false,
+      is_deleted: false,
+      metadata: { uploading: true },
+      sender_profile: {
+        first_name: user.user_metadata?.first_name || 'You',
+        last_name: user.user_metadata?.last_name || '',
+        avatar_url: user.user_metadata?.avatar_url || null,
+        type: user.user_metadata?.user_type || 'ww_manager'
+      },
+      reply_to: replyToId ? messages.find(m => m.id === replyToId) : undefined
+    };
+
+    setMessages(prev => [...prev, optimisticMessage]);
+    setSendingMessages(prev => new Set([...prev, tempId]));
+
+    try {
+      // Upload voice file first
+      const uploadResult = await chatApi.uploadVoiceMessage(activeChat.id, audioBlob, duration);
+
+      if (!uploadResult.success || !uploadResult.file_url) {
+        throw new Error(uploadResult.error || 'Voice upload failed');
+      }
+
+      // Send message with voice URL
+      await chatApi.sendMessage(activeChat.id, {
+        content: '',
+        message_type: 'voice',
+        reply_to_id: replyToId,
+        file_url: uploadResult.file_url,
+        voice_duration: duration,
+      });
+
+      // Remove optimistic message - WSE will bring the real one
+      setSendingMessages(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(tempId);
+        return newSet;
+      });
+
+      logger.debug('Voice message sent', { chatId: activeChat.id, duration, component: 'useRealtimeChat' });
+
+    } catch (error) {
+      logger.error('Error sending voice message', error, { component: 'useRealtimeChat', chatId: activeChat.id });
+
+      // Remove failed optimistic message
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+      setSendingMessages(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(tempId);
+        return newSet;
+      });
+    }
+  }, [user, activeChat, messages]);
 
   // Отправка интерактивного сообщения
   const sendInteractiveMessage = useCallback(async (interactiveData: any, title?: string) => {

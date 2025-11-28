@@ -6,30 +6,15 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, Protocol, Any
+from typing import Optional, Any, TYPE_CHECKING
 from uuid import UUID
 
 from app.infra.telegram.adapter import TelegramAdapter, get_telegram_adapter
-from app.infra.read_repos.user_account_read_repo import UserAccountReadRepo
+
+if TYPE_CHECKING:
+    from app.infra.cqrs.query_bus import QueryBus
 
 log = logging.getLogger("wellwon.telegram.listener")
-
-
-class ChatReadRepository(Protocol):
-    """Protocol for Chat read repository"""
-
-    async def get_by_id(self, chat_id: UUID) -> Any:
-        """Get chat by ID"""
-        ...
-
-    async def find_by_external_channel(
-        self,
-        channel_type: str,
-        channel_id: str,
-        topic_id: Optional[str] = None
-    ) -> Any:
-        """Find chat by external channel info"""
-        ...
 
 
 class TelegramEventListener:
@@ -47,7 +32,7 @@ class TelegramEventListener:
 
     Architecture:
     - Receives events from EventBus (RedPanda)
-    - Looks up chat configuration from ChatReadRepository
+    - Uses QueryBus to lookup data (CQRS compliance)
     - Calls TelegramAdapter to perform Telegram operations
 
     Pattern follows WSEDomainPublisher for consistency.
@@ -56,12 +41,12 @@ class TelegramEventListener:
     def __init__(
         self,
         event_bus: Any,
+        query_bus: 'QueryBus',
         telegram_adapter: Optional[TelegramAdapter] = None,
-        chat_repository: Optional[ChatReadRepository] = None
     ):
         self._event_bus = event_bus
+        self._query_bus = query_bus
         self._telegram: Optional[TelegramAdapter] = telegram_adapter
-        self._chat_repo: Optional[ChatReadRepository] = chat_repository
         self._initialized = False
         self._running = False
         self._subscriptions: dict = {}
@@ -139,10 +124,6 @@ class TelegramEventListener:
         self._subscriptions.clear()
         log.info("TelegramEventListener stopped")
 
-    def set_chat_repository(self, repository: ChatReadRepository) -> None:
-        """Set chat repository (called during app startup)"""
-        self._chat_repo = repository
-
     # =========================================================================
     # Event Handlers
     # =========================================================================
@@ -180,25 +161,32 @@ class TelegramEventListener:
             message_type = event.get("message_type", "text")
             sender_id = event.get("sender_id")
 
-            # Lookup sender name from WellWon user
+            # Lookup sender name via QueryBus (CQRS compliant)
             sender_name = "Unknown"
             if sender_id:
                 try:
-                    user = await UserAccountReadRepo.get_user_profile_by_user_id(
-                        UUID(sender_id) if isinstance(sender_id, str) else sender_id
+                    from app.user_account.queries import GetUserProfileQuery
+                    user = await self._query_bus.dispatch(
+                        GetUserProfileQuery(
+                            user_id=UUID(sender_id) if isinstance(sender_id, str) else sender_id,
+                            include_preferences=False,
+                            include_security_settings=False
+                        )
                     )
                     if user:
-                        first = user.first_name or ""
-                        last = user.last_name or ""
-                        sender_name = f"{first} {last}".strip() or user.username or "Unknown"
+                        first = getattr(user, 'first_name', '') or ''
+                        last = getattr(user, 'last_name', '') or ''
+                        username = getattr(user, 'username', '') or ''
+                        sender_name = f"{first} {last}".strip() or username or "Unknown"
                 except Exception as e:
                     log.warning(f"Failed to lookup sender {sender_id}: {e}")
 
-            # Get chat configuration from read model
-            from app.infra.read_repos.chat_read_repo import ChatReadRepo
-
-            chat = await ChatReadRepo.get_chat_by_id(
-                UUID(chat_id) if isinstance(chat_id, str) else chat_id
+            # Get chat configuration via QueryBus (CQRS compliant)
+            from app.chat.queries import GetChatByIdQuery
+            chat = await self._query_bus.dispatch(
+                GetChatByIdQuery(
+                    chat_id=UUID(chat_id) if isinstance(chat_id, str) else chat_id
+                )
             )
 
             if not chat:
@@ -206,13 +194,13 @@ class TelegramEventListener:
                 return
 
             # Check if chat has Telegram integration
-            if not chat.telegram_chat_id:
+            telegram_chat_id = getattr(chat, 'telegram_chat_id', None)
+            if not telegram_chat_id:
                 log.debug(f"Chat {chat_id} has no Telegram integration")
                 return
 
             # Get Telegram identifiers
-            telegram_chat_id = chat.telegram_chat_id
-            topic_id = chat.telegram_topic_id
+            topic_id = getattr(chat, 'telegram_topic_id', None)
 
             # Format message with sender name
             formatted_content = f"<b>{sender_name}</b>\n{content}"
@@ -391,7 +379,7 @@ class TelegramEventListener:
 
 async def create_telegram_event_listener(
     event_bus: Any,
-    chat_repository: Optional[ChatReadRepository] = None
+    query_bus: 'QueryBus',
 ) -> TelegramEventListener:
     """
     Factory function to create and start a TelegramEventListener.
@@ -399,13 +387,13 @@ async def create_telegram_event_listener(
     Usage in startup:
         listener = await create_telegram_event_listener(
             event_bus=app.state.event_bus,
-            chat_repository=chat_read_repo  # optional
+            query_bus=app.state.query_bus
         )
         app.state.telegram_event_listener = listener
     """
     listener = TelegramEventListener(
         event_bus=event_bus,
-        chat_repository=chat_repository
+        query_bus=query_bus
     )
     await listener.start()
     return listener

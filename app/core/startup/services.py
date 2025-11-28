@@ -89,12 +89,18 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
         app.state.telegram_event_listener = None
         return
 
+    # Ensure QueryBus is available (CQRS compliance)
+    if not hasattr(app.state, 'query_bus') or not app.state.query_bus:
+        logger.warning("QueryBus not available, Telegram Event Listener disabled")
+        app.state.telegram_event_listener = None
+        return
+
     try:
         from app.infra.telegram.listener import create_telegram_event_listener
 
         telegram_listener = await create_telegram_event_listener(
             event_bus=app.state.event_bus,
-            chat_repository=None  # Will be set when Chat domain read repo is available
+            query_bus=app.state.query_bus
         )
 
         app.state.telegram_event_listener = telegram_listener
@@ -126,12 +132,16 @@ async def initialize_wse_domain_publisher(app: FastAPI) -> None:
 
         wse_domain_config = {
             "enable_user_events": os.getenv("WSE_ENABLE_USER_EVENTS", "true").lower() == "true",
+            "enable_company_events": os.getenv("WSE_ENABLE_COMPANY_EVENTS", "true").lower() == "true",
+            "enable_chat_events": os.getenv("WSE_ENABLE_CHAT_EVENTS", "true").lower() == "true",
         }
 
         wse_domain_publisher = WSEDomainPublisher(
             event_bus=app.state.event_bus,
             pubsub_bus=app.state.pubsub_bus,
-            enable_user_events=wse_domain_config["enable_user_events"]
+            enable_user_events=wse_domain_config["enable_user_events"],
+            enable_company_events=wse_domain_config["enable_company_events"],
+            enable_chat_events=wse_domain_config["enable_chat_events"]
         )
 
         await wse_domain_publisher.start()
@@ -139,7 +149,9 @@ async def initialize_wse_domain_publisher(app: FastAPI) -> None:
 
         logger.info(
             f"WSE Domain Publisher started - "
-            f"Users: {wse_domain_config['enable_user_events']}"
+            f"Users: {wse_domain_config['enable_user_events']}, "
+            f"Companies: {wse_domain_config['enable_company_events']}, "
+            f"Chats: {wse_domain_config['enable_chat_events']}"
         )
 
     except ImportError as import_error:

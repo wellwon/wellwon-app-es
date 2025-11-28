@@ -462,18 +462,19 @@ const ChatInterface = React.memo(() => {
   
   const handleSendMessage = useCallback(async () => {
     const content = inputValue.trim();
-    if (!content || !activeChat) return;
-    
+    if (!content) return;
+
     setInputValue('');
     closeMentions(); // Close mentions on send
-    
+
     try {
+      // sendMessage in useRealtimeChat handles auto-creating chat if no activeChat
       await sendMessage(content, replyTarget?.id);
       setReplyTarget(null); // Clear reply target after sending
     } catch (error) {
       logger.error('Failed to send message', error, { component: 'ChatInterface' });
     }
-  }, [inputValue, activeChat, sendMessage, replyTarget, closeMentions]);
+  }, [inputValue, sendMessage, replyTarget, closeMentions]);
   
   // Create properly ordered displayedItems that match MentionsDropdown visual order
   const displayedItems = React.useMemo(() => {

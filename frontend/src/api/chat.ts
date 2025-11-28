@@ -159,9 +159,13 @@ export async function getChatById(chatId: string): Promise<ChatDetail> {
   return data;
 }
 
-export async function createChat(request: CreateChatRequest): Promise<CommandResponse> {
+export async function createChat(request: CreateChatRequest): Promise<ChatDetail> {
+  // Create the chat - returns only id and message
   const { data } = await API.post<CommandResponse>("/chats", request);
-  return data;
+
+  // Fetch the full chat details
+  const chatDetail = await getChatById(data.id);
+  return chatDetail;
 }
 
 export async function updateChat(

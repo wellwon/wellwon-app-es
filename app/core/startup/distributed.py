@@ -101,12 +101,29 @@ async def initialize_outbox_service(app: FastAPI) -> None:
 
     # Define custom event-to-topic mappings for WellWon domains
     custom_mappings = {
+        # User account events
         "UserAccountCreated": "transport.user-account-events",
         "UserDeleted": "transport.user-account-events",
         "UserProfileUpdated": "transport.user-account-events",
+        # Saga events
         "SagaStarted": "saga.events",
         "SagaCompleted": "saga.events",
         "SagaFailed": "saga.events",
+        # Chat domain events (for WSE real-time updates)
+        "ChatCreated": "transport.chat-events",
+        "ChatUpdated": "transport.chat-events",
+        "ChatArchived": "transport.chat-events",
+        "ChatRestored": "transport.chat-events",
+        "MessageSent": "transport.chat-events",
+        "MessageEdited": "transport.chat-events",
+        "MessageDeleted": "transport.chat-events",
+        "ParticipantAdded": "transport.chat-events",
+        "ParticipantRemoved": "transport.chat-events",
+        "ParticipantLeft": "transport.chat-events",
+        "ParticipantRoleChanged": "transport.chat-events",
+        "MessagesMarkedAsRead": "transport.chat-events",
+        "TelegramChatLinked": "transport.chat-events",
+        "TelegramChatUnlinked": "transport.chat-events",
     }
 
     # Create outbox service with DLQ support
