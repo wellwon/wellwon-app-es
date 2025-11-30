@@ -128,15 +128,16 @@ const ChatNavigationBar: React.FC = () => {
   };
 
   return (
-    <div className={`h-16 border-b flex items-center justify-between px-6 relative z-20 ${theme.header}`}>
-      <div className="flex items-center gap-3 relative z-10">
+    <div className={`h-16 border-b flex items-center gap-4 px-4 md:px-6 relative z-20 ${theme.header}`}>
+      {/* Left side - chat name (flex-1 to fill, but min-w-0 to allow shrinking) */}
+      <div className="flex items-center gap-2 md:gap-3 relative z-10 min-w-0 flex-1">
         {activeChat && (
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${theme.icon}`}>
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${theme.icon}`}>
             <MessageSquare size={16} className={isLightTheme ? 'text-gray-600' : 'text-white'} />
           </div>
         )}
 
-        <div>
+        <div className="min-w-0 flex-1">
           {initialLoading ? (
             <>
               <h1 className={`font-semibold text-lg ${theme.text.primary}`}></h1>
@@ -144,24 +145,19 @@ const ChatNavigationBar: React.FC = () => {
             </>
           ) : (
             <>
-              <h1 className={`font-semibold text-lg ${theme.text.primary}`}>
+              <h1 className={`font-semibold text-base md:text-lg truncate max-w-[200px] md:max-w-none ${theme.text.primary}`}>
                 {activeChat ? activeChat.name || `Чат ${activeChat.id.slice(-8)}` : ''}
               </h1>
-              <p className={`text-sm ${theme.text.secondary}`}>
-                {activeChat
-                  ? (activeChat.metadata as any)?.description || 'Краткое описание чата'
-                  : ''
-                }
-              </p>
             </>
           )}
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        {/* Message filter buttons */}
+      {/* Right side - filters and actions (flex-shrink-0 to keep size) */}
+      <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
+        {/* Message filter buttons - scrollable on small screens */}
         {activeChat && (
-          <div className="flex items-center gap-1 mr-4">
+          <div className="flex items-center gap-0.5 md:gap-1 mr-2 md:mr-4 overflow-x-auto scrollbar-hide">
             <FilterButton
               label="ALL"
               active={messageFilter === 'all'}

@@ -57,6 +57,8 @@ class CompanyCreated(BaseEvent):
     create_telegram_group: bool = False
     telegram_group_title: Optional[str] = None
     telegram_group_description: Optional[str] = None
+    # If True, saga will create company chat (default: True for backward compat)
+    create_chat: bool = True
     # If provided, saga will link this existing chat to the company
     link_chat_id: Optional[uuid.UUID] = None
 
@@ -196,6 +198,16 @@ class TelegramSupergroupUpdated(BaseEvent):
     invite_link: Optional[str] = None
 
 
+@domain_event(category="domain")
+class TelegramSupergroupDeleted(BaseEvent):
+    """Event emitted when a Telegram supergroup is permanently deleted"""
+    event_type: Literal["TelegramSupergroupDeleted"] = "TelegramSupergroupDeleted"
+    telegram_group_id: int
+    company_id: Optional[uuid.UUID] = None  # May be None if supergroup wasn't linked
+    deleted_by: uuid.UUID
+    reason: Optional[str] = None
+
+
 # =============================================================================
 # Balance Events
 # =============================================================================
@@ -230,5 +242,6 @@ COMPANY_EVENT_TYPES = {
     "TelegramSupergroupLinked": TelegramSupergroupLinked,
     "TelegramSupergroupUnlinked": TelegramSupergroupUnlinked,
     "TelegramSupergroupUpdated": TelegramSupergroupUpdated,
+    "TelegramSupergroupDeleted": TelegramSupergroupDeleted,
     "CompanyBalanceUpdated": CompanyBalanceUpdated,
 }

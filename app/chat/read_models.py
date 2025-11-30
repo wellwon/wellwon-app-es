@@ -90,6 +90,7 @@ class MessageReadModel(BaseModel):
     telegram_forward_data: Optional[Dict[str, Any]] = None  # Forward info if forwarded
     telegram_topic_id: Optional[int] = None  # Forum topic ID
     sync_direction: Optional[str] = None  # 'telegram_to_web' | 'web_to_telegram' | 'bidirectional'
+    telegram_read_at: Optional[datetime] = None  # When message was read on Telegram
     # Metadata
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
@@ -155,6 +156,10 @@ class ChatListItemReadModel(BaseModel):
     last_message_sender_name: Optional[str] = None
     unread_count: int = 0
     is_active: bool = True
+    # Company and Telegram fields for filtering by scope
+    company_id: Optional[uuid.UUID] = None
+    telegram_supergroup_id: Optional[int] = None
+    telegram_topic_id: Optional[int] = None
     # Other participants (for direct chats - show other user's info)
     other_participant_name: Optional[str] = None
     other_participant_avatar_url: Optional[str] = None

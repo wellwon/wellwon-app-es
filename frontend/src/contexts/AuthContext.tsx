@@ -1,22 +1,29 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+// =============================================================================
+// File: src/contexts/AuthContext.tsx
+// Description: Auth context using React Query + Zustand (TkDodo pattern)
+// =============================================================================
+
+import React, { createContext, useContext, useCallback, useMemo, useEffect, useRef } from 'react';
 import { logger } from '@/utils/logger';
 import type { Profile, SignUpMetadata, AuthResponse } from '@/types/auth';
-import { login as apiLogin, register as apiRegister, fetchMe as apiGetProfile, logout as apiLogout } from '@/api/user_account';
-import { API } from '@/api/core';
 
-// Simplified User type (no Supabase dependency)
-interface User {
-  id: string;  // Alias for user_id (for compatibility)
-  user_id: string;
-  username: string;
-  email: string;
-  role: string;
-  user_metadata?: {
-    first_name?: string;
-    last_name?: string;
-    avatar_url?: string;
-  };
-}
+// React Query + Zustand hooks
+import {
+  useAuthStore,
+  useProfile,
+  useLogin,
+  useLogout,
+  useRegister,
+  useUpdateProfile,
+  useChangePassword,
+  useRefreshToken,
+  profileToUser,
+  type User,
+} from '@/hooks/auth';
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
 
 interface AuthContextType {
   user: User | null;
@@ -32,9 +39,12 @@ interface AuthContextType {
   quickLogin: (email: string, password: string) => Promise<AuthResponse>;
 }
 
+// -----------------------------------------------------------------------------
+// Context
+// -----------------------------------------------------------------------------
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Hook moved to separate export for better HMR compatibility
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
@@ -43,409 +53,168 @@ export function useAuth() {
   return context;
 }
 
+// -----------------------------------------------------------------------------
+// Provider
+// -----------------------------------------------------------------------------
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [token, setToken] = useState<string | null>(null);
+  // Zustand: Token state
+  const token = useAuthStore((state) => state.token);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const refreshToken = useAuthStore((state) => state.refreshToken);
+  const expiresAt = useAuthStore((state) => state.expiresAt);
 
-  // Protection against state updates after unmounting
-  const isMountedRef = React.useRef(true);
-  const profileLoadingRef = React.useRef<string | null>(null);
+  // React Query: Profile
+  const { profile, isLoading: isLoadingProfile } = useProfile();
 
-  React.useEffect(() => {
-    // Reset to true on mount (important for React StrictMode)
-    console.log('[AuthContext] Component mounted, isMountedRef set to true');
-    isMountedRef.current = true;
-    return () => {
-      console.log('[AuthContext] Component unmounting, isMountedRef set to false');
-      isMountedRef.current = false;
-    };
-  }, []);
+  // Mutations
+  const loginMutation = useLogin();
+  const logoutMutation = useLogout();
+  const registerMutation = useRegister();
+  const updateProfileMutation = useUpdateProfile();
+  const changePasswordMutation = useChangePassword();
+  const refreshTokenMutation = useRefreshToken();
 
-  const fetchProfile = React.useCallback(async (userId: string) => {
-    // Prevent multiple concurrent profile loads
-    if (profileLoadingRef.current === userId) {
-      logger.debug('Profile already loading for user', { userId, component: 'AuthContext' });
+  // Token refresh timer
+  const refreshTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Schedule token refresh
+  useEffect(() => {
+    if (!isAuthenticated || !expiresAt || !refreshToken) {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
       return;
     }
 
-    profileLoadingRef.current = userId;
-    logger.debug('Starting profile load', { userId, component: 'AuthContext' });
+    const scheduleRefresh = () => {
+      const now = Date.now();
+      const timeUntilExpiry = expiresAt - now;
 
-    try {
-      // Call new backend API
-      const profileData = await apiGetProfile();
+      // Refresh 1 minute before expiry
+      const refreshTime = expiresAt - 60000;
+      const delayMs = refreshTime - now;
 
-      logger.debug('Profile loaded successfully', { component: 'AuthContext' });
-
-      if (isMountedRef.current && profileLoadingRef.current === userId) {
-        // Map API response to Profile type
-        const mappedProfile: Profile = {
-          id: profileData.user_id,
-          user_id: profileData.user_id,
-          username: profileData.username,
-          email: profileData.email,
-          role: profileData.role,
-          first_name: profileData.first_name || null,
-          last_name: profileData.last_name || null,
-          avatar_url: profileData.avatar_url || null,
-          bio: profileData.bio || null,
-          phone: profileData.phone || null,
-          active: profileData.is_active,
-          is_active: profileData.is_active,
-          is_developer: profileData.is_developer ?? false,
-          email_verified: profileData.email_verified,
-          mfa_enabled: profileData.mfa_enabled,
-          created_at: profileData.created_at,
-          updated_at: profileData.created_at,
-          last_login: profileData.last_login,
-          last_password_change: profileData.last_password_change,
-          security_alerts_enabled: profileData.security_alerts_enabled,
-          active_sessions_count: profileData.active_sessions_count,
-          user_type: profileData.user_type,
-          user_number: profileData.user_number,
-        };
-        setProfile(mappedProfile);
+      if (delayMs <= 0) {
+        // Token already expired or expiring soon - refresh immediately!
+        logger.debug('Token expired or expiring soon, refreshing immediately');
+        refreshTokenMutation.mutate();
+        return;
       }
-    } catch (error) {
-      logger.error('Profile loading error', error, { userId, component: 'AuthContext' });
-    } finally {
-      if (profileLoadingRef.current === userId) {
-        profileLoadingRef.current = null;
-      }
-    }
-  }, []);
 
-  // Initialize session from localStorage
-  useEffect(() => {
-    let mounted = true;
+      logger.debug('Scheduling token refresh', { inSeconds: Math.round(delayMs / 1000) });
 
-    logger.debug('AuthContext initializing', { component: 'AuthContext' });
-
-    const initializeAuth = async () => {
-      try {
-        // Check for stored auth
-        const stored = localStorage.getItem('auth');
-        if (!stored) {
-          logger.debug('No stored auth found', { component: 'AuthContext' });
-          setLoading(false);
-          return;
-        }
-
-        const auth = JSON.parse(stored);
-        if (!auth.token) {
-          logger.debug('No token in stored auth', { component: 'AuthContext' });
-          localStorage.removeItem('auth');
-          setLoading(false);
-          return;
-        }
-
-        logger.debug('Found stored token, loading profile', { component: 'AuthContext' });
-        setToken(auth.token);
-
-        // Try to load profile
-        const profileData = await apiGetProfile();
-
-        if (mounted && isMountedRef.current) {
-          // Create user object from profile
-          const userObj: User = {
-            id: profileData.user_id,
-            user_id: profileData.user_id,
-            username: profileData.username,
-            email: profileData.email,
-            role: profileData.role || 'user'
-          };
-
-          // Map API response to Profile type
-          const mappedProfile: Profile = {
-            id: profileData.user_id,
-            user_id: profileData.user_id,
-            username: profileData.username,
-            email: profileData.email,
-            role: profileData.role,
-            first_name: profileData.first_name || null,
-            last_name: profileData.last_name || null,
-            avatar_url: profileData.avatar_url || null,
-            bio: profileData.bio || null,
-            phone: profileData.phone || null,
-            active: profileData.is_active,
-            is_active: profileData.is_active,
-            is_developer: profileData.is_developer ?? false,
-            email_verified: profileData.email_verified,
-            mfa_enabled: profileData.mfa_enabled,
-            created_at: profileData.created_at,
-            updated_at: profileData.created_at,
-            last_login: profileData.last_login,
-            last_password_change: profileData.last_password_change,
-            security_alerts_enabled: profileData.security_alerts_enabled,
-            active_sessions_count: profileData.active_sessions_count,
-            user_type: profileData.user_type,
-            user_number: profileData.user_number,
-          };
-
-          setUser(userObj);
-          setProfile(mappedProfile);
-          logger.info('User session restored from localStorage', { component: 'AuthContext' });
-        }
-
-        setLoading(false);
-      } catch (error) {
-        logger.error('Failed to restore session', error, { component: 'AuthContext' });
-        // Clear invalid auth
-        localStorage.removeItem('auth');
-        setToken(null);
-        setUser(null);
-        setProfile(null);
-        setLoading(false);
-      }
+      refreshTimerRef.current = setTimeout(() => {
+        refreshTokenMutation.mutate();
+      }, delayMs);
     };
 
-    initializeAuth();
+    scheduleRefresh();
 
     return () => {
-      logger.debug('AuthContext cleanup', { component: 'AuthContext' });
-      mounted = false;
-    };
-  }, []);
-
-  // Listen for WSE profile update events
-  useEffect(() => {
-    const handleProfileUpdate = async (event: CustomEvent) => {
-      try {
-        logger.info('Profile update event received via WSE', { component: 'AuthContext' });
-
-        // Refetch profile from backend to get latest data
-        if (profile?.user_id) {
-          await fetchProfile(profile.user_id);
-        }
-      } catch (error) {
-        logger.error('Failed to handle profile update event', error, { component: 'AuthContext' });
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
       }
     };
+  }, [isAuthenticated, expiresAt, refreshToken, refreshTokenMutation]);
 
-    // CES: Listen for admin changes (is_developer, role, is_active, etc.)
-    const handleAdminChange = async (event: CustomEvent) => {
-      try {
-        const detail = event.detail;
-        logger.info('CES: Admin change event received via WSE', { detail, component: 'AuthContext' });
+  // Derive user from profile
+  const user = useMemo(() => profileToUser(profile), [profile]);
 
-        // Check if this event is for the current user
-        if (detail?.userId && profile?.user_id && detail.userId === profile.user_id) {
-          logger.info('CES: Updating local profile state', { component: 'AuthContext' });
+  // Loading state
+  const loading = useMemo(() => {
+    // Initial load: checking stored auth
+    if (isAuthenticated && !profile && isLoadingProfile) {
+      return true;
+    }
+    return false;
+  }, [isAuthenticated, profile, isLoadingProfile]);
 
-          // Update local profile state immediately for responsive UI
-          setProfile(prev => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              is_developer: detail.isDeveloper ?? prev.is_developer,
-              role: detail.role ?? prev.role,
-              is_active: detail.isActive ?? prev.is_active,
-              active: detail.isActive ?? prev.active,
-              email_verified: detail.emailVerified ?? prev.email_verified,
-              user_type: detail.userType ?? prev.user_type,
-            };
-          });
+  // -----------------------------------------------------------------------------
+  // Actions (maintain same interface as before)
+  // -----------------------------------------------------------------------------
 
-          // Also refetch from backend to ensure consistency
-          await fetchProfile(profile.user_id);
-        }
-      } catch (error) {
-        logger.error('Failed to handle CES admin change event', error, { component: 'AuthContext' });
-      }
-    };
-
-    window.addEventListener('userProfileUpdated', handleProfileUpdate as EventListener);
-    window.addEventListener('userAdminChange', handleAdminChange as EventListener);
-
-    return () => {
-      window.removeEventListener('userProfileUpdated', handleProfileUpdate as EventListener);
-      window.removeEventListener('userAdminChange', handleAdminChange as EventListener);
-    };
-  }, [profile?.user_id, fetchProfile]);
-
-  const signUp = async (email: string, password: string, metadata?: SignUpMetadata) => {
+  const signUp = useCallback(async (
+    email: string,
+    password: string,
+    metadata?: SignUpMetadata
+  ): Promise<AuthResponse> => {
     try {
-      // Call new backend register API
-      // Use email as username (simplest approach, OAuth-ready)
-      await apiRegister(
-        email, // username = email
-        email,
-        password,
-        undefined, // secret - optional, uses default on backend
-        true, // terms_accepted
-        false, // marketing_consent
-        undefined, // referral_code
-        metadata?.first_name, // WellWon profile field
-        metadata?.last_name   // WellWon profile field
-      );
-
-      // Don't auto-login - let event projector process first
-      // User will be redirected to login page
-      logger.info('Registration successful, please login', { component: 'AuthContext' });
+      await registerMutation.mutateAsync({ email, password, metadata });
       return { error: null };
     } catch (error: any) {
-      logger.error('Registration error', error, { component: 'AuthContext' });
+      logger.error('Registration error', error);
       return { error: error?.response?.data || error };
     }
-  };
+  }, [registerMutation]);
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = useCallback(async (
+    email: string,
+    password: string
+  ): Promise<AuthResponse> => {
     try {
-      // Call new backend login API
-      console.log('[AuthContext] signIn: calling apiLogin...');
-      const authResponse = await apiLogin(email, password);
-      console.log('[AuthContext] signIn: login successful, storing tokens...');
-
-      // Store JWT tokens with expiration
-      localStorage.setItem('auth', JSON.stringify({
-        token: authResponse.access_token,
-        refresh_token: authResponse.refresh_token,
-        expires_at: Date.now() + (authResponse.expires_in * 1000),
-        token_type: authResponse.token_type,
-        session_id: authResponse.session_id
-      }));
-
-      setToken(authResponse.access_token);
-
-      // Load profile
-      console.log('[AuthContext] signIn: loading profile...');
-      const profileData = await apiGetProfile();
-      console.log('[AuthContext] signIn: profile loaded:', profileData);
-
-      const userObj: User = {
-        id: profileData.user_id,
-        user_id: profileData.user_id,
-        username: profileData.username,
-        email: profileData.email,
-        role: profileData.role || 'user'
-      };
-
-      // Map API response to Profile type
-      const mappedProfile: Profile = {
-        id: profileData.user_id,
-        user_id: profileData.user_id,
-        username: profileData.username,
-        email: profileData.email,
-        role: profileData.role,
-        first_name: profileData.first_name || null,
-        last_name: profileData.last_name || null,
-        avatar_url: profileData.avatar_url || null,
-        bio: profileData.bio || null,
-        phone: profileData.phone || null,
-        active: profileData.is_active,
-        is_active: profileData.is_active,
-        is_developer: false,
-        email_verified: profileData.email_verified,
-        mfa_enabled: profileData.mfa_enabled,
-        created_at: profileData.created_at,
-        updated_at: profileData.created_at,
-        last_login: profileData.last_login,
-        last_password_change: profileData.last_password_change,
-        security_alerts_enabled: profileData.security_alerts_enabled,
-        active_sessions_count: profileData.active_sessions_count,
-        user_type: profileData.user_type,
-        user_number: profileData.user_number,
-      };
-
-      console.log('[AuthContext] signIn: setting user and profile state...');
-      setUser(userObj);
-      setProfile(mappedProfile);
-      console.log('[AuthContext] signIn: state update called, userObj:', userObj);
-
-      // Dispatch custom event to trigger WSE reconnection
-      console.log('[AuthContext] signIn: dispatching authSuccess event for WSE');
-      window.dispatchEvent(new Event('authSuccess'));
-
-      logger.info('User logged in successfully', { component: 'AuthContext' });
-      console.log('[AuthContext] signIn: returning success');
+      await loginMutation.mutateAsync({ email, password });
       return { error: null };
     } catch (error: any) {
-      logger.error('Login error', error, { component: 'AuthContext' });
-      console.error('[AuthContext] signIn: error:', error);
+      logger.error('Login error', error);
       return { error: error?.response?.data || error };
     }
-  };
+  }, [loginMutation]);
 
-  const signInWithMagicLink = async (email: string) => {
-    // TODO: Implement magic link with new backend
-    logger.warn('Magic link not implemented yet', { component: 'AuthContext' });
+  const signInWithMagicLink = useCallback(async (_email: string): Promise<AuthResponse> => {
+    logger.warn('Magic link not implemented yet');
     return { error: new Error('Magic link not implemented') };
-  };
+  }, []);
 
-  const signOut = async () => {
+  const signOut = useCallback(async (): Promise<AuthResponse> => {
     try {
-      // Call backend logout to invalidate server session
-      await apiLogout();
-    } catch (error) {
-      // Log but don't fail - still need to clear local state
-      logger.warn('Backend logout failed, clearing local state anyway', { component: 'AuthContext' });
-    }
-
-    try {
-      // Clear localStorage
-      localStorage.removeItem('auth');
-      setToken(null);
-      setUser(null);
-      setProfile(null);
-      profileLoadingRef.current = null;
-
-      logger.info('User signed out successfully', { component: 'AuthContext' });
+      await logoutMutation.mutateAsync();
       return { error: null };
-    } catch (error) {
-      logger.error('Logout error', error, { component: 'AuthContext' });
+    } catch (error: any) {
+      logger.error('Logout error', error);
       return { error };
     }
-  };
+  }, [logoutMutation]);
 
-  const updateProfile = async (updates: Partial<Profile>) => {
-    if (!user) {
-      return { error: new Error('Пользователь не авторизован') };
-    }
-
+  const updateProfileAction = useCallback(async (
+    updates: Partial<Profile>
+  ): Promise<AuthResponse> => {
     try {
-      // Call backend PATCH /user/profile
-      await API.patch('/user/profile', updates);
-
-      // Update local state
-      if (isMountedRef.current) {
-        setProfile(prev => prev ? { ...prev, ...updates } : null);
-      }
-
-      logger.info('Profile updated successfully', { component: 'AuthContext' });
+      await updateProfileMutation.mutateAsync(updates as any);
       return { error: null };
     } catch (error: any) {
-      logger.error('Profile update error', error, { component: 'AuthContext' });
+      logger.error('Profile update error', error);
       return { error: error?.response?.data || error };
     }
-  };
+  }, [updateProfileMutation]);
 
-  const updatePassword = async (currentPassword: string, newPassword: string) => {
+  const updatePassword = useCallback(async (
+    currentPassword: string,
+    newPassword: string
+  ): Promise<AuthResponse> => {
     try {
-      if (!user?.email) {
-        return { error: new Error('Пользователь не авторизован') };
-      }
-
-      // Call backend POST /user/change-password
-      await API.post('/user/change-password', {
-        old_password: currentPassword,
-        new_password: newPassword
-      });
-
-      logger.info('Password updated successfully', { component: 'AuthContext' });
+      await changePasswordMutation.mutateAsync({ currentPassword, newPassword });
       return { error: null };
     } catch (error: any) {
-      logger.error('Password update error', error, { component: 'AuthContext' });
+      logger.error('Password update error', error);
       return { error: error?.response?.data || error };
     }
-  };
+  }, [changePasswordMutation]);
 
-  const quickLogin = async (email: string, password: string) => {
-    return await signIn(email, password);
-  };
+  const quickLogin = useCallback(async (
+    email: string,
+    password: string
+  ): Promise<AuthResponse> => {
+    return signIn(email, password);
+  }, [signIn]);
 
-  const value = {
+  // -----------------------------------------------------------------------------
+  // Context Value
+  // -----------------------------------------------------------------------------
+
+  const value: AuthContextType = useMemo(() => ({
     user,
     profile,
     loading,
@@ -454,11 +223,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signIn,
     signInWithMagicLink,
     signOut,
-    updateProfile,
+    updateProfile: updateProfileAction,
     updatePassword,
     quickLogin,
-    // Remove session (not used with JWT)
-  };
+  }), [
+    user,
+    profile,
+    loading,
+    token,
+    signUp,
+    signIn,
+    signInWithMagicLink,
+    signOut,
+    updateProfileAction,
+    updatePassword,
+    quickLogin,
+  ]);
 
   return (
     <AuthContext.Provider value={value}>

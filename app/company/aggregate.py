@@ -26,6 +26,7 @@ from app.company.events import (
     TelegramSupergroupLinked,
     TelegramSupergroupUnlinked,
     TelegramSupergroupUpdated,
+    TelegramSupergroupDeleted,
     CompanyBalanceUpdated,
 )
 from app.company.exceptions import (
@@ -190,6 +191,7 @@ class CompanyAggregate:
         create_telegram_group: bool = False,
         telegram_group_title: Optional[str] = None,
         telegram_group_description: Optional[str] = None,
+        create_chat: bool = True,
         link_chat_id: Optional[uuid.UUID] = None,
     ) -> None:
         """Create a new company"""
@@ -221,6 +223,7 @@ class CompanyAggregate:
             create_telegram_group=create_telegram_group,
             telegram_group_title=telegram_group_title or name,  # Default to company name
             telegram_group_description=telegram_group_description or f"Рабочая группа компании {name}",
+            create_chat=create_chat,
             link_chat_id=link_chat_id,
         )
         self._apply_and_record(event)
@@ -476,6 +479,25 @@ class CompanyAggregate:
         )
         self._apply_and_record(event)
 
+    def delete_telegram_supergroup(
+        self,
+        telegram_group_id: int,
+        deleted_by: uuid.UUID,
+        company_id: Optional[uuid.UUID] = None,
+        reason: Optional[str] = None,
+    ) -> None:
+        """Permanently delete a Telegram supergroup"""
+        # No validation needed - supergroup might not be in aggregate state
+        # if it was created without being linked to a company
+
+        event = TelegramSupergroupDeleted(
+            telegram_group_id=telegram_group_id,
+            company_id=company_id,
+            deleted_by=deleted_by,
+            reason=reason,
+        )
+        self._apply_and_record(event)
+
     # =========================================================================
     # Balance Methods
     # =========================================================================
@@ -566,6 +588,7 @@ class CompanyAggregate:
             TelegramSupergroupLinked: self._on_telegram_supergroup_linked,
             TelegramSupergroupUnlinked: self._on_telegram_supergroup_unlinked,
             TelegramSupergroupUpdated: self._on_telegram_supergroup_updated,
+            TelegramSupergroupDeleted: self._on_telegram_supergroup_deleted,
             CompanyBalanceUpdated: self._on_balance_updated,
         }
 
@@ -711,6 +734,11 @@ class CompanyAggregate:
             if event.invite_link is not None:
                 self.state.telegram_supergroups[group_key].invite_link = event.invite_link
 
+    def _on_telegram_supergroup_deleted(self, event: TelegramSupergroupDeleted) -> None:
+        group_key = str(event.telegram_group_id)
+        if group_key in self.state.telegram_supergroups:
+            del self.state.telegram_supergroups[group_key]
+
     def _on_balance_updated(self, event: CompanyBalanceUpdated) -> None:
         self.state.balance = event.new_balance
 
@@ -840,10 +868,37 @@ class CompanyAggregate:
 
     @classmethod
     def replay_from_events(cls, company_id: uuid.UUID, events: List[BaseEvent]) -> 'CompanyAggregate':
-        """Reconstruct aggregate from event history"""
+        """
+        Reconstruct aggregate from event history.
+
+        Handles both BaseEvent objects and EventEnvelope objects (from KurrentDB).
+        EventEnvelopes are converted to domain events using the event registry.
+        """
+        from app.infra.event_store.event_envelope import EventEnvelope
+        from app.company.events import COMPANY_EVENT_TYPES
+
         agg = cls(company_id)
         for evt in events:
-            agg._apply(evt)
+            # Handle EventEnvelope from KurrentDB
+            if isinstance(evt, EventEnvelope):
+                # Try to convert envelope to domain event object
+                event_obj = evt.to_event_object()
+                if event_obj is None:
+                    # Fallback: use COMPANY_EVENT_TYPES registry
+                    event_class = COMPANY_EVENT_TYPES.get(evt.event_type)
+                    if event_class:
+                        try:
+                            event_obj = event_class(**evt.event_data)
+                        except Exception as e:
+                            log.warning(f"Failed to deserialize {evt.event_type}: {e}")
+                            continue
+                    else:
+                        log.warning(f"Unknown event type in replay: {evt.event_type}")
+                        continue
+                agg._apply(event_obj)
+            else:
+                # Direct BaseEvent object
+                agg._apply(evt)
             agg.version += 1
         agg.mark_events_committed()
         return agg

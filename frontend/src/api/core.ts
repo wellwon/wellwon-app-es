@@ -40,6 +40,21 @@ const addRefreshSubscriber = (callback: (token: string) => void) => {
   refreshSubscribers.push(callback);
 };
 
+// Storage key must match Zustand persist key
+const AUTH_STORAGE_KEY = 'wellwon-auth';
+
+// Helper to get auth data from localStorage (matching Zustand persist format)
+function getStoredAuth(): { token: string | null; refreshToken: string | null; expiresAt: number | null; sessionId: string | null } | null {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.state || null;
+  } catch {
+    return null;
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Attach Authorization header from localStorage before each request
 // -----------------------------------------------------------------------------
@@ -50,15 +65,9 @@ API.interceptors.request.use(
       return config;
     }
 
-    try {
-      const raw = localStorage.getItem("auth");
-      const auth = raw ? JSON.parse(raw) : null;
-
-      if (auth?.token && config.headers) {
-        config.headers["Authorization"] = `Bearer ${auth.token}`;
-      }
-    } catch (e) {
-      console.warn("[API] Failed to parse auth data from localStorage:", e);
+    const auth = getStoredAuth();
+    if (auth?.token && config.headers) {
+      config.headers["Authorization"] = `Bearer ${auth.token}`;
     }
 
     return config;
@@ -80,7 +89,7 @@ API.interceptors.response.use(
     // If refresh endpoint itself returns 401, clear auth and redirect
     if (originalRequest?.url?.includes('/auth/refresh')) {
       console.error('Refresh token is invalid or expired');
-      localStorage.removeItem("auth");
+      localStorage.removeItem(AUTH_STORAGE_KEY);
       window.location.href = '/login?reason=session_expired';
       return Promise.reject(error);
     }
@@ -93,14 +102,13 @@ API.interceptors.response.use(
         isRefreshing = true;
 
         try {
-          // Get current auth data
-          const storedAuth = localStorage.getItem("auth");
-          if (!storedAuth) {
+          // Get current auth data from Zustand persist storage
+          const authData = getStoredAuth();
+          if (!authData) {
             throw new Error('No auth data found');
           }
 
-          const authData = JSON.parse(storedAuth);
-          const refreshToken = authData?.refresh_token;
+          const refreshToken = authData?.refreshToken;
 
           if (!refreshToken) {
             throw new Error('No refresh token available');
@@ -126,16 +134,22 @@ API.interceptors.response.use(
             throw new Error('No access token received from refresh');
           }
 
-          // Update stored auth data - treat token as opaque string
-          const updatedAuth = {
+          // Update stored auth data in Zustand persist format
+          const updatedState = {
             token: data.access_token,
-            refresh_token: data.refresh_token || refreshToken, // Keep old refresh token if not rotated
-            expires_at: Date.now() + ((data.expires_in || 900) * 1000), // Default 15 min if not provided
-            token_type: data.token_type || 'Bearer',
-            session_id: authData.session_id
+            refreshToken: data.refresh_token || refreshToken, // Keep old refresh token if not rotated
+            expiresAt: Date.now() + ((data.expires_in || 900) * 1000), // Default 15 min if not provided
+            sessionId: authData.sessionId,
+            isAuthenticated: true,
           };
 
-          localStorage.setItem("auth", JSON.stringify(updatedAuth));
+          // Zustand persist wraps state in { state: ..., version: ... }
+          const persistData = {
+            state: updatedState,
+            version: 0,
+          };
+
+          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(persistData));
           console.log('[API] Token refreshed successfully');
 
           // Update the authorization header for the original request
@@ -151,7 +165,7 @@ API.interceptors.response.use(
           console.error('[API] Token refresh failed:', refreshError);
 
           // Clear auth data
-          localStorage.removeItem("auth");
+          localStorage.removeItem(AUTH_STORAGE_KEY);
 
           // Notify all waiting requests of failure
           refreshSubscribers = [];

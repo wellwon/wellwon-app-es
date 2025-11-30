@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from app.infra.telegram.config import TelegramConfig, get_telegram_config
 from app.infra.telegram.bot_client import TelegramBotClient, TelegramMessage, SendMessageResult
-from app.infra.telegram.mtproto_client import TelegramMTProtoClient, GroupInfo, TopicInfo, MemberInfo
+from app.infra.telegram.mtproto_client import TelegramMTProtoClient, GroupInfo, TopicInfo, MemberInfo, IncomingMessage
 
 log = logging.getLogger("wellwon.telegram.adapter")
 
@@ -110,6 +110,18 @@ class TelegramAdapter:
     def mtproto_client(self) -> Optional[TelegramMTProtoClient]:
         """Get MTProto client"""
         return self._mtproto_client
+
+    def set_incoming_message_handler(self, handler: callable) -> None:
+        """
+        Set handler for incoming messages from Telegram via MTProto.
+
+        The handler will be called with IncomingMessage for each incoming message.
+        """
+        if self._mtproto_client:
+            self._mtproto_client.set_message_callback(handler)
+            log.info("Incoming message handler registered with MTProto client")
+        else:
+            log.warning("Cannot set message handler - MTProto client not available")
 
     # =========================================================================
     # MESSAGING (Bot API)

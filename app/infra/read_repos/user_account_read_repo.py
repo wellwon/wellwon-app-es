@@ -17,7 +17,11 @@ from uuid import UUID
 from datetime import datetime
 
 # Database clients
-from app.infra.persistence.pg_client import execute as pg_execute, fetchrow as pg_fetchrow
+from app.infra.persistence.pg_client import (
+    execute as pg_execute,
+    fetchrow as pg_fetchrow,
+    fetchrow_with_app_context,
+)
 from app.infra.persistence.cache_manager import CacheManager, get_cache_manager
 
 # Import Pydantic models for User Read Models
@@ -674,16 +678,20 @@ class UserAccountReadRepo:
     async def update_user_admin_status(
             user_id: UUID,
             is_active: Optional[bool] = None,
-            is_developer: Optional[bool] = None
+            is_developer: Optional[bool] = None,
+            user_type: Optional[str] = None,
+            role: Optional[str] = None
     ) -> Optional[UserAccountReadModel]:
         """
-        Updates user admin status (active, developer flags).
+        Updates user admin status (active, developer, user_type, role).
         Called by projector on admin status change events.
 
         Args:
             user_id: The UUID of the user to update
             is_active: New active status (optional)
             is_developer: New developer status (optional)
+            user_type: New user type (optional)
+            role: New role (optional)
 
         Returns:
             Updated UserAccountReadModel or None if not found
@@ -693,6 +701,10 @@ class UserAccountReadRepo:
             updates['is_active'] = is_active
         if is_developer is not None:
             updates['is_developer'] = is_developer
+        if user_type is not None:
+            updates['user_type'] = user_type
+        if role is not None:
+            updates['role'] = role
 
         if not updates:
             return None
@@ -730,7 +742,9 @@ class UserAccountReadRepo:
         """
 
         try:
-            row = await pg_fetchrow(sql, *params)
+            # Use fetchrow_with_app_context to bypass CES triggers
+            # This prevents duplicate events when updating via normal app flow
+            row = await fetchrow_with_app_context(sql, *params)
 
             if not row:
                 log.warning(f"User not found for admin status update: {user_id}")

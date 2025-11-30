@@ -16,6 +16,7 @@ from app.infra.cqrs.decorators import (
     validate_handler_registrations
 )
 from app.services.infrastructure.saga_service import create_saga_service
+from app.infra.read_repos.company_read_repo import CompanyReadRepo
 
 logger = logging.getLogger("wellwon.startup.cqrs")
 
@@ -164,10 +165,12 @@ async def register_cqrs_handlers(app: FastAPI) -> None:
         query_bus=app.state.query_bus,
         user_auth_service=app.state.user_auth_service,
         user_read_repo=app.state.user_account_read_repo,
+        company_read_repo=CompanyReadRepo,  # Static class methods
         chat_read_repo=app.state.chat_read_repo if hasattr(app.state, 'chat_read_repo') else None,
         global_config={},
         saga_manager=app.state.saga_service.saga_manager if app.state.saga_service else None,
         cache_manager=app.state.cache_manager,
+        telegram_adapter=app.state.telegram_adapter if hasattr(app.state, 'telegram_adapter') else None,
         app=app
     )
 

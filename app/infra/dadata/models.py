@@ -3,7 +3,22 @@
 # =============================================================================
 
 from dataclasses import dataclass, field
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Union
+from datetime import datetime
+
+
+def _timestamp_to_date_str(timestamp: Optional[Union[int, str]]) -> Optional[str]:
+    """Convert DaData timestamp (milliseconds) to ISO date string"""
+    if timestamp is None:
+        return None
+    if isinstance(timestamp, str):
+        return timestamp
+    try:
+        # DaData returns timestamp in milliseconds
+        dt = datetime.fromtimestamp(timestamp / 1000)
+        return dt.strftime("%Y-%m-%d")
+    except (ValueError, TypeError, OSError):
+        return None
 
 
 @dataclass
@@ -126,14 +141,16 @@ class CompanyInfo:
         opf_data = company_data.get("opf", {})
 
         # Parse state/status
-        state_data = company_data.get("state", {})
+        state_data = company_data.get("state", {}) or {}
 
         # Parse capital
         capital_data = company_data.get("capital", {})
 
-        # Parse contacts
-        emails = [e.get("value", "") for e in company_data.get("emails", []) if e.get("value")]
-        phones = [p.get("value", "") for p in company_data.get("phones", []) if p.get("value")]
+        # Parse contacts (can be None, not just missing)
+        emails_data = company_data.get("emails") or []
+        phones_data = company_data.get("phones") or []
+        emails = [e.get("value", "") for e in emails_data if e and e.get("value")]
+        phones = [p.get("value", "") for p in phones_data if p and p.get("value")]
 
         return cls(
             inn=company_data.get("inn", ""),
@@ -160,8 +177,8 @@ class CompanyInfo:
             management=management,
             director_name=director_name,
             director_post=director_post,
-            registration_date=state_data.get("registration_date"),
-            liquidation_date=state_data.get("liquidation_date"),
+            registration_date=_timestamp_to_date_str(state_data.get("registration_date")),
+            liquidation_date=_timestamp_to_date_str(state_data.get("liquidation_date")),
             capital_value=capital_data.get("value") if capital_data else None,
             capital_type=capital_data.get("type") if capital_data else None,
             emails=emails,

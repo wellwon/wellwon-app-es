@@ -47,6 +47,8 @@ class ChatArchived(BaseEvent):
     event_type: Literal["ChatArchived"] = "ChatArchived"
     chat_id: uuid.UUID
     archived_by: uuid.UUID
+    telegram_supergroup_id: Optional[int] = None  # For syncing to Telegram
+    telegram_topic_id: Optional[int] = None  # Topic to close/archive
 
 
 @domain_event(category="domain")
@@ -55,6 +57,17 @@ class ChatRestored(BaseEvent):
     event_type: Literal["ChatRestored"] = "ChatRestored"
     chat_id: uuid.UUID
     restored_by: uuid.UUID
+
+
+@domain_event(category="domain")
+class ChatHardDeleted(BaseEvent):
+    """Event emitted when a chat is permanently deleted (hard delete)"""
+    event_type: Literal["ChatHardDeleted"] = "ChatHardDeleted"
+    chat_id: uuid.UUID
+    deleted_by: uuid.UUID
+    reason: Optional[str] = None
+    telegram_supergroup_id: Optional[int] = None  # For syncing to Telegram
+    telegram_topic_id: Optional[int] = None  # Topic to delete
 
 
 # =============================================================================
@@ -174,6 +187,8 @@ class MessageDeleted(BaseEvent):
     message_id: uuid.UUID
     chat_id: uuid.UUID
     deleted_by: uuid.UUID
+    telegram_message_id: Optional[int] = None  # For syncing deletion to Telegram
+    telegram_chat_id: Optional[int] = None  # Telegram chat/group ID
 
 
 @domain_event(category="domain")
@@ -264,6 +279,9 @@ CHAT_EVENT_TYPES = {
     "ChatUpdated": ChatUpdated,
     "ChatArchived": ChatArchived,
     "ChatRestored": ChatRestored,
+    "ChatHardDeleted": ChatHardDeleted,
+    "ChatLinkedToCompany": ChatLinkedToCompany,
+    "ChatUnlinkedFromCompany": ChatUnlinkedFromCompany,
     "ParticipantAdded": ParticipantAdded,
     "ParticipantRemoved": ParticipantRemoved,
     "ParticipantRoleChanged": ParticipantRoleChanged,

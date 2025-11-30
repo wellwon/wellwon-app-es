@@ -39,12 +39,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from datetime import datetime, timezone
 
 from app.infra.event_bus.event_bus import EventBus
 from app.wse.core.pubsub_bus import PubSubBus
 from app.wse.core.event_mappings import INTERNAL_TO_WS_EVENT_TYPE_MAP
+
+if TYPE_CHECKING:
+    from app.infra.read_repos.chat_read_repo import ChatReadRepo
 
 log = logging.getLogger("wellwon.wse.domain_publisher")
 
@@ -64,6 +67,7 @@ class WSEDomainPublisher:
         enable_user_events: bool = True,
         enable_company_events: bool = True,
         enable_chat_events: bool = True,
+        chat_read_repo: Optional['ChatReadRepo'] = None,
     ):
         """
         Initialize WSE Domain Publisher
@@ -74,9 +78,11 @@ class WSEDomainPublisher:
             enable_user_events: Enable user event forwarding
             enable_company_events: Enable company event forwarding
             enable_chat_events: Enable chat event forwarding
+            chat_read_repo: Chat read repository for querying participants
         """
         self._event_bus = event_bus
         self._pubsub_bus = pubsub_bus
+        self._chat_read_repo = chat_read_repo
 
         # Feature flags
         self._enable_user_events = enable_user_events
@@ -100,7 +106,8 @@ class WSEDomainPublisher:
             "WSE Domain Publisher initialized - "
             f"Users: {enable_user_events}, "
             f"Companies: {enable_company_events}, "
-            f"Chats: {enable_chat_events}"
+            f"Chats: {enable_chat_events}, "
+            f"ChatReadRepo: {'enabled' if chat_read_repo else 'disabled'}"
         )
 
     async def start(self) -> None:
@@ -268,10 +275,13 @@ class WSEDomainPublisher:
                 return
 
             # Transform to WebSocket format
+            # NOTE: Use original event_type for transformer, not ws_event_type
+            # The EventTransformer does the mapping again, so we keep the original
+            transformed_data = self._transform_user_event(event)
             wse_event = {
-                "event_type": ws_event_type,
+                "event_type": event_type,  # Original event type for transformer to map
                 "user_id": str(user_id),
-                "data": self._transform_user_event(event),
+                **transformed_data,  # Spread data at root level, not nested in 'data'
                 "timestamp": event.get("timestamp", datetime.now(timezone.utc).isoformat()),
                 "event_id": event.get("event_id"),
             }
@@ -308,10 +318,13 @@ class WSEDomainPublisher:
                 return
 
             # Transform to WebSocket format
+            # NOTE: Use original event_type for transformer, not ws_event_type
+            # The EventTransformer does the mapping again, so we keep the original
+            transformed_data = self._transform_company_event(event)
             wse_event = {
-                "event_type": ws_event_type,
+                "event_type": event_type,  # Original event type for transformer to map
                 "company_id": str(company_id),
-                "data": self._transform_company_event(event),
+                **transformed_data,  # Spread data at root level, not nested in 'data'
                 "timestamp": event.get("timestamp", datetime.now(timezone.utc).isoformat()),
                 "event_id": event.get("event_id"),
             }
@@ -331,6 +344,17 @@ class WSEDomainPublisher:
                     topic=user_topic,
                     event=wse_event,
                 )
+                log.debug(f"Also forwarded {event_type} to user topic {user_topic}")
+
+            # For company creation, notify the creator so their UI updates
+            created_by = event.get("created_by")
+            if created_by and event_type in ("CompanyCreated", "TelegramSupergroupCreated"):
+                creator_topic = f"user:{created_by}:events"
+                await self._pubsub_bus.publish(
+                    topic=creator_topic,
+                    event=wse_event,
+                )
+                log.debug(f"Also forwarded {event_type} to creator topic {creator_topic}")
 
             self._events_forwarded += 1
             log.debug(f"Forwarded {event_type} -> {ws_event_type} to {topic}")
@@ -357,10 +381,13 @@ class WSEDomainPublisher:
                 return
 
             # Transform to WebSocket format
+            # NOTE: Use original event_type for transformer, not ws_event_type
+            # The EventTransformer does the mapping again, so we keep the original
+            transformed_data = self._transform_chat_event(event)
             wse_event = {
-                "event_type": ws_event_type,
+                "event_type": event_type,  # Original event type for transformer to map
                 "chat_id": str(chat_id),
-                "data": self._transform_chat_event(event),
+                **transformed_data,  # Spread data at root level, not nested in 'data'
                 "timestamp": event.get("timestamp", datetime.now(timezone.utc).isoformat()),
                 "event_id": event.get("event_id"),
             }
@@ -372,14 +399,77 @@ class WSEDomainPublisher:
                 event=wse_event,
             )
 
-            # For typing events, publish to all participants quickly
-            # For messages, frontend React Query will invalidate chat list
+            # For message events, publish to ALL participant user topics
+            # This enables real-time message delivery to all chat members
+            if event_type in ("MessageSent", "TelegramMessageReceived", "MessageEdited", "MessageDeleted"):
+                await self._publish_to_chat_participants(chat_id, wse_event, event_type)
+
+            # Also publish user-specific events for chat membership changes
+            # This ensures users get notified when added/removed from chats
+            user_id = event.get("user_id")
+            if user_id and event_type in ("ChatCreated", "ParticipantAdded", "ParticipantRemoved", "ChatArchived"):
+                user_topic = f"user:{user_id}:events"
+                await self._pubsub_bus.publish(
+                    topic=user_topic,
+                    event=wse_event,
+                )
+                log.debug(f"Also forwarded {event_type} to user topic {user_topic}")
+
+            # For chat creation by a user, also notify that user
+            created_by = event.get("created_by")
+            if created_by and event_type == "ChatCreated" and created_by != user_id:
+                creator_topic = f"user:{created_by}:events"
+                await self._pubsub_bus.publish(
+                    topic=creator_topic,
+                    event=wse_event,
+                )
+                log.debug(f"Also forwarded {event_type} to creator topic {creator_topic}")
+
             self._events_forwarded += 1
             log.debug(f"Forwarded {event_type} -> {ws_event_type} to {topic}")
 
         except Exception as e:
             self._forwarding_errors += 1
             log.error(f"Error handling chat event: {e}", exc_info=True)
+
+    async def _publish_to_chat_participants(
+        self,
+        chat_id: str,
+        wse_event: Dict[str, Any],
+        event_type: str,
+    ) -> None:
+        """
+        Publish event to all chat participants' user topics.
+
+        This enables real-time message delivery to all users who are
+        members of the chat, regardless of which chat they're currently viewing.
+        """
+        if not self._chat_read_repo:
+            log.debug(f"ChatReadRepo not available, skipping participant broadcast for {event_type}")
+            return
+
+        try:
+            import uuid
+            chat_uuid = uuid.UUID(str(chat_id))
+            participants = await self._chat_read_repo.get_chat_participants(chat_uuid)
+
+            if not participants:
+                log.debug(f"No participants found for chat {chat_id}")
+                return
+
+            # Publish to each participant's user topic
+            for participant in participants:
+                if participant.user_id:
+                    user_topic = f"user:{participant.user_id}:events"
+                    await self._pubsub_bus.publish(
+                        topic=user_topic,
+                        event=wse_event,
+                    )
+
+            log.debug(f"Published {event_type} to {len(participants)} participant user topics")
+
+        except Exception as e:
+            log.error(f"Error publishing to chat participants: {e}", exc_info=True)
 
     # =========================================================================
     # EVENT TRANSFORMERS
@@ -399,6 +489,7 @@ class WSEDomainPublisher:
         # For CES events, prefer current_state values; for regular events, use root level
         return {
             "user_id": event.get("aggregate_id") or event.get("user_id"),
+            "admin_user_id": event.get("admin_user_id"),  # Who made the change (admin panel)
             "email": event.get("email"),
             "first_name": event.get("first_name"),
             "last_name": event.get("last_name"),
@@ -498,6 +589,9 @@ class WSEDomainPublisher:
             "telegram_message_id": event.get("telegram_message_id"),
             "telegram_user_id": event.get("telegram_user_id"),
             "telegram_user_data": telegram_user_data if telegram_user_data else None,
+            # Company linking
+            "company_id": event.get("company_id"),
+            "created_by": event.get("created_by"),
             # Timestamps
             "created_at": event.get("created_at"),
             "updated_at": event.get("updated_at"),

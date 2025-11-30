@@ -59,6 +59,13 @@ class RestoreChatCommand(Command):
     restored_by: uuid.UUID
 
 
+class DeleteChatCommand(Command):
+    """Hard delete a chat (permanent, removes from database)"""
+    chat_id: uuid.UUID
+    deleted_by: uuid.UUID
+    reason: Optional[str] = Field(None, max_length=500)
+
+
 # =============================================================================
 # Company Linking Commands
 # =============================================================================

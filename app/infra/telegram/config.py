@@ -61,7 +61,7 @@ class TelegramConfig:
 
     # Feature flags
     enable_webhook: bool = field(default_factory=lambda: os.getenv("TELEGRAM_ENABLE_WEBHOOK", "true").lower() == "true")
-    enable_mtproto: bool = field(default_factory=lambda: os.getenv("TELEGRAM_ENABLE_MTPROTO", "false").lower() == "true")
+    enable_mtproto: bool = field(default_factory=lambda: os.getenv("TELEGRAM_ENABLE_MTPROTO", "true").lower() == "true")
 
     def __post_init__(self):
         """Validate configuration"""

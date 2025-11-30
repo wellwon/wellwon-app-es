@@ -1,48 +1,22 @@
-import React, { useState, useEffect } from 'react';
-import * as telegramApi from '@/api/telegram';
+// =============================================================================
+// File: SupergroupsList.tsx
+// Description: Supergroups list using React Query + WSE
+// =============================================================================
+
+import React from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-
+import { useActiveSupergroups } from '@/hooks/useSupergroups';
 import { OptimizedImage } from '@/components/chat/components/OptimizedImage';
-import { logger } from '@/utils/logger';
-
-import type { TelegramSupergroup } from '@/types/chat';
 
 export const SupergroupsList: React.FC = () => {
   const { user } = useAuth();
-  const [supergroups, setSupergroups] = useState<TelegramSupergroup[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: supergroups, isLoading, isError } = useActiveSupergroups();
 
-  useEffect(() => {
-    const loadSupergroups = async () => {
-      if (!user?.id) return;
+  if (!user?.id) {
+    return null;
+  }
 
-      try {
-        setLoading(true);
-        setError(null);
-        
-        // Для разработчиков загружаем все супергруппы, для обычных пользователей - только их компании
-        const data = await telegramApi.getAllSupergroups();
-        setSupergroups(data);
-        
-        logger.info('Loaded all supergroups', { 
-          userId: user.id,
-          count: data.length 
-        });
-      } catch (err) {
-        logger.error('Failed to load supergroups', err, { 
-          userId: user.id 
-        });
-        setError('Ошибка загрузки');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadSupergroups();
-  }, [user?.id]);
-
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="p-4 text-center">
         <span className="text-gray-400 text-sm">Загрузка...</span>
@@ -50,15 +24,15 @@ export const SupergroupsList: React.FC = () => {
     );
   }
 
-  if (error) {
+  if (isError) {
     return (
       <div className="p-4 text-center">
-        <p className="text-red-400 text-sm">{error}</p>
+        <p className="text-red-400 text-sm">Ошибка загрузки</p>
       </div>
     );
   }
 
-  if (supergroups.length === 0) {
+  if (!supergroups || supergroups.length === 0) {
     return (
       <div className="p-4 text-center">
         <p className="text-gray-400 text-sm">Нет супергрупп</p>
@@ -70,7 +44,7 @@ export const SupergroupsList: React.FC = () => {
     <div className="overflow-y-auto">
       {supergroups.map((supergroup) => (
         <div
-          key={supergroup.id}
+          key={supergroup.telegram_group_id}
           className="p-4 border-b border-white/5 hover:bg-white/5 transition-colors cursor-pointer"
         >
           <div className="flex items-center space-x-3">

@@ -3,11 +3,10 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { 
-  MoreHorizontal, 
-  Reply, 
-  Download, 
-  Play, 
+import {
+  Reply,
+  Download,
+  Play,
   Pause,
   File,
   Image as ImageIcon,
@@ -45,16 +44,18 @@ interface MessageBubbleProps {
     avatar_url?: string;
   };
   onReply?: (message: Message) => void;
+  onDelete?: (messageId: string) => void;
   className?: string;
 }
 
-export function MessageBubble({ 
-  message, 
-  isOwn, 
+export function MessageBubble({
+  message,
+  isOwn,
   isSending = false,
   currentUser,
-  onReply, 
-  className = '' 
+  onReply,
+  onDelete,
+  className = ''
 }: MessageBubbleProps) {
   const { options } = useChatDisplayOptions();
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
@@ -561,12 +562,15 @@ export function MessageBubble({
       </span>
     );
 
+    // Show double checkmark if message is read by WellWon users OR read on Telegram
+    const isRead = (message.read_by?.length ?? 0) > 0 || !!message.telegram_read_at;
+
     const statusEl = isOwn ? (
       isSending ? (
         <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
       ) : (
-        message.read_by?.length ? (
-          <CheckCheck size={14} />
+        isRead ? (
+          <CheckCheck size={14} className="text-blue-400" />
         ) : (
           <Check size={14} />
         )
@@ -588,7 +592,7 @@ export function MessageBubble({
     }
 
     return (
-      <div className={`flex items-center gap-1 text-xs ${isOwn ? 'text-white/80' : 'text-gray-400'}`}>
+      <div className="flex items-center gap-1 text-xs text-gray-400">
         {editedEl}
         {timeEl}
         {statusEl}
@@ -750,7 +754,14 @@ export function MessageBubble({
 
   return (
     <>
-      <div className={`w-full max-w-4xl mx-auto group ${className}`} data-message-id={message.id}>
+      <div
+        className={`w-full max-w-4xl mx-auto group ${className} ${
+          isOwn
+            ? 'animate-message-out'
+            : 'animate-message-in'
+        }`}
+        data-message-id={message.id}
+      >
         <div className={`flex gap-4 items-start ${isOwn ? 'flex-row-reverse' : ''}`}>
           
           {/* Только аватар без рамки */}
@@ -800,27 +811,26 @@ export function MessageBubble({
                   ) 
                   : 'max-w-[66.666%]'
                 }
-                ${isOwn 
-                  ? 'bg-accent-red/20 text-white rounded-br-md border border-accent-red/30' 
-                  : 'bg-[hsl(var(--light-gray))] text-white rounded-bl-md border border-white/10'
+                ${isOwn
+                  ? 'bg-accent-red/20 text-gray-600 rounded-br-md border border-accent-red/30 group-hover:bg-accent-red/25'
+                  : 'bg-[hsl(var(--light-gray))] text-white rounded-bl-md border border-white/10 group-hover:bg-[hsl(var(--light-gray))]/80'
                 }
+                transition-colors duration-150
               `}
             >
               {/* Имя и тип пользователя внутри сообщения */}
-              <div className="px-3 pt-2 pb-1 border-b border-white/10">
-                <div className={`text-xs font-medium text-white/90 flex items-center gap-2 ${isOwn ? 'justify-end' : 'justify-start'}`}>
+              <div className={`px-3 pt-2 pb-1 border-b ${isOwn ? 'border-gray-900/10' : 'border-white/10'}`}>
+                <div className={`text-xs font-medium flex items-center gap-2 ${isOwn ? 'justify-end text-gray-500' : 'justify-start text-white/90'}`}>
                   {isOwn && (
-                    <Badge 
-                      variant="outline" 
-                      className={`text-[10px] py-0 px-1 h-4 bg-accent-red/20 border-red-400/30 ${
-                        message.metadata?.role_label === 'Нет роли' ? 'text-accent-red' : 'text-red-300'
-                      }`}
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] py-0 px-1 h-4 bg-accent-red/20 border-accent-red/30 text-red-400"
                     >
                       {message.metadata?.role_label || 'Нет роли'}
                     </Badge>
                   )}
                   <div className="flex items-center gap-1">
-                    <span className={isOwn ? "" : "text-[#969699]"}>{displayName}</span>
+                    <span className={isOwn ? "text-gray-500" : "text-[#969699]"}>{displayName}</span>
                     {isFromTelegram && (
                       <TelegramIcon className="w-3 h-3 text-blue-400" />
                     )}
@@ -923,53 +933,45 @@ export function MessageBubble({
                 </div>
               )}
 
-              {/* Кнопки действий */}
+              {/* Message Action Buttons - Vertical, positioned opposite to message */}
               <div className={`
-                absolute top-0 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1
-                ${isOwn ? '-left-20' : '-right-20'}
+                absolute top-1/2 -translate-y-1/2
+                opacity-0 group-hover:opacity-100
+                transition-all duration-200
+                flex flex-col gap-0.5
+                ${isOwn ? '-left-10' : '-right-10'}
               `}>
-                {isOwn ? (
-                  // Для отправленных сообщений: точки слева, стрелка справа
-                  <>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-8 w-8 p-0"
-                    >
-                      <MoreHorizontal size={14} />
-                    </Button>
-                    {onReply && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 w-8 p-0"
-                        onClick={() => onReply(message)}
-                      >
-                        <Reply size={14} className="scale-x-[-1]" />
-                      </Button>
-                    )}
-                  </>
-                ) : (
-                  // Для полученных сообщений: оставляем как есть
-                  <>
-                    {onReply && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 w-8 p-0"
-                        onClick={() => onReply(message)}
-                      >
-                        <Reply size={14} />
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-8 w-8 p-0"
-                    >
-                      <MoreHorizontal size={14} />
-                    </Button>
-                  </>
+                {/* Reply Button */}
+                {onReply && (
+                  <button
+                    onClick={() => onReply(message)}
+                    className="
+                      w-7 h-7 rounded-md
+                      flex items-center justify-center
+                      text-gray-400
+                      hover:text-gray-200 hover:bg-white/10
+                      transition-all duration-150
+                    "
+                    title="Ответить"
+                  >
+                    <Reply size={15} className={isOwn ? 'scale-x-[-1]' : ''} />
+                  </button>
+                )}
+                {/* Delete Button - only for own messages */}
+                {isOwn && onDelete && (
+                  <button
+                    onClick={() => onDelete(message.id)}
+                    className="
+                      w-7 h-7 rounded-md
+                      flex items-center justify-center
+                      text-gray-400
+                      hover:text-red-400 hover:bg-red-500/10
+                      transition-all duration-150
+                    "
+                    title="Удалить"
+                  >
+                    <X size={15} />
+                  </button>
                 )}
               </div>
             </div>

@@ -15,6 +15,7 @@ from app.chat.queries import (
     GetChatsByUserQuery,
     GetChatsByCompanyQuery,
     GetChatByTelegramIdQuery,
+    GetLinkedTelegramChatsQuery,
     SearchChatsQuery,
     GetChatParticipantsQuery,
     GetUserParticipationQuery,
@@ -22,6 +23,7 @@ from app.chat.queries import (
     ChatSummary,
     ParticipantInfo,
     UserParticipation,
+    LinkedTelegramChat,
 )
 
 if TYPE_CHECKING:
@@ -58,6 +60,7 @@ class GetChatByIdQueryHandler(BaseQueryHandler[GetChatByIdQuery, Optional[ChatDe
             participant_count=chat.participant_count,
             last_message_at=chat.last_message_at,
             telegram_chat_id=chat.telegram_chat_id,
+            telegram_supergroup_id=chat.telegram_chat_id,  # Same value for compatibility
             telegram_topic_id=chat.telegram_topic_id,
             last_message_content=chat.last_message_content,
             last_message_sender_id=chat.last_message_sender_id,
@@ -91,6 +94,10 @@ class GetChatsByUserQueryHandler(BaseQueryHandler[GetChatsByUserQuery, List[Chat
                 last_message_content=chat.last_message_content,
                 unread_count=getattr(chat, 'unread_count', 0),
                 is_active=chat.is_active,
+                company_id=getattr(chat, 'company_id', None),
+                telegram_supergroup_id=getattr(chat, 'telegram_supergroup_id', None),
+                telegram_topic_id=getattr(chat, 'telegram_topic_id', None),
+                other_participant_name=getattr(chat, 'other_participant_name', None),
             )
             for chat in chats
         ]
@@ -157,6 +164,7 @@ class GetChatByTelegramIdQueryHandler(BaseQueryHandler[GetChatByTelegramIdQuery,
             participant_count=chat.participant_count,
             last_message_at=chat.last_message_at,
             telegram_chat_id=chat.telegram_chat_id,
+            telegram_supergroup_id=chat.telegram_chat_id,  # Same value for compatibility
             telegram_topic_id=chat.telegram_topic_id,
         )
 
@@ -249,3 +257,29 @@ class GetUserParticipationQueryHandler(BaseQueryHandler[GetUserParticipationQuer
             role=participation.role,
             joined_at=participation.joined_at,
         )
+
+
+@query_handler(GetLinkedTelegramChatsQuery)
+class GetLinkedTelegramChatsQueryHandler(BaseQueryHandler[GetLinkedTelegramChatsQuery, List[LinkedTelegramChat]]):
+    """Get all chats linked to Telegram supergroups for polling"""
+
+    def __init__(self, deps: 'HandlerDependencies'):
+        super().__init__()
+        self.chat_read_repo: 'ChatReadRepo' = deps.chat_read_repo
+
+    async def handle(self, query: GetLinkedTelegramChatsQuery) -> List[LinkedTelegramChat]:
+        """Fetch linked Telegram chats from read model"""
+        chats = await self.chat_read_repo.get_linked_telegram_chats(
+            active_only=query.active_only,
+        )
+
+        return [
+            LinkedTelegramChat(
+                chat_id=chat['chat_id'],
+                telegram_supergroup_id=chat['telegram_supergroup_id'],
+                telegram_topic_id=chat.get('telegram_topic_id'),
+                name=chat.get('name'),
+                last_telegram_message_id=0,  # TODO: Track last processed message per chat
+            )
+            for chat in chats
+        ]

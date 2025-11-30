@@ -568,3 +568,44 @@
   transition: none !important;
   animation: none !important;
 }
+
+/* Плавная пагинация - fade in для загруженных сообщений */
+@keyframes pagination-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.pagination-reveal {
+  animation: pagination-fade-in 0.2s ease-out forwards;
+}
+
+/* Loader для пагинации - не анимируем */
+.no-anchor {
+  animation: none !important;
+}
+
+/* Chat Message Animations - Simple smooth slide up + fade */
+@keyframes message-appear {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-message-in,
+.animate-message-out {
+  animation: message-appear 0.25s ease-out forwards;
+  will-change: transform, opacity;
+}
+
+/* Отключаем анимацию для сообщений при загрузке истории */
+.chat-loading-history .animate-message-in,
+.chat-loading-history .animate-message-out {
+  animation: none !important;
+  opacity: 1;
+  transform: none;
+}

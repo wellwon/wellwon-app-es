@@ -75,6 +75,7 @@ class CreateCompanyHandler(BaseCommandHandler):
             create_telegram_group=command.create_telegram_group,
             telegram_group_title=command.telegram_group_title,
             telegram_group_description=command.telegram_group_description,
+            create_chat=command.create_chat,
             link_chat_id=command.link_chat_id,
         )
 

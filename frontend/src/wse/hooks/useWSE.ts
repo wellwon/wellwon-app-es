@@ -840,9 +840,32 @@ export function useWSE(
   // Add subscription confirmation handler
   useEffect(() => {
     const handleSubscriptionUpdate = (event: CustomEvent) => {
-      const { success, topics } = event.detail;
+      const { success, topics, success_topics, failed_topics, action } = event.detail;
+
+      // Log all subscription updates for debugging
+      logger.info('Subscription update received', {
+        action,
+        success,
+        topics,
+        success_topics,
+        failed_topics
+      });
+
+      // Log each confirmed topic
+      if (success_topics && success_topics.length > 0) {
+        success_topics.forEach((topic: string) => {
+          logger.info(`Topic subscribed: ${topic}`);
+        });
+      }
+
+      // Log failed topics
+      if (failed_topics && failed_topics.length > 0) {
+        failed_topics.forEach((topic: { topic: string; error: string }) => {
+          logger.error(`Topic subscription failed: ${topic.topic}`, { error: topic.error });
+        });
+      }
+
       if (success && topics?.includes('user_account_events')) {
-        logger.info('Subscription confirmed for user_account_events');
         subscriptionsConfirmedRef.current = true;
       }
     };

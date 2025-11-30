@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from app.infra.read_repos.chat_read_repo import ChatReadRepo
     from app.infra.persistence.cache_manager import CacheManager
     from app.infra.saga.saga_manager import SagaManager
+    from app.infra.telegram.adapter import TelegramAdapter
 
 
 @dataclass
@@ -45,6 +46,9 @@ class HandlerDependencies:
     chat_read_repo: Optional['ChatReadRepo'] = None
 
     cache_manager: Optional['CacheManager'] = None
+
+    # Telegram integration
+    telegram_adapter: Optional['TelegramAdapter'] = None
 
     global_config: Dict[str, Any] = field(default_factory=dict)
 

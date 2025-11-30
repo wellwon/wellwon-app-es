@@ -261,8 +261,12 @@ class BaseCommandHandler(ABC):
         correlation_id = getattr(command, 'correlation_id', None)
         saga_id = getattr(command, 'saga_id', None)
 
-        # Determine expected version - None for new aggregates, current version for existing
-        expected_version = None if aggregate.version == 0 else aggregate.version
+        # Determine expected version for optimistic concurrency
+        # For NEW aggregates: version equals number of uncommitted events (no events in store yet)
+        # For EXISTING aggregates: version > uncommitted events count (has events in store)
+        uncommitted_count = len(aggregate.get_uncommitted_events())
+        is_new_aggregate = aggregate.version == uncommitted_count
+        expected_version = None if is_new_aggregate else (aggregate.version - uncommitted_count)
 
         return await self.publish_and_commit_events(
             aggregate=aggregate,

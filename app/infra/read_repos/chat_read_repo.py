@@ -47,20 +47,19 @@ class ChatReadRepo:
         """
         Insert a new chat record.
 
-        Note: telegram_chat_id is mapped to telegram_supergroup_id in the database.
+        Note: Parameter is telegram_chat_id but DB column is telegram_supergroup_id.
         """
-        telegram_sync = telegram_chat_id is not None
         await pg_client.execute(
             """
             INSERT INTO chats (
                 id, name, type, created_by, company_id,
-                telegram_supergroup_id, telegram_topic_id, telegram_sync, created_at,
+                telegram_supergroup_id, telegram_topic_id, created_at,
                 is_active
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
             ON CONFLICT (id) DO NOTHING
             """,
             chat_id, name, chat_type, created_by, company_id,
-            telegram_chat_id, telegram_topic_id, telegram_sync, created_at or datetime.utcnow(),
+            telegram_chat_id, telegram_topic_id, created_at or datetime.utcnow(),
         )
 
     @staticmethod
@@ -89,7 +88,7 @@ class ChatReadRepo:
         params.append(updated_at or datetime.utcnow())
         param_idx += 1
 
-        updates.append(f"version = version + 1")
+        # Note: version column removed - event store handles versioning
 
         params.append(chat_id)
 
@@ -108,10 +107,35 @@ class ChatReadRepo:
         await pg_client.execute(
             """
             UPDATE chats
-            SET is_active = $1, updated_at = $2, version = version + 1
+            SET is_active = $1, updated_at = $2
             WHERE id = $3
             """,
             is_active, updated_at or datetime.utcnow(), chat_id
+        )
+
+    @staticmethod
+    async def hard_delete_chat(chat_id: uuid.UUID) -> None:
+        """
+        Hard delete a chat and all related data.
+
+        Deletes:
+        - Chat messages
+        - Chat participants (includes read status via last_read_at/last_read_message_id)
+        - The chat itself
+        """
+        # Delete in correct order to avoid FK constraint violations
+        # Table names: messages (not chat_messages), chat_participants, chats
+        await pg_client.execute(
+            "DELETE FROM messages WHERE chat_id = $1",
+            chat_id
+        )
+        await pg_client.execute(
+            "DELETE FROM chat_participants WHERE chat_id = $1",
+            chat_id
+        )
+        await pg_client.execute(
+            "DELETE FROM chats WHERE id = $1",
+            chat_id
         )
 
     @staticmethod
@@ -143,12 +167,12 @@ class ChatReadRepo:
         """
         Update Telegram integration fields.
 
-        Note: telegram_chat_id is mapped to telegram_supergroup_id in the database.
+        Note: Parameter is telegram_chat_id but DB column is telegram_supergroup_id.
         """
         await pg_client.execute(
             """
             UPDATE chats
-            SET telegram_supergroup_id = $1, telegram_topic_id = $2, telegram_sync = true, updated_at = NOW()
+            SET telegram_supergroup_id = $1, telegram_topic_id = $2, updated_at = NOW()
             WHERE id = $3
             """,
             telegram_chat_id, telegram_topic_id, chat_id
@@ -201,8 +225,7 @@ class ChatReadRepo:
         """
         Get chat by Telegram supergroup ID.
 
-        Note: The database uses telegram_supergroup_id (foreign key to telegram_supergroups)
-        but we keep the interface name as telegram_chat_id for API compatibility.
+        Note: Parameter is telegram_chat_id but DB column is telegram_supergroup_id.
         """
         if telegram_topic_id:
             row = await pg_client.fetchrow(
@@ -234,7 +257,7 @@ class ChatReadRepo:
                     NULL::text as last_message_content,
                     NULL::uuid as last_message_sender_id
                 FROM chats c
-                WHERE c.telegram_supergroup_id = $1 AND (c.telegram_topic_id IS NULL OR c.telegram_sync = true)
+                WHERE c.telegram_supergroup_id = $1 AND c.telegram_topic_id IS NULL
                 """,
                 telegram_chat_id
             )
@@ -255,11 +278,12 @@ class ChatReadRepo:
         rows = await pg_client.fetch(
             f"""
             SELECT
-                c.id, c.name, c.chat_type, c.participant_count,
-                c.last_message_at, c.last_message_content, c.is_active,
+                c.id, c.name, c.type as chat_type, c.participant_count,
+                c.updated_at as last_message_at, NULL::text as last_message_content, c.is_active,
+                c.telegram_supergroup_id, c.telegram_topic_id, c.company_id,
                 COALESCE(unread.count, 0) as unread_count,
                 CASE
-                    WHEN c.chat_type = 'direct' THEN other_user.full_name
+                    WHEN c.type = 'direct' THEN other_user.full_name
                     ELSE NULL
                 END as other_participant_name
             FROM chats c
@@ -273,14 +297,14 @@ class ChatReadRepo:
                   AND m.is_deleted = false
             ) unread ON true
             LEFT JOIN LATERAL (
-                SELECT u.full_name
+                SELECT COALESCE(u.first_name || ' ' || u.last_name, u.first_name, u.last_name, 'Unknown') as full_name
                 FROM chat_participants cp2
-                INNER JOIN users u ON cp2.user_id = u.id
+                INNER JOIN user_accounts u ON cp2.user_id = u.id
                 WHERE cp2.chat_id = c.id AND cp2.user_id != $1 AND cp2.is_active = true
                 LIMIT 1
-            ) other_user ON c.chat_type = 'direct'
+            ) other_user ON c.type = 'direct'
             WHERE 1=1 {active_filter}
-            ORDER BY c.last_message_at DESC NULLS LAST
+            ORDER BY c.updated_at DESC NULLS LAST
             LIMIT $2 OFFSET $3
             """,
             user_id, limit, offset
@@ -410,11 +434,11 @@ class ChatReadRepo:
             f"""
             SELECT
                 cp.*,
-                u.full_name as user_name,
+                COALESCE(u.first_name || ' ' || u.last_name, u.first_name, u.last_name, 'Unknown') as user_name,
                 u.email as user_email,
                 u.avatar_url as user_avatar_url
             FROM chat_participants cp
-            LEFT JOIN users u ON cp.user_id = u.id
+            LEFT JOIN user_accounts u ON cp.user_id = u.id
             WHERE cp.chat_id = $1 {active_filter}
             ORDER BY cp.joined_at
             """,
@@ -541,14 +565,14 @@ class ChatReadRepo:
             rows = await pg_client.fetch(
                 """
                 SELECT m.*,
-                    u.full_name as sender_name,
+                    COALESCE(u.first_name || ' ' || u.last_name, u.first_name, u.last_name, 'Unknown') as sender_name,
                     u.avatar_url as sender_avatar_url,
                     rm.content as reply_to_content,
-                    ru.full_name as reply_to_sender_name
+                    COALESCE(ru.first_name || ' ' || ru.last_name, ru.first_name, ru.last_name, 'Unknown') as reply_to_sender_name
                 FROM messages m
-                LEFT JOIN users u ON m.sender_id = u.id
+                LEFT JOIN user_accounts u ON m.sender_id = u.id
                 LEFT JOIN messages rm ON m.reply_to_id = rm.id
-                LEFT JOIN users ru ON rm.sender_id = ru.id
+                LEFT JOIN user_accounts ru ON rm.sender_id = ru.id
                 WHERE m.chat_id = $1 AND m.created_at < (SELECT created_at FROM messages WHERE id = $2)
                 ORDER BY m.created_at DESC
                 LIMIT $3
@@ -559,14 +583,14 @@ class ChatReadRepo:
             rows = await pg_client.fetch(
                 """
                 SELECT m.*,
-                    u.full_name as sender_name,
+                    COALESCE(u.first_name || ' ' || u.last_name, u.first_name, u.last_name, 'Unknown') as sender_name,
                     u.avatar_url as sender_avatar_url,
                     rm.content as reply_to_content,
-                    ru.full_name as reply_to_sender_name
+                    COALESCE(ru.first_name || ' ' || ru.last_name, ru.first_name, ru.last_name, 'Unknown') as reply_to_sender_name
                 FROM messages m
-                LEFT JOIN users u ON m.sender_id = u.id
+                LEFT JOIN user_accounts u ON m.sender_id = u.id
                 LEFT JOIN messages rm ON m.reply_to_id = rm.id
-                LEFT JOIN users ru ON rm.sender_id = ru.id
+                LEFT JOIN user_accounts ru ON rm.sender_id = ru.id
                 WHERE m.chat_id = $1 AND m.created_at > (SELECT created_at FROM messages WHERE id = $2)
                 ORDER BY m.created_at ASC
                 LIMIT $3
@@ -577,14 +601,14 @@ class ChatReadRepo:
             rows = await pg_client.fetch(
                 """
                 SELECT m.*,
-                    u.full_name as sender_name,
+                    COALESCE(u.first_name || ' ' || u.last_name, u.first_name, u.last_name, 'Unknown') as sender_name,
                     u.avatar_url as sender_avatar_url,
                     rm.content as reply_to_content,
-                    ru.full_name as reply_to_sender_name
+                    COALESCE(ru.first_name || ' ' || ru.last_name, ru.first_name, ru.last_name, 'Unknown') as reply_to_sender_name
                 FROM messages m
-                LEFT JOIN users u ON m.sender_id = u.id
+                LEFT JOIN user_accounts u ON m.sender_id = u.id
                 LEFT JOIN messages rm ON m.reply_to_id = rm.id
-                LEFT JOIN users ru ON rm.sender_id = ru.id
+                LEFT JOIN user_accounts ru ON rm.sender_id = ru.id
                 WHERE m.chat_id = $1
                 ORDER BY m.created_at DESC
                 LIMIT $2 OFFSET $3
@@ -726,4 +750,35 @@ class ChatReadRepo:
         sql += " ORDER BY name"
 
         rows = await pg_client.fetch(sql, category)
+        return [dict(row) for row in rows]
+
+    # =========================================================================
+    # Telegram Integration Operations
+    # =========================================================================
+
+    @staticmethod
+    async def get_linked_telegram_chats(
+        active_only: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all chats that have a linked Telegram supergroup.
+
+        Used by the Telegram polling mechanism to know which supergroups to monitor.
+        """
+        active_filter = "AND is_active = true" if active_only else ""
+
+        rows = await pg_client.fetch(
+            f"""
+            SELECT
+                id as chat_id,
+                telegram_supergroup_id,
+                telegram_topic_id,
+                name
+            FROM chats
+            WHERE telegram_supergroup_id IS NOT NULL
+            {active_filter}
+            ORDER BY updated_at DESC NULLS LAST
+            """,
+        )
+
         return [dict(row) for row in rows]

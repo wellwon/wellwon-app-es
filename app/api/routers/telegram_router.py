@@ -30,8 +30,9 @@ from app.api.models.telegram_api_models import (
     SendMessageResponse,
     AvailableEmojisResponse,
 )
-from app.chat.commands import ProcessTelegramMessageCommand
+from app.chat.commands import ProcessTelegramMessageCommand, CreateChatCommand, AddParticipantCommand
 from app.chat.queries import GetChatByTelegramIdQuery
+from app.company.queries import GetCompanyByTelegramGroupQuery
 
 log = logging.getLogger("wellwon.telegram.webhook")
 
@@ -157,6 +158,43 @@ async def telegram_webhook(
 
             # Normalize chat ID (convert -100{id} to just {id} for supergroups)
             normalized_chat_id = normalize_telegram_chat_id(telegram_message.chat_id)
+
+            # Check if this is a topic creation event
+            is_topic_creation = (
+                telegram_message.text and
+                telegram_message.text.startswith("__TOPIC_CREATED__:")
+            )
+
+            if is_topic_creation:
+                # Extract topic name from special marker
+                topic_name = telegram_message.text.replace("__TOPIC_CREATED__:", "")
+                log.info(f"Processing topic creation: name='{topic_name}', topic_id={telegram_message.topic_id}")
+
+                # Find company by Telegram group ID
+                company_query = GetCompanyByTelegramGroupQuery(telegram_group_id=normalized_chat_id)
+                company = await query_bus.query(company_query)
+
+                if company:
+                    import uuid
+                    # Create new chat for this topic
+                    # The creator (owner_id) will be automatically added as admin by CreateChatHandler
+                    creator_id = company.owner_id or uuid.UUID('00000000-0000-0000-0000-000000000000')
+                    create_cmd = CreateChatCommand(
+                        chat_id=uuid.uuid4(),
+                        name=topic_name,
+                        chat_type="company",
+                        created_by=creator_id,
+                        company_id=company.id,
+                        participant_ids=[],  # Creator is added automatically as admin
+                        telegram_supergroup_id=normalized_chat_id,
+                        telegram_topic_id=telegram_message.topic_id,
+                    )
+                    await command_bus.send(create_cmd)
+                    log.info(f"Created chat '{topic_name}' for topic {telegram_message.topic_id} in company {company.id}, creator={creator_id}")
+                else:
+                    log.warning(f"No company found for Telegram group {normalized_chat_id}, cannot create topic chat")
+
+                return WebhookResponse(ok=True)
 
             # Find WellWon chat by Telegram ID via Query Bus
             query = GetChatByTelegramIdQuery(
@@ -441,6 +479,7 @@ async def send_message(
 from typing import List, Annotated
 from pydantic import BaseModel
 from datetime import datetime
+import uuid as uuid_module
 from app.security.jwt_auth import get_current_user
 from app.infra.read_repos.company_read_repo import CompanyReadRepo
 
@@ -448,7 +487,7 @@ from app.infra.read_repos.company_read_repo import CompanyReadRepo
 class SupergroupResponse(BaseModel):
     """Telegram supergroup info"""
     id: int
-    company_id: Optional[int] = None
+    company_id: Optional[uuid_module.UUID] = None  # FK to companies.id (UUID)
     title: str
     username: Optional[str] = None
     description: Optional[str] = None
@@ -462,7 +501,7 @@ class SupergroupResponse(BaseModel):
 class SupergroupWithChatCountResponse(BaseModel):
     """Telegram supergroup with chat count"""
     id: int
-    company_id: Optional[int] = None
+    company_id: Optional[uuid_module.UUID] = None  # FK to companies.id (UUID)
     company_name: str = ""
     title: str
     username: Optional[str] = None
@@ -516,6 +555,99 @@ async def get_all_supergroups(
     except Exception as e:
         log.error(f"Failed to get supergroups: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to get supergroups")
+
+
+class UpdateSupergroupRequest(BaseModel):
+    """Request to update supergroup"""
+    is_active: Optional[bool] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+
+
+@router.patch("/supergroups/{supergroup_id}", response_model=SupergroupResponse)
+async def update_supergroup(
+    supergroup_id: int,
+    request: UpdateSupergroupRequest,
+    current_user: Annotated[dict, Depends(get_current_user)],
+) -> SupergroupResponse:
+    """
+    Update a Telegram supergroup (archive/unarchive, update title, etc.)
+    """
+    try:
+        # Build update dict with only provided fields
+        updates = {}
+        if request.is_active is not None:
+            updates["is_active"] = request.is_active
+        if request.title is not None:
+            updates["title"] = request.title
+        if request.description is not None:
+            updates["description"] = request.description
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        updated = await CompanyReadRepo.update_telegram_supergroup(supergroup_id, updates_dict=updates)
+
+        if not updated:
+            raise HTTPException(status_code=404, detail="Supergroup not found")
+
+        return SupergroupResponse(
+            id=updated.id if hasattr(updated, 'id') else updated.telegram_group_id,
+            company_id=updated.company_id,
+            title=updated.title,
+            username=updated.username,
+            description=updated.description,
+            invite_link=updated.invite_link,
+            member_count=updated.member_count if hasattr(updated, 'member_count') else 0,
+            is_forum=updated.is_forum if hasattr(updated, 'is_forum') else False,
+            is_active=updated.is_active if hasattr(updated, 'is_active') else True,
+            created_at=updated.created_at if hasattr(updated, 'created_at') else None,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Failed to update supergroup {supergroup_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to update supergroup")
+
+
+@router.delete("/supergroups/{supergroup_id}")
+async def delete_supergroup(
+    supergroup_id: int,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    command_bus=Depends(get_command_bus),
+) -> dict:
+    """
+    Delete a Telegram supergroup from the database via Event Sourcing.
+
+    This removes the supergroup record from WellWon database through the
+    DeleteTelegramSupergroupCommand, creating proper audit trail.
+    It does NOT delete the actual Telegram group.
+    """
+    from app.company.commands import DeleteTelegramSupergroupCommand
+
+    try:
+        # Check if supergroup exists
+        supergroup = await CompanyReadRepo.get_telegram_supergroup(supergroup_id)
+        if not supergroup:
+            raise HTTPException(status_code=404, detail="Supergroup not found")
+
+        # Send command through Event Sourcing
+        command = DeleteTelegramSupergroupCommand(
+            telegram_group_id=supergroup_id,
+            deleted_by=current_user["user_id"],
+            reason="Deleted via admin interface",
+        )
+        await command_bus.send(command)
+
+        log.info(f"Supergroup {supergroup_id} deleted via Event Sourcing by user {current_user['user_id']}")
+        return {"success": True, "message": "Supergroup deleted"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Failed to delete supergroup {supergroup_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to delete supergroup")
 
 
 @router.get("/supergroups/chat-counts", response_model=List[SupergroupWithChatCountResponse])

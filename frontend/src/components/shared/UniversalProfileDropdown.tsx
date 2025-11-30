@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useRef, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Settings, LogOut, ArrowRight, User } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfileModal } from '@/contexts/ProfileModalContext';
@@ -20,15 +21,19 @@ interface UniversalProfileDropdownProps {
   onClose: () => void;
   position?: 'top' | 'bottom';
   align?: 'left' | 'right';
+  triggerRef?: React.RefObject<HTMLElement>;
 }
 
-const UniversalProfileDropdown = ({ 
-  isOpen, 
-  onClose, 
+const UniversalProfileDropdown = ({
+  isOpen,
+  onClose,
   position = 'bottom',
-  align = 'right' 
+  align = 'right',
+  triggerRef
 }: UniversalProfileDropdownProps) => {
   const { user, profile, signOut } = useAuth();
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
   const { openProfileModal } = useProfileModal();
   const { toast } = useToast();
   const location = useLocation();
@@ -112,34 +117,70 @@ const UniversalProfileDropdown = ({
     return baseLabel;
   };
 
+  // Calculate dropdown position when open
+  useEffect(() => {
+    if (isOpen && triggerRef?.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const dropdownWidth = 288; // w-72 = 18rem = 288px
+
+      let top = position === 'top'
+        ? rect.top - 8 // 8px gap above trigger
+        : rect.bottom + 8; // 8px gap below trigger
+
+      let left = align === 'left'
+        ? rect.left
+        : rect.right - dropdownWidth;
+
+      // Ensure dropdown stays within viewport
+      if (left < 8) left = 8;
+      if (left + dropdownWidth > window.innerWidth - 8) {
+        left = window.innerWidth - dropdownWidth - 8;
+      }
+
+      setDropdownPosition({ top, left });
+    }
+  }, [isOpen, position, align, triggerRef]);
+
+  // Close on escape key
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
-  const positionClasses = position === 'top' 
-    ? 'bottom-full mb-2' 
-    : 'top-full mt-2';
-  
-  const alignClasses = align === 'left' 
-    ? 'left-0' 
-    : 'right-0';
-
-  return (
+  const dropdownContent = (
     <>
       {/* Backdrop */}
-      <div 
-        className="fixed inset-0 z-40" 
+      <div
+        className="fixed inset-0 z-[9998]"
         onClick={onClose}
       />
-      
-      {/* Dropdown */}
-      <div className={`absolute ${positionClasses} ${alignClasses} w-72 bg-dark-gray/95 backdrop-blur-sm border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden`}>
+
+      {/* Dropdown - rendered in portal */}
+      <div
+        ref={dropdownRef}
+        className="fixed w-72 bg-dark-gray/95 backdrop-blur-sm border border-white/10 rounded-xl shadow-2xl z-[9999] overflow-hidden"
+        style={{
+          top: position === 'top' ? 'auto' : dropdownPosition.top,
+          bottom: position === 'top' ? `calc(100vh - ${dropdownPosition.top}px)` : 'auto',
+          left: dropdownPosition.left,
+        }}
+      >
         {/* User Info Section */}
         <div className="p-4 border-b border-white/10">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 bg-gradient-to-br from-accent-red to-accent-red/80 rounded-full flex items-center justify-center text-white font-semibold">
               {profile?.avatar_url ? (
-                <img 
-                  src={profile.avatar_url} 
-                  alt="Profile" 
+                <img
+                  src={profile.avatar_url}
+                  alt="Profile"
                   className="w-full h-full rounded-full object-cover"
                 />
               ) : (
@@ -169,11 +210,11 @@ const UniversalProfileDropdown = ({
             <User size={16} />
             <span className="text-sm">Настройки профиля</span>
           </button>
-          
+
           <div className="border-t border-white/10 my-1"></div>
-          
+
           <button
-            className="w-full flex items-center gap-3 px-3 py-2 text-white hover:bg-accent-red/20 rounded-lg transition-all duration-300"
+            className="w-full flex items-center gap-3 px-3 py-2 text-white hover:bg-red-500/20 rounded-lg transition-all duration-300"
             onClick={handleSignOut}
           >
             <LogOut size={16} />
@@ -183,6 +224,8 @@ const UniversalProfileDropdown = ({
       </div>
     </>
   );
+
+  return createPortal(dropdownContent, document.body);
 };
 
 export default UniversalProfileDropdown;

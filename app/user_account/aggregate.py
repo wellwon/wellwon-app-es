@@ -209,21 +209,25 @@ class UserAccountAggregate:
             self,
             admin_user_id: uuid.UUID,
             is_active: Optional[bool] = None,
-            is_developer: Optional[bool] = None
+            is_developer: Optional[bool] = None,
+            user_type: Optional[str] = None,
+            role: Optional[str] = None
     ) -> None:
         """
         Handle UpdateUserAdminStatusCommand:
-        - Update user admin status (active, developer flags).
+        - Update user admin status (active, developer, user_type, role).
         - Emit UserAdminStatusUpdated event.
         """
-        if is_active is None and is_developer is None:
+        if is_active is None and is_developer is None and user_type is None and role is None:
             raise ValueError("At least one status field must be provided.")
 
         event = UserAdminStatusUpdated(
             user_id=self.id,
             admin_user_id=admin_user_id,
             is_active=is_active,
-            is_developer=is_developer
+            is_developer=is_developer,
+            user_type=user_type,
+            role=role
         )
         self._apply_and_record(event)
 
@@ -306,6 +310,10 @@ class UserAccountAggregate:
             self.state.is_active = event.is_active
         if event.is_developer is not None:
             self.state.is_developer = event.is_developer
+        if event.user_type is not None:
+            self.state.user_type = event.user_type
+        if event.role is not None:
+            self.state.role = event.role
 
     # -------------------------------------------------------------------------
     # Snapshot Support for Event Store
@@ -368,10 +376,35 @@ class UserAccountAggregate:
     def replay_from_events(cls, user_id: uuid.UUID, events: List[BaseEvent]) -> UserAccountAggregate:
         """
         Reconstruct an aggregate by applying past events in order.
+
+        Handles both BaseEvent objects and EventEnvelope objects (from KurrentDB).
+        EventEnvelopes are converted to domain events using the event registry.
         """
+        from app.infra.event_store.event_envelope import EventEnvelope
+        from app.user_account.events import USER_ACCOUNT_EVENT_TYPES
+
         agg = cls(user_id)
         for evt in events:
-            agg._apply(evt)
+            # Handle EventEnvelope from KurrentDB
+            if isinstance(evt, EventEnvelope):
+                # Try to convert envelope to domain event object
+                event_obj = evt.to_event_object()
+                if event_obj is None:
+                    # Fallback: use USER_ACCOUNT_EVENT_TYPES registry
+                    event_class = USER_ACCOUNT_EVENT_TYPES.get(evt.event_type)
+                    if event_class:
+                        try:
+                            event_obj = event_class(**evt.event_data)
+                        except Exception as e:
+                            log.warning(f"Failed to deserialize {evt.event_type}: {e}")
+                            continue
+                    else:
+                        log.warning(f"Unknown event type in replay: {evt.event_type}")
+                        continue
+                agg._apply(event_obj)
+            else:
+                # Direct BaseEvent object
+                agg._apply(evt)
             agg.version += 1
         agg.mark_events_committed()
         return agg

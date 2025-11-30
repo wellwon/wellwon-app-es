@@ -316,11 +316,11 @@ class CompanyReadRepo:
         """Insert a user-company relationship"""
         await pg_client.execute(
             """
-            INSERT INTO user_companies (id, company_id, user_id, relationship_type, joined_at, is_active)
+            INSERT INTO user_companies (id, company_id, user_id, relationship_type, assigned_at, is_active)
             VALUES (gen_random_uuid(), $1, $2, $3, $4, true)
-            ON CONFLICT (company_id, user_id) DO UPDATE SET
-                relationship_type = $3,
-                is_active = true
+            ON CONFLICT (user_id, company_id, relationship_type) DO UPDATE SET
+                is_active = true,
+                updated_at = NOW()
             """,
             company_id, user_id, relationship_type, joined_at
         )
@@ -370,7 +370,7 @@ class CompanyReadRepo:
             f"""
             SELECT
                 uc.id, uc.company_id, c.name as company_name, c.company_type,
-                uc.relationship_type, uc.joined_at, uc.is_active
+                uc.relationship_type, uc.assigned_at as joined_at, uc.is_active
             FROM user_companies uc
             INNER JOIN companies c ON uc.company_id = c.id
             WHERE uc.user_id = $1 AND uc.is_active = true AND c.is_deleted = false {active_filter}
@@ -392,9 +392,10 @@ class CompanyReadRepo:
 
         rows = await pg_client.fetch(
             f"""
-            SELECT * FROM user_companies
+            SELECT id, user_id, company_id, relationship_type, assigned_at as joined_at, is_active, created_at, updated_at
+            FROM user_companies
             WHERE company_id = $1 {active_filter}
-            ORDER BY joined_at
+            ORDER BY assigned_at
             """,
             company_id
         )
@@ -409,7 +410,8 @@ class CompanyReadRepo:
         """Get user's relationship with company"""
         row = await pg_client.fetchrow(
             """
-            SELECT * FROM user_companies
+            SELECT id, company_id, user_id, relationship_type, assigned_at as joined_at, is_active, created_at, updated_at
+            FROM user_companies
             WHERE company_id = $1 AND user_id = $2
             """,
             company_id, user_id
@@ -433,59 +435,86 @@ class CompanyReadRepo:
         is_forum: bool = True,
         created_at: Optional[datetime] = None,
     ) -> None:
-        """Insert a Telegram supergroup"""
+        """Insert a Telegram supergroup.
+        Note: The table uses 'id' as the telegram_group_id (BIGINT primary key).
+        """
         await pg_client.execute(
             """
             INSERT INTO telegram_supergroups (
-                id, company_id, telegram_group_id, title, username,
+                id, company_id, title, username,
                 description, invite_link, is_forum, created_at
-            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8)
-            ON CONFLICT (telegram_group_id) DO UPDATE SET
-                company_id = $1,
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (id) DO UPDATE SET
+                company_id = $2,
                 title = $3,
+                username = $4,
+                description = $5,
+                invite_link = $6,
                 updated_at = NOW()
             """,
-            company_id, telegram_group_id, title, username,
+            telegram_group_id, company_id, title, username,
             description, invite_link, is_forum, created_at or datetime.utcnow()
         )
 
     @staticmethod
     async def update_telegram_supergroup(
         telegram_group_id: int,
+        updates_dict: Optional[Dict[str, Any]] = None,
         title: Optional[str] = None,
         description: Optional[str] = None,
         invite_link: Optional[str] = None,
-    ) -> None:
-        """Update Telegram supergroup info"""
+    ) -> Optional[TelegramSupergroupReadModel]:
+        """Update Telegram supergroup info.
+
+        Can be called with either:
+        - updates_dict: dict with fields to update (is_active, title, description, etc.)
+        - Individual keyword arguments (title, description, invite_link)
+
+        Returns the updated record or None if not found.
+        """
         updates = []
         params = []
         param_idx = 1
 
-        if title is not None:
-            updates.append(f"title = ${param_idx}")
-            params.append(title)
-            param_idx += 1
+        # Handle dict-based updates (from API endpoint)
+        if updates_dict:
+            allowed_fields = {"is_active", "title", "description", "invite_link", "username", "member_count"}
+            for field, value in updates_dict.items():
+                if field in allowed_fields and value is not None:
+                    updates.append(f"{field} = ${param_idx}")
+                    params.append(value)
+                    param_idx += 1
+        else:
+            # Handle keyword arguments (legacy)
+            if title is not None:
+                updates.append(f"title = ${param_idx}")
+                params.append(title)
+                param_idx += 1
 
-        if description is not None:
-            updates.append(f"description = ${param_idx}")
-            params.append(description)
-            param_idx += 1
+            if description is not None:
+                updates.append(f"description = ${param_idx}")
+                params.append(description)
+                param_idx += 1
 
-        if invite_link is not None:
-            updates.append(f"invite_link = ${param_idx}")
-            params.append(invite_link)
-            param_idx += 1
+            if invite_link is not None:
+                updates.append(f"invite_link = ${param_idx}")
+                params.append(invite_link)
+                param_idx += 1
 
         if not updates:
-            return
+            return None
 
-        updates.append(f"updated_at = NOW()")
+        updates.append("updated_at = NOW()")
         params.append(telegram_group_id)
 
-        await pg_client.execute(
-            f"UPDATE telegram_supergroups SET {', '.join(updates)} WHERE telegram_group_id = ${param_idx}",
+        row = await pg_client.fetchrow(
+            f"UPDATE telegram_supergroups SET {', '.join(updates)} WHERE id = ${param_idx} RETURNING *",
             *params
         )
+
+        if not row:
+            return None
+        return TelegramSupergroupReadModel(**dict(row))
 
     @staticmethod
     async def unlink_telegram_supergroup(
@@ -496,10 +525,25 @@ class CompanyReadRepo:
         await pg_client.execute(
             """
             DELETE FROM telegram_supergroups
-            WHERE company_id = $1 AND telegram_group_id = $2
+            WHERE company_id = $1 AND id = $2
             """,
             company_id, telegram_group_id
         )
+
+    @staticmethod
+    async def delete_telegram_supergroup(
+        telegram_group_id: int,
+    ) -> bool:
+        """Delete Telegram supergroup by ID (regardless of company)"""
+        result = await pg_client.execute(
+            """
+            DELETE FROM telegram_supergroups
+            WHERE id = $1
+            """,
+            telegram_group_id
+        )
+        # Returns True if a row was deleted
+        return result and "DELETE 1" in result
 
     @staticmethod
     async def get_company_telegram_supergroups(
@@ -521,12 +565,14 @@ class CompanyReadRepo:
     async def get_company_by_telegram_group(
         telegram_group_id: int,
     ) -> Optional[CompanyReadModel]:
-        """Get company by Telegram group ID"""
+        """Get company by Telegram group ID.
+        Note: telegram_supergroups table uses 'id' column for the Telegram group ID.
+        """
         row = await pg_client.fetchrow(
             """
             SELECT c.* FROM companies c
             INNER JOIN telegram_supergroups ts ON c.id = ts.company_id
-            WHERE ts.telegram_group_id = $1 AND c.is_deleted = false
+            WHERE ts.id = $1 AND c.is_deleted = false
             """,
             telegram_group_id
         )
@@ -656,3 +702,33 @@ class CompanyReadRepo:
         if not row:
             return None
         return TelegramSupergroupReadModel(**dict(row))
+
+    @staticmethod
+    async def get_telegram_supergroup(
+        telegram_group_id: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Get Telegram supergroup as dict (for handler lookups)"""
+        row = await pg_client.fetchrow(
+            """
+            SELECT * FROM telegram_supergroups
+            WHERE id = $1
+            """,
+            telegram_group_id
+        )
+        if not row:
+            return None
+        return dict(row)
+
+    @staticmethod
+    async def hard_delete_telegram_supergroup(
+        telegram_group_id: int,
+    ) -> bool:
+        """Hard delete Telegram supergroup from database (permanent deletion)"""
+        result = await pg_client.execute(
+            """
+            DELETE FROM telegram_supergroups
+            WHERE id = $1
+            """,
+            telegram_group_id
+        )
+        return result and "DELETE 1" in result

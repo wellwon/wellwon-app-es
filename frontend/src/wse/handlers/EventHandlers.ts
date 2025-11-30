@@ -45,6 +45,85 @@ export class EventHandlers {
     }
   }
 
+  static handleUserAdminStatusUpdated(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('User admin status updated event received:', data);
+
+      const userId = data.user_id;
+      const isActive = data.is_active;
+      const isDeveloper = data.is_developer;
+      const userType = data.user_type;
+      const role = data.role;
+      const adminUserId = data.admin_user_id;
+
+      logger.info('Admin status update details:', {
+        userId,
+        isActive,
+        isDeveloper,
+        userType,
+        role,
+        adminUserId
+      });
+
+      // Invalidate React Query cache for user profile (forces re-fetch)
+      queryClient.invalidateQueries({ queryKey: ['user', 'profile'] });
+      queryClient.invalidateQueries({ queryKey: ['user', userId] });
+
+      // Dispatch event for AuthContext to update local state immediately
+      window.dispatchEvent(new CustomEvent('userAdminChange', {
+        detail: {
+          userId,
+          isDeveloper,
+          isActive,
+          userType,
+          role,
+          changedFields: {
+            ...(isDeveloper !== undefined && { is_developer: { new: isDeveloper } }),
+            ...(isActive !== undefined && { is_active: { new: isActive } }),
+            ...(userType !== undefined && { user_type: { new: userType } }),
+            ...(role !== undefined && { role: { new: role } })
+          },
+          isCompensatingEvent: false,
+          detectedBy: 'admin_panel',
+          timestamp: data.timestamp || new Date().toISOString()
+        }
+      }));
+
+      // Dispatch specific events for granular handling
+      if (isDeveloper !== undefined) {
+        window.dispatchEvent(new CustomEvent('developerStatusChanged', {
+          detail: { userId, isDeveloper, newValue: isDeveloper }
+        }));
+        logger.info(`Admin panel: Developer status changed for user ${userId}: ${isDeveloper}`);
+      }
+
+      if (isActive !== undefined) {
+        window.dispatchEvent(new CustomEvent('userStatusChanged', {
+          detail: { userId, isActive, newValue: isActive }
+        }));
+        logger.info(`Admin panel: User status changed for user ${userId}: ${isActive}`);
+      }
+
+      if (userType !== undefined) {
+        window.dispatchEvent(new CustomEvent('userTypeChanged', {
+          detail: { userId, userType, newValue: userType }
+        }));
+        logger.info(`Admin panel: User type changed for user ${userId}: ${userType}`);
+      }
+
+      if (role !== undefined) {
+        window.dispatchEvent(new CustomEvent('userRoleChanged', {
+          detail: { userId, role, newValue: role }
+        }));
+        logger.info(`Admin panel: User role changed for user ${userId}: ${role}`);
+      }
+
+    } catch (error) {
+      logger.error('Error handling user admin status update:', error);
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // CES Events (Compensating Event System - External Admin Changes)
   // Pattern: Greg Young's Compensating Events via PostgreSQL triggers
@@ -155,6 +234,9 @@ export class EventHandlers {
       // Invalidate company list queries
       queryClient.invalidateQueries({ queryKey: ['companies'] });
       queryClient.invalidateQueries({ queryKey: ['my-companies'] });
+      // Also invalidate supergroups as new company may create a telegram group
+      queryClient.invalidateQueries({ queryKey: ['supergroups'] });
+      queryClient.invalidateQueries({ queryKey: ['telegram-supergroups'] });
 
       window.dispatchEvent(new CustomEvent('companyCreated', { detail: company }));
     } catch (error) {
@@ -167,9 +249,9 @@ export class EventHandlers {
       const company = message.p;
       logger.info('Company updated:', company);
 
-      // Invalidate specific company and list queries
+      // Only invalidate detail cache
+      // Supergroups list is updated optimistically via setQueryData in useSupergroups hook
       queryClient.invalidateQueries({ queryKey: ['company', company.company_id] });
-      queryClient.invalidateQueries({ queryKey: ['companies'] });
 
       window.dispatchEvent(new CustomEvent('companyUpdated', { detail: company }));
     } catch (error) {
@@ -182,9 +264,9 @@ export class EventHandlers {
       const company = message.p;
       logger.info('Company archived:', company);
 
+      // Only invalidate detail cache
+      // Supergroups list is updated optimistically via setQueryData in useSupergroups hook
       queryClient.invalidateQueries({ queryKey: ['company', company.company_id] });
-      queryClient.invalidateQueries({ queryKey: ['companies'] });
-      queryClient.invalidateQueries({ queryKey: ['my-companies'] });
 
       window.dispatchEvent(new CustomEvent('companyArchived', { detail: company }));
     } catch (error) {
@@ -197,8 +279,9 @@ export class EventHandlers {
       const company = message.p;
       logger.info('Company restored:', company);
 
+      // Only invalidate detail cache
+      // Supergroups list is updated optimistically via setQueryData in useSupergroups hook
       queryClient.invalidateQueries({ queryKey: ['company', company.company_id] });
-      queryClient.invalidateQueries({ queryKey: ['companies'] });
 
       window.dispatchEvent(new CustomEvent('companyRestored', { detail: company }));
     } catch (error) {
@@ -211,9 +294,9 @@ export class EventHandlers {
       const company = message.p;
       logger.info('Company deleted:', company);
 
+      // Remove detail cache
       queryClient.removeQueries({ queryKey: ['company', company.company_id] });
-      queryClient.invalidateQueries({ queryKey: ['companies'] });
-      queryClient.invalidateQueries({ queryKey: ['my-companies'] });
+      // Do NOT invalidate lists - they are updated optimistically via setQueryData in useSupergroups hook
 
       window.dispatchEvent(new CustomEvent('companyDeleted', { detail: company }));
     } catch (error) {
@@ -226,6 +309,9 @@ export class EventHandlers {
       const data = message.p;
       logger.info('Company member joined:', data);
 
+      // Invalidate company lists so new company appears in sidebar
+      queryClient.invalidateQueries({ queryKey: ['companies'] });
+      queryClient.invalidateQueries({ queryKey: ['my-companies'] });
       queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'users'] });
       queryClient.invalidateQueries({ queryKey: ['company', data.company_id] });
 
@@ -267,7 +353,10 @@ export class EventHandlers {
       const data = message.p;
       logger.info('Company Telegram group created:', data);
 
+      // Invalidate all supergroup-related queries
       queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'telegram'] });
+      queryClient.invalidateQueries({ queryKey: ['supergroups'] });
+      queryClient.invalidateQueries({ queryKey: ['telegram-supergroups'] });
 
       window.dispatchEvent(new CustomEvent('companyTelegramCreated', { detail: data }));
     } catch (error) {
@@ -325,6 +414,9 @@ export class EventHandlers {
       logger.info('Chat created:', chat);
 
       queryClient.invalidateQueries({ queryKey: ['chats'] });
+      // Invalidate supergroup chat counts if linked to a supergroup
+      queryClient.invalidateQueries({ queryKey: ['supergroup-chat-counts'] });
+      queryClient.invalidateQueries({ queryKey: ['supergroups'] });
 
       window.dispatchEvent(new CustomEvent('chatCreated', { detail: chat }));
     } catch (error) {
@@ -337,8 +429,10 @@ export class EventHandlers {
       const chat = message.p;
       logger.info('Chat updated:', chat);
 
+      // Only invalidate detail cache, NOT the list!
+      // The list is updated optimistically via setQueryData in useChatList hook
+      // Invalidating list would cause refetch that overwrites optimistic update with stale data
       queryClient.invalidateQueries({ queryKey: ['chat', chat.chat_id] });
-      queryClient.invalidateQueries({ queryKey: ['chats'] });
 
       window.dispatchEvent(new CustomEvent('chatUpdated', { detail: chat }));
     } catch (error) {
@@ -351,8 +445,9 @@ export class EventHandlers {
       const chat = message.p;
       logger.info('Chat archived:', chat);
 
+      // Only invalidate detail cache, NOT the list!
+      // The list is updated optimistically via setQueryData in useChatList hook
       queryClient.invalidateQueries({ queryKey: ['chat', chat.chat_id] });
-      queryClient.invalidateQueries({ queryKey: ['chats'] });
 
       window.dispatchEvent(new CustomEvent('chatArchived', { detail: chat }));
     } catch (error) {
@@ -365,8 +460,9 @@ export class EventHandlers {
       const chat = message.p;
       logger.info('Chat deleted:', chat);
 
+      // Remove detail cache
       queryClient.removeQueries({ queryKey: ['chat', chat.chat_id] });
-      queryClient.invalidateQueries({ queryKey: ['chats'] });
+      // Do NOT invalidate list - it's updated optimistically via setQueryData in useChatList hook
 
       window.dispatchEvent(new CustomEvent('chatDeleted', { detail: chat }));
     } catch (error) {
@@ -391,17 +487,22 @@ export class EventHandlers {
         has_telegram_user_data: !!msg.telegram_user_data
       });
 
-      // Invalidate messages for the chat
-      queryClient.invalidateQueries({ queryKey: ['chat', msg.chat_id, 'messages'] });
-      // Update chat list (for last message preview)
+      // NOTE: Do NOT invalidate messages query here!
+      // The CustomEvent below triggers useRealtimeChat to add the message directly to state.
+      // Invalidating would cause a full refetch, leading to duplicate messages.
+      // This follows TkDodo's best practice: for frequent updates, directly update state.
+
+      // Update chat list (for last message preview) - this is OK, it's metadata not messages
       queryClient.invalidateQueries({ queryKey: ['chats'] });
       // Update unread count
       queryClient.invalidateQueries({ queryKey: ['unread-count'] });
 
       // Dispatch event with full Telegram data
+      // Normalize message_id to id for frontend consistency
       window.dispatchEvent(new CustomEvent('messageCreated', {
         detail: {
           ...msg,
+          id: msg.message_id || msg.id,  // Backend sends message_id, frontend expects id
           source,
           isTelegram
         }
@@ -416,9 +517,14 @@ export class EventHandlers {
       const msg = message.p;
       logger.info('Message updated:', msg);
 
-      queryClient.invalidateQueries({ queryKey: ['chat', msg.chat_id, 'messages'] });
-
-      window.dispatchEvent(new CustomEvent('messageUpdated', { detail: msg }));
+      // NOTE: Do NOT invalidate - CustomEvent triggers direct state update in useRealtimeChat
+      // Normalize message_id to id for frontend consistency
+      window.dispatchEvent(new CustomEvent('messageUpdated', {
+        detail: {
+          ...msg,
+          id: msg.message_id || msg.id
+        }
+      }));
     } catch (error) {
       logger.error('Error handling message updated:', error);
     }
@@ -429,9 +535,14 @@ export class EventHandlers {
       const msg = message.p;
       logger.info('Message deleted:', msg);
 
-      queryClient.invalidateQueries({ queryKey: ['chat', msg.chat_id, 'messages'] });
-
-      window.dispatchEvent(new CustomEvent('messageDeleted', { detail: msg }));
+      // NOTE: Do NOT invalidate - CustomEvent triggers direct state update in useRealtimeChat
+      // Normalize message_id to id for frontend consistency
+      window.dispatchEvent(new CustomEvent('messageDeleted', {
+        detail: {
+          ...msg,
+          id: msg.message_id || msg.id
+        }
+      }));
     } catch (error) {
       logger.error('Error handling message deleted:', error);
     }
@@ -748,6 +859,7 @@ export class EventHandlers {
       // User account events
       messageProcessor.registerHandler('user_account_update', this.handleUserAccountUpdate);
       messageProcessor.registerHandler('user_profile_updated', this.handleUserProfileUpdated);
+      messageProcessor.registerHandler('user_admin_status_updated', this.handleUserAdminStatusUpdated);
 
       // CES Events (Compensating Event System - External Admin Changes)
       messageProcessor.registerHandler('user_admin_change', this.handleUserAdminChange);

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -14,6 +14,7 @@ interface SidebarUserCardProps {
 const SidebarUserCard = ({ collapsed = false }: SidebarUserCardProps) => {
   const { user, profile } = useAuth();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const triggerRef = useRef<HTMLDivElement>(null);
   
   const getUserDisplayName = () => {
     if (profile?.first_name || profile?.last_name) {
@@ -48,6 +49,7 @@ const SidebarUserCard = ({ collapsed = false }: SidebarUserCardProps) => {
     return (
       <div className="relative w-full">
         <div
+          ref={triggerRef}
           className="flex justify-center p-2 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10"
           onClick={() => setIsDropdownOpen(!isDropdownOpen)}
         >
@@ -63,6 +65,7 @@ const SidebarUserCard = ({ collapsed = false }: SidebarUserCardProps) => {
           onClose={() => setIsDropdownOpen(false)}
           position="top"
           align="left"
+          triggerRef={triggerRef}
         />
       </div>
     );
@@ -71,6 +74,7 @@ const SidebarUserCard = ({ collapsed = false }: SidebarUserCardProps) => {
   return (
     <div className="relative w-full">
       <div
+        ref={triggerRef}
         className="w-full flex items-center gap-3 p-2 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10"
         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
       >
@@ -101,6 +105,7 @@ const SidebarUserCard = ({ collapsed = false }: SidebarUserCardProps) => {
         onClose={() => setIsDropdownOpen(false)}
         position="top"
         align="left"
+        triggerRef={triggerRef}
       />
     </div>
   );

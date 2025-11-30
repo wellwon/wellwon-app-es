@@ -279,8 +279,11 @@ class EventTransformer:
             'avatar_url': event.get('avatar_url'),
             'timezone': event.get('timezone'),
             'language': event.get('language'),
-            'is_active': event.get('is_active', True),
-            'email_verified': event.get('email_verified', False),
+            'is_active': event.get('is_active'),
+            'is_developer': event.get('is_developer'),
+            'user_type': event.get('user_type'),
+            'admin_user_id': str(event.get('admin_user_id')) if event.get('admin_user_id') else None,
+            'email_verified': event.get('email_verified'),
             'created_at': event.get('created_at'),
             'updated_at': event.get('updated_at'),
             'metadata': event.get('metadata'),
@@ -308,6 +311,9 @@ class EventTransformer:
     @staticmethod
     def _transform_chat_event(event: Dict[str, Any]) -> Dict[str, Any]:
         """Transform chat domain event"""
+        # telegram_supergroup_id may be in event or legacy telegram_chat_id
+        telegram_supergroup_id = event.get('telegram_supergroup_id') or event.get('telegram_chat_id')
+
         return {
             'chat_id': str(event.get('chat_id', event.get('aggregate_id', ''))),
             'name': event.get('name'),
@@ -316,7 +322,9 @@ class EventTransformer:
             'created_by': str(event.get('created_by', '')) if event.get('created_by') else None,
             'participant_count': event.get('participant_count'),
             'is_active': event.get('is_active', True),
+            # Include both fields for compatibility
             'telegram_chat_id': event.get('telegram_chat_id'),
+            'telegram_supergroup_id': telegram_supergroup_id,
             'telegram_topic_id': event.get('telegram_topic_id'),
             'last_message_at': event.get('last_message_at'),
             'created_at': event.get('created_at'),

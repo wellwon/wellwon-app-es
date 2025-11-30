@@ -25,6 +25,11 @@ class ChatProjector:
 
     Handles all chat-related events and updates the corresponding
     read model tables (chats, chat_participants, messages, message_reads).
+
+    SYNC vs ASYNC projections:
+    - SYNC: ChatCreated, ParticipantAdded, MessageSent, TelegramMessageReceived
+      (Critical for saga flow, real-time chat UI)
+    - ASYNC: Everything else (eventual consistency is acceptable)
     """
 
     def __init__(self, chat_read_repo: 'ChatReadRepo'):
@@ -37,7 +42,11 @@ class ChatProjector:
     @sync_projection("ChatCreated")
     @monitor_projection
     async def on_chat_created(self, envelope: EventEnvelope) -> None:
-        """Project ChatCreated event to read model"""
+        """
+        Project ChatCreated event to read model.
+
+        SYNC: Saga waits for chat to exist. UI shows chat immediately.
+        """
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
 
@@ -55,36 +64,49 @@ class ChatProjector:
         )
 
     @sync_projection("ChatUpdated")
+    @monitor_projection
     async def on_chat_updated(self, envelope: EventEnvelope) -> None:
-        """Project ChatUpdated event"""
+        """Project ChatUpdated event - SYNC for immediate UI update"""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
 
-        log.info(f"Projecting ChatUpdated: chat_id={chat_id}")
+        log.info(f"Projecting ChatUpdated: chat_id={chat_id}, type={type(chat_id)}, name={event_data.get('name')}")
 
-        await self.chat_read_repo.update_chat(
-            chat_id=chat_id,
-            name=event_data.get('name'),
-            metadata=event_data.get('metadata'),
-            updated_at=envelope.stored_at,
-        )
+        try:
+            await self.chat_read_repo.update_chat(
+                chat_id=chat_id,
+                name=event_data.get('name'),
+                metadata=event_data.get('metadata'),
+                updated_at=envelope.stored_at,
+            )
+            log.info(f"ChatUpdated projection SUCCESS: chat_id={chat_id}")
+        except Exception as e:
+            log.error(f"ChatUpdated projection FAILED: chat_id={chat_id}, error={e}", exc_info=True)
+            raise
 
     @sync_projection("ChatArchived")
+    @monitor_projection
     async def on_chat_archived(self, envelope: EventEnvelope) -> None:
-        """Project ChatArchived event"""
+        """Project ChatArchived event - SYNC for immediate UI update"""
         chat_id = envelope.aggregate_id
 
-        log.info(f"Projecting ChatArchived: chat_id={chat_id}")
+        log.info(f"Projecting ChatArchived: chat_id={chat_id}, type={type(chat_id)}")
 
-        await self.chat_read_repo.update_chat_status(
-            chat_id=chat_id,
-            is_active=False,
-            updated_at=envelope.stored_at,
-        )
+        try:
+            await self.chat_read_repo.update_chat_status(
+                chat_id=chat_id,
+                is_active=False,
+                updated_at=envelope.stored_at,
+            )
+            log.info(f"ChatArchived projection SUCCESS: chat_id={chat_id}")
+        except Exception as e:
+            log.error(f"ChatArchived projection FAILED: chat_id={chat_id}, error={e}", exc_info=True)
+            raise
 
     @sync_projection("ChatRestored")
+    @monitor_projection
     async def on_chat_restored(self, envelope: EventEnvelope) -> None:
-        """Project ChatRestored event"""
+        """Project ChatRestored event - SYNC for immediate UI update"""
         chat_id = envelope.aggregate_id
 
         log.info(f"Projecting ChatRestored: chat_id={chat_id}")
@@ -95,6 +117,21 @@ class ChatProjector:
             updated_at=envelope.stored_at,
         )
 
+    @sync_projection("ChatHardDeleted")
+    @monitor_projection
+    async def on_chat_hard_deleted(self, envelope: EventEnvelope) -> None:
+        """Project ChatHardDeleted event - SYNC for immediate UI update (hard delete from DB)"""
+        chat_id = envelope.aggregate_id
+
+        log.info(f"Projecting ChatHardDeleted: chat_id={chat_id}")
+
+        try:
+            await self.chat_read_repo.hard_delete_chat(chat_id=chat_id)
+            log.info(f"ChatHardDeleted projection SUCCESS: chat_id={chat_id}")
+        except Exception as e:
+            log.error(f"ChatHardDeleted projection FAILED: chat_id={chat_id}, error={e}", exc_info=True)
+            raise
+
     # =========================================================================
     # Participant Projections
     # =========================================================================
@@ -102,7 +139,11 @@ class ChatProjector:
     @sync_projection("ParticipantAdded")
     @monitor_projection
     async def on_participant_added(self, envelope: EventEnvelope) -> None:
-        """Project ParticipantAdded event"""
+        """
+        Project ParticipantAdded event.
+
+        SYNC: Saga flow depends on participant. UI shows members immediately.
+        """
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
         user_id = uuid.UUID(event_data['user_id'])
@@ -120,8 +161,9 @@ class ChatProjector:
         await self.chat_read_repo.increment_participant_count(chat_id)
 
     @sync_projection("ParticipantRemoved")
+    @monitor_projection
     async def on_participant_removed(self, envelope: EventEnvelope) -> None:
-        """Project ParticipantRemoved event"""
+        """Project ParticipantRemoved event - SYNC for UI update"""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
         user_id = uuid.UUID(event_data['user_id'])
@@ -137,8 +179,9 @@ class ChatProjector:
         await self.chat_read_repo.decrement_participant_count(chat_id)
 
     @sync_projection("ParticipantRoleChanged")
+    @monitor_projection
     async def on_participant_role_changed(self, envelope: EventEnvelope) -> None:
-        """Project ParticipantRoleChanged event"""
+        """Project ParticipantRoleChanged event - SYNC for UI update"""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
         user_id = uuid.UUID(event_data['user_id'])
@@ -152,8 +195,9 @@ class ChatProjector:
         )
 
     @sync_projection("ParticipantLeft")
+    @monitor_projection
     async def on_participant_left(self, envelope: EventEnvelope) -> None:
-        """Project ParticipantLeft event"""
+        """Project ParticipantLeft event - SYNC for UI update"""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
         user_id = uuid.UUID(event_data['user_id'])
@@ -174,7 +218,11 @@ class ChatProjector:
     @sync_projection("MessageSent")
     @monitor_projection
     async def on_message_sent(self, envelope: EventEnvelope) -> None:
-        """Project MessageSent event"""
+        """
+        Project MessageSent event.
+
+        SYNC: Real-time chat requires immediate message visibility.
+        """
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
         message_id = uuid.UUID(event_data['message_id'])
@@ -218,9 +266,11 @@ class ChatProjector:
             last_message_sender_id=sender_id,
         )
 
+
     @sync_projection("MessageEdited")
+    @monitor_projection
     async def on_message_edited(self, envelope: EventEnvelope) -> None:
-        """Project MessageEdited event"""
+        """Project MessageEdited event - SYNC for real-time UI"""
         event_data = envelope.event_data
         message_id = uuid.UUID(event_data['message_id'])
 
@@ -234,8 +284,9 @@ class ChatProjector:
         )
 
     @sync_projection("MessageDeleted")
+    @monitor_projection
     async def on_message_deleted(self, envelope: EventEnvelope) -> None:
-        """Project MessageDeleted event (soft delete)"""
+        """Project MessageDeleted event - SYNC for real-time UI"""
         event_data = envelope.event_data
         message_id = uuid.UUID(event_data['message_id'])
 
@@ -248,7 +299,7 @@ class ChatProjector:
 
     @sync_projection("MessageReadStatusUpdated")
     async def on_message_read_status_updated(self, envelope: EventEnvelope) -> None:
-        """Project MessageReadStatusUpdated event"""
+        """Project MessageReadStatusUpdated event - SYNC for read receipts"""
         event_data = envelope.event_data
         message_id = uuid.UUID(event_data['message_id'])
         user_id = uuid.UUID(event_data['user_id'])
@@ -263,7 +314,7 @@ class ChatProjector:
 
     @sync_projection("MessagesMarkedAsRead")
     async def on_messages_marked_as_read(self, envelope: EventEnvelope) -> None:
-        """Project MessagesMarkedAsRead event (batch read)"""
+        """Project MessagesMarkedAsRead event - SYNC for batch read receipts"""
         event_data = envelope.event_data
         chat_id = uuid.UUID(event_data['chat_id'])
         user_id = uuid.UUID(event_data['user_id'])
@@ -284,8 +335,9 @@ class ChatProjector:
     # =========================================================================
 
     @sync_projection("TelegramChatLinked")
+    @monitor_projection
     async def on_telegram_chat_linked(self, envelope: EventEnvelope) -> None:
-        """Project TelegramChatLinked event"""
+        """Project TelegramChatLinked event - SYNC for UI"""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
 
@@ -298,8 +350,9 @@ class ChatProjector:
         )
 
     @sync_projection("TelegramChatUnlinked")
+    @monitor_projection
     async def on_telegram_chat_unlinked(self, envelope: EventEnvelope) -> None:
-        """Project TelegramChatUnlinked event"""
+        """Project TelegramChatUnlinked event - SYNC for UI"""
         chat_id = envelope.aggregate_id
 
         log.info(f"Projecting TelegramChatUnlinked: chat={chat_id}")
@@ -311,10 +364,12 @@ class ChatProjector:
         )
 
     @sync_projection("TelegramMessageReceived")
+    @monitor_projection
     async def on_telegram_message_received(self, envelope: EventEnvelope) -> None:
         """
-        Project TelegramMessageReceived event (DEPRECATED).
+        Project TelegramMessageReceived event (legacy).
 
+        SYNC: Real-time Telegram messages must appear immediately.
         This handler exists for backward compatibility with old events.
         New messages use unified MessageSent event with telegram_user_id field.
         """

@@ -80,6 +80,8 @@ export interface Message {
   telegram_topic_id?: number | null;
   telegram_forward_data?: Record<string, unknown> | null;
   sync_direction?: 'telegram_to_web' | 'web_to_telegram' | 'bidirectional';
+  // Telegram read receipt - when the message was read on Telegram
+  telegram_read_at?: string | null;
 }
 
 export interface MessageRead {
@@ -178,6 +180,7 @@ export interface RealtimeChatContextType {
   sendFile: (file: File, replyToId?: string) => Promise<void>;
   sendVoice: (audioBlob: Blob, duration: number, replyToId?: string) => Promise<void>;
   sendInteractiveMessage?: (interactiveData: any, title?: string) => Promise<void>;
+  deleteMessage: (messageId: string) => Promise<void>;
   markAsRead: (messageId: string) => Promise<void>;
   
   // Typing индикаторы
@@ -187,6 +190,7 @@ export interface RealtimeChatContextType {
   // Управление чатами
   updateChat: (chatId: string, name: string, description?: string) => Promise<void>;
   deleteChat: (chatId: string) => Promise<void>;
+  hardDeleteChat: (chatId: string, reason?: string) => Promise<void>;
   
   // Message filtering
   setMessageFilter: (filter: MessageFilter) => Promise<void>;

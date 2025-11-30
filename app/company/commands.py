@@ -50,11 +50,12 @@ class CreateCompanyCommand(Command):
     tg_support: Optional[str] = Field(None, max_length=100)
 
     # Saga orchestration options
-    # If True, CompanyCreationSaga will create Telegram group and chat automatically
+    # If True, CompanyCreationSaga will create Telegram supergroup automatically
     create_telegram_group: bool = Field(default=False, description="Create Telegram supergroup via saga")
     telegram_group_title: Optional[str] = Field(None, max_length=255, description="Telegram group title (defaults to company name)")
     telegram_group_description: Optional[str] = Field(None, max_length=1000, description="Telegram group description")
-
+    # If True, CompanyCreationSaga will create company chat (default: True)
+    create_chat: bool = Field(default=True, description="Create company chat via saga")
     # If provided, saga will link this existing chat to the company
     link_chat_id: Optional[uuid.UUID] = Field(None, description="Existing chat ID to link to company")
 
@@ -203,6 +204,13 @@ class UpdateTelegramSupergroupCommand(Command):
     title: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = Field(None, max_length=1000)
     invite_link: Optional[str] = Field(None, max_length=500)
+
+
+class DeleteTelegramSupergroupCommand(Command):
+    """Permanently delete a Telegram supergroup (hard delete from read model)"""
+    telegram_group_id: int
+    deleted_by: uuid.UUID
+    reason: Optional[str] = Field(None, max_length=500)
 
 
 # =============================================================================

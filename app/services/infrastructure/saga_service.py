@@ -387,6 +387,7 @@ class SagaService:
                     'create_telegram_group': event.get('create_telegram_group', False),
                     'telegram_group_title': event.get('telegram_group_title'),
                     'telegram_group_description': event.get('telegram_group_description'),
+                    'create_chat': event.get('create_chat', True),
                     'link_chat_id': event.get('link_chat_id'),
                     # CQRS metadata
                     'correlation_id': event.get('correlation_id', event.get('event_id')),

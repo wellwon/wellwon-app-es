@@ -1,64 +1,39 @@
-import React, { useState, useEffect } from 'react';
+// =============================================================================
+// File: UserManagement.tsx
+// Description: User management using React Query + WSE
+// =============================================================================
+
+import React from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { adminApi, AdminUser } from '@/api/admin';
+import { useAdminUsers, useUpdateAdminUser } from '@/hooks/admin';
 import { GlassCard } from '@/components/design-system/GlassCard';
 import { GlassButton } from '@/components/design-system/GlassButton';
 import { useToast } from '@/hooks/use-toast';
 import { Users, Shield, UserX, UserCheck } from 'lucide-react';
-import { logger } from '@/utils/logger';
 
 const UserManagement: React.FC = () => {
   const { profile } = useAuth();
   const { toast } = useToast();
-  const [users, setUsers] = useState<AdminUser[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  // React Query hooks
+  const { users, isLoading } = useAdminUsers({ enabled: true });
+  const updateUserMutation = useUpdateAdminUser();
 
   // Only WW managers and developers can manage users
   const canManageUsers = true; // All users are now managers/admins
 
-  useEffect(() => {
-    if (canManageUsers) {
-      fetchUsers();
-    } else {
-      setLoading(false);
-    }
-  }, [canManageUsers]);
-
-  const fetchUsers = async () => {
-    try {
-      const { data } = await adminApi.getUsers();
-      // Filter users to only include developer types
-      const filteredUsers = (data || []).filter(user =>
-        user.developer === true
-      );
-      setUsers(filteredUsers);
-    } catch (error) {
-      logger.warn('[UserManagement] Admin users endpoint not available');
-      toast({
-        title: 'Ошибка',
-        description: 'Не удалось загрузить список пользователей',
-        variant: 'error',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Filter users to only include developers
+  const filteredUsers = users.filter(user => user.developer === true);
 
   const updateUserStatus = async (userId: string, active: boolean) => {
     try {
-      await adminApi.updateUser(userId, { active });
-
-      setUsers(prev => prev.map(user =>
-        user.user_id === userId ? { ...user, active } : user
-      ));
-
+      await updateUserMutation.mutateAsync({ userId, data: { active } });
       toast({
         title: 'Успешно',
         description: `Пользователь ${active ? 'активирован' : 'деактивирован'}`,
         variant: 'success',
       });
     } catch (error) {
-      logger.error('[UserManagement] Failed to update user status', error);
       toast({
         title: 'Ошибка',
         description: 'Не удалось обновить статус пользователя',
@@ -69,19 +44,13 @@ const UserManagement: React.FC = () => {
 
   const updateUserType = async (userId: string, isDeveloper: boolean) => {
     try {
-      await adminApi.updateUser(userId, { developer: isDeveloper });
-
-      setUsers(prev => prev.map(user =>
-        user.user_id === userId ? { ...user, developer: isDeveloper } : user
-      ));
-
+      await updateUserMutation.mutateAsync({ userId, data: { developer: isDeveloper } });
       toast({
         title: 'Успешно',
         description: 'Тип пользователя обновлен',
         variant: 'success',
       });
     } catch (error) {
-      logger.error('[UserManagement] Failed to update user type', error);
       toast({
         title: 'Ошибка',
         description: 'Не удалось обновить тип пользователя',
@@ -105,7 +74,7 @@ const UserManagement: React.FC = () => {
     );
   }
 
-  if (loading) {
+  if (isLoading) {
     return (
       <GlassCard>
         <div className="text-center text-gray-400">
@@ -123,7 +92,7 @@ const UserManagement: React.FC = () => {
       </div>
 
       <div className="space-y-4">
-        {users.map((user) => (
+        {filteredUsers.map((user) => (
           <div
             key={user.id}
             className="bg-gray-secondary/40 border border-white/10 rounded-xl p-4"
@@ -153,6 +122,7 @@ const UserManagement: React.FC = () => {
                 <select
                   value={user.developer ? 'developer' : 'user'}
                   onChange={(e) => updateUserType(user.user_id, e.target.value === 'developer')}
+                  disabled={updateUserMutation.isPending}
                   className="px-3 py-1 bg-gray-secondary/60 border border-white/10 rounded-lg text-white text-sm"
                 >
                   <option value="user">Пользователь WW</option>
@@ -163,6 +133,7 @@ const UserManagement: React.FC = () => {
                   variant={user.active ? "outline" : "primary"}
                   size="sm"
                   onClick={() => updateUserStatus(user.user_id, !user.active)}
+                  disabled={updateUserMutation.isPending}
                   className={`inline-flex items-center gap-2 ${
                     user.active
                       ? 'text-red-400 border-red-400/30 hover:bg-red-400/10'
@@ -186,7 +157,7 @@ const UserManagement: React.FC = () => {
           </div>
         ))}
 
-        {users.length === 0 && (
+        {filteredUsers.length === 0 && (
           <div className="text-center text-gray-400 py-8">
             Пользователи не найдены
           </div>

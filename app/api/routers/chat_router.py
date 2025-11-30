@@ -17,6 +17,7 @@ from app.chat.commands import (
     CreateChatCommand,
     UpdateChatCommand,
     ArchiveChatCommand,
+    DeleteChatCommand,
     AddParticipantCommand,
     RemoveParticipantCommand,
     ChangeParticipantRoleCommand,
@@ -29,6 +30,12 @@ from app.chat.commands import (
     StopTypingCommand,
     LinkTelegramChatCommand,
     UnlinkTelegramChatCommand,
+)
+from app.chat.exceptions import (
+    UserNotParticipantError,
+    InsufficientPermissionsError,
+    ChatNotFoundError,
+    ChatInactiveError,
 )
 from app.chat.queries import (
     GetChatByIdQuery,
@@ -100,6 +107,7 @@ class ChangeRoleRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     """Request to send a message"""
+    message_id: Optional[uuid.UUID] = None  # Client-generated UUID for idempotency
     content: str = Field(..., max_length=10000)
     message_type: str = Field(default="text")
     reply_to_id: Optional[uuid.UUID] = None
@@ -118,6 +126,11 @@ class EditMessageRequest(BaseModel):
 class MarkAsReadRequest(BaseModel):
     """Request to mark messages as read"""
     last_read_message_id: uuid.UUID
+
+
+class DeleteChatRequest(BaseModel):
+    """Request to permanently delete a chat"""
+    reason: Optional[str] = Field(None, max_length=500)
 
 
 class LinkTelegramRequest(BaseModel):
@@ -263,18 +276,31 @@ async def update_chat(
         await command_bus.send(command)
         return ChatResponse(id=chat_id, message="Chat updated")
 
+    except UserNotParticipantError as e:
+        log.warning(f"Update chat denied - not participant: {e}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except InsufficientPermissionsError as e:
+        log.warning(f"Update chat denied - insufficient permissions: {e}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ChatNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ChatInactiveError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        log.error(f"Failed to update chat {chat_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.delete("/{chat_id}", response_model=ChatResponse)
-async def archive_chat(
+@router.post("/{chat_id}/archive", response_model=ChatResponse)
+async def archive_chat_post(
     chat_id: uuid.UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
 ):
-    """Archive (soft delete) a chat"""
+    """Archive (soft delete) a chat - POST endpoint for frontend compatibility"""
     try:
         command = ArchiveChatCommand(
             chat_id=chat_id,
@@ -284,8 +310,94 @@ async def archive_chat(
         await command_bus.send(command)
         return ChatResponse(id=chat_id, message="Chat archived")
 
+    except UserNotParticipantError as e:
+        log.warning(f"Archive chat denied - not participant: {e}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except InsufficientPermissionsError as e:
+        log.warning(f"Archive chat denied - insufficient permissions: {e}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ChatNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ChatInactiveError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        log.error(f"Failed to archive chat {chat_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.delete("/{chat_id}", response_model=ChatResponse)
+async def archive_chat(
+    chat_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
+):
+    """Archive (soft delete) a chat - DELETE endpoint"""
+    try:
+        command = ArchiveChatCommand(
+            chat_id=chat_id,
+            archived_by=current_user["user_id"],
+        )
+
+        await command_bus.send(command)
+        return ChatResponse(id=chat_id, message="Chat archived")
+
+    except UserNotParticipantError as e:
+        log.warning(f"Archive chat denied - not participant: {e}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except InsufficientPermissionsError as e:
+        log.warning(f"Archive chat denied - insufficient permissions: {e}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ChatNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ChatInactiveError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        log.error(f"Failed to archive chat {chat_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/{chat_id}/delete", response_model=ChatResponse)
+async def hard_delete_chat(
+    chat_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
+    request: Optional[DeleteChatRequest] = None,
+):
+    """
+    Permanently delete a chat (hard delete).
+
+    This removes the chat and all related data from the database.
+    Use with caution - this action cannot be undone.
+    """
+    try:
+        command = DeleteChatCommand(
+            chat_id=chat_id,
+            deleted_by=current_user["user_id"],
+            reason=request.reason if request else None,
+        )
+
+        await command_bus.send(command)
+        return ChatResponse(id=chat_id, message="Chat permanently deleted")
+
+    except UserNotParticipantError as e:
+        log.warning(f"Delete chat denied - not participant: {e}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except InsufficientPermissionsError as e:
+        log.warning(f"Delete chat denied - insufficient permissions: {e}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ChatNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        log.error(f"Failed to delete chat {chat_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 # =============================================================================
@@ -439,8 +551,11 @@ async def send_message(
 ):
     """Send a message to chat"""
     try:
+        # Use client-provided message_id for idempotency, or generate new one
+        message_id = request.message_id or uuid.uuid4()
+
         command = SendMessageCommand(
-            message_id=uuid.uuid4(),
+            message_id=message_id,
             chat_id=chat_id,
             sender_id=current_user["user_id"],
             content=request.content,

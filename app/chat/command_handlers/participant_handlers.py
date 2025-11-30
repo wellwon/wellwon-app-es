@@ -40,7 +40,7 @@ class AddParticipantHandler(BaseCommandHandler):
         log.info(f"Adding participant {command.user_id} to chat {command.chat_id}")
 
         # Load aggregate
-        events = await self.event_store.get_events(command.chat_id, "chat")
+        events = await self.event_store.get_events(command.chat_id, "Chat")
         chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
 
         # Add participant
@@ -74,7 +74,7 @@ class RemoveParticipantHandler(BaseCommandHandler):
     async def handle(self, command: RemoveParticipantCommand) -> uuid.UUID:
         log.info(f"Removing participant {command.user_id} from chat {command.chat_id}")
 
-        events = await self.event_store.get_events(command.chat_id, "chat")
+        events = await self.event_store.get_events(command.chat_id, "Chat")
         chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
 
         chat_aggregate.remove_participant(
@@ -107,7 +107,7 @@ class ChangeParticipantRoleHandler(BaseCommandHandler):
     async def handle(self, command: ChangeParticipantRoleCommand) -> uuid.UUID:
         log.info(f"Changing role for {command.user_id} in chat {command.chat_id} to {command.new_role}")
 
-        events = await self.event_store.get_events(command.chat_id, "chat")
+        events = await self.event_store.get_events(command.chat_id, "Chat")
         chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
 
         chat_aggregate.change_participant_role(
@@ -140,7 +140,7 @@ class LeaveChatHandler(BaseCommandHandler):
     async def handle(self, command: LeaveChatCommand) -> uuid.UUID:
         log.info(f"User {command.user_id} leaving chat {command.chat_id}")
 
-        events = await self.event_store.get_events(command.chat_id, "chat")
+        events = await self.event_store.get_events(command.chat_id, "Chat")
         chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
 
         chat_aggregate.leave_chat(user_id=command.user_id)

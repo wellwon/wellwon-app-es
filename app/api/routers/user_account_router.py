@@ -572,7 +572,7 @@ async def change_password(
     device_info = _get_device_info(request)
     log_event_query = LogSecurityEventQuery(
         event_type="password_changed",
-        user_id=current_user["user_id"],
+        user_id=str(current_user["user_id"]),
         ip_address=device_info["ip_address"],
         user_agent=device_info["user_agent"],
         success=True,
@@ -685,7 +685,7 @@ async def logout_user(
     device_info = _get_device_info(request)
     log_event_query = LogSecurityEventQuery(
         event_type="logout",
-        user_id=current_user["user_id"],
+        user_id=str(current_user["user_id"]),
         ip_address=device_info["ip_address"],
         user_agent=device_info["user_agent"],
         success=True,
@@ -750,7 +750,7 @@ async def logout_all_sessions(
     device_info = _get_device_info(request)
     log_event_query = LogSecurityEventQuery(
         event_type="logout_all",
-        user_id=current_user["user_id"],
+        user_id=str(current_user["user_id"]),
         ip_address=device_info["ip_address"],
         user_agent=device_info["user_agent"],
         success=True,
@@ -898,7 +898,7 @@ async def delete_account(
     device_info = _get_device_info(request)
     log_event_query = LogSecurityEventQuery(
         event_type="account_deleted",
-        user_id=current_user["user_id"],
+        user_id=str(current_user["user_id"]),
         ip_address=device_info["ip_address"],
         user_agent=device_info["user_agent"],
         success=True,

@@ -8,15 +8,13 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { AppConfirmDialog } from '@/components/shared';
 import { GlassButton } from '@/components/design-system/GlassButton';
-import { Plus, Trash2, Archive, Search, Filter, Edit3, Users, Briefcase, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Archive, Search, Filter, Edit3, Users, Briefcase } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import ChatDialog from '@/components/chat/core/ChatDialog';
 import CompanyBadge from './CompanyBadge';
 
 import { OptimizedChatListForSidebar } from '@/components/chat/components/OptimizedChatListForSidebar';
-import * as telegramApi from '@/api/telegram';
-
 import { logger } from '@/utils/logger';
 import { SupergroupsList } from './SupergroupsList';
 import { GroupsPanel } from './GroupsPanel';
@@ -29,6 +27,7 @@ const SidebarChat: React.FC = () => {
     createChat,
     initialLoading,
     deleteChat,
+    hardDeleteChat,
     updateChat,
     setScopeBySupergroup,
     setScopeByCompany,
@@ -45,7 +44,8 @@ const SidebarChat: React.FC = () => {
     isDeveloper
   } = usePlatform();
   const {
-    user
+    user,
+    profile
   } = useAuth();
   const {
     toast
@@ -56,9 +56,6 @@ const SidebarChat: React.FC = () => {
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [showNoChatsHint, setShowNoChatsHint] = React.useState(false);
   
-  const [isVerifying, setIsVerifying] = React.useState(false);
-  const [verifyConfirmOpen, setVerifyConfirmOpen] = React.useState(false);
-  const [pendingDryRun, setPendingDryRun] = React.useState(false);
   
   // Ref для отслеживания последнего ручного выбора группы
   const lastManualGroupSelectionRef = useRef<{ supergroupId: number | null; timestamp: number } | null>(null);
@@ -130,15 +127,22 @@ const SidebarChat: React.FC = () => {
   }, [SIDEBAR_STATE_KEY]);
 
 
+  // Ref to track last synced chat id
+  const lastSyncedChatIdRef = useRef<string | null>(null);
+
   // Синхронизация с активным чатом: если есть активный чат и он принадлежит к supergroup,
   // автоматически показываем темы этой группы (только при смене активного чата)
   // НО уважаем ручной выбор группы пользователем
   useEffect(() => {
     if (!activeChat || isRestoringState.current) return;
 
+    // Prevent running if we already synced this chat
+    if (lastSyncedChatIdRef.current === activeChat.id) return;
+    lastSyncedChatIdRef.current = activeChat.id;
+
     // Проверяем, был ли недавний ручной выбор группы (в течение 5 секунд)
     const manualSelection = lastManualGroupSelectionRef.current;
-    const isRecentManualSelection = manualSelection && 
+    const isRecentManualSelection = manualSelection &&
       (Date.now() - manualSelection.timestamp < 5000);
 
     if (isRecentManualSelection) {
@@ -154,14 +158,14 @@ const SidebarChat: React.FC = () => {
       // У активного чата есть supergroup - настраиваем UI для отображения тем этой группы
       setSelectedSupergroupId(chat.telegram_supergroup_id);
       setActiveMode('supergroups');
-      
+
       // Устанавливаем scope только если supergroup изменилась
       if (selectedSupergroupId !== chat.telegram_supergroup_id) {
         setScopeBySupergroup({
           id: chat.telegram_supergroup_id,
           company_id: chat.company_id
         });
-        
+
         logger.debug('Sidebar state synchronized with active chat', {
           chatId: activeChat.id,
           supergroupId: chat.telegram_supergroup_id,
@@ -174,7 +178,8 @@ const SidebarChat: React.FC = () => {
       setScopeByCompany(chat.company_id || null);
       setSelectedSupergroupId(null);
     }
-  }, [activeChat?.id, setScopeBySupergroup, setScopeByCompany]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChat?.id, chats]);
 
   // Event listener for chat mode changes from main sidebar
   useEffect(() => {
@@ -197,22 +202,30 @@ const SidebarChat: React.FC = () => {
     window.dispatchEvent(new CustomEvent('chatModeSync', { detail: syncMode }));
   }, [activeMode]);
 
+  // Ref to prevent re-running scope sync
+  const scopeSyncedRef = useRef<number | null>(null);
+
   // Синхронизация scope с визуально выбранной группой на старте (когда нет активного чата)
   useEffect(() => {
     // Выполняем только если нет активного чата, но есть визуально выбранная supergroup
     if (activeChat || selectedSupergroupId === null || isRestoringState.current) return;
+
+    // Prevent infinite loop - only sync if supergroup actually changed
+    if (scopeSyncedRef.current === selectedSupergroupId) return;
+    scopeSyncedRef.current = selectedSupergroupId;
 
     // Устанавливаем scope для загрузки чатов выбранной группы
     setScopeBySupergroup({
       id: selectedSupergroupId,
       company_id: null // company_id определится автоматически при загрузке чатов
     });
-    
+
     logger.debug('Setting scope for visually selected supergroup', {
       supergroupId: selectedSupergroupId,
       component: 'SidebarChat'
     });
-  }, [selectedSupergroupId, activeChat, setScopeBySupergroup]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSupergroupId, activeChat]);
 
   // Обработчик события manual group selection из useRealtimeChat
   useEffect(() => {
@@ -237,16 +250,23 @@ const SidebarChat: React.FC = () => {
   // Преобразуем realtime чаты в формат для отображения (мемоизировано)
   const conversations = useMemo(() => chats.map(chat => {
     // Chat transformation for display
+    // Use last_message_at > updated_at > created_at for display, fallback to current time
+    const dateStr = chat.last_message_at || chat.updated_at || chat.created_at;
+    const parsedDate = dateStr ? new Date(dateStr) : new Date();
+    // Guard against Invalid Date
+    const validDate = isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+
     return {
       id: chat.id,
       title: chat.name || 'Новый чат',
-      updatedAt: new Date(chat.updated_at),
+      updatedAt: validDate,
       unreadCount: 0,
+      company_id: chat.company_id, // Add company_id for CompanyBadge
       // Note: unread messages count to be implemented
       dealInfo: chat.metadata?.dealNumber ? {
         dealNumber: chat.metadata.dealNumber
       } : undefined,
-      telegram_supergroup_id: chat.telegram_supergroup_id // Добавляем для фильтрации
+      telegram_supergroup_id: chat.telegram_supergroup_id // Для фильтрации
     };
   }), [chats]);
 
@@ -258,29 +278,38 @@ const SidebarChat: React.FC = () => {
         return conversation.telegram_supergroup_id === null;
       });
     }
-    
+
     // В режиме групповых чатов (оригинальная логика)
     let filtered = conversations.filter(conversation => {
       if (selectedSupergroupId !== null) {
-        return conversation.telegram_supergroup_id === selectedSupergroupId;
+        const matches = conversation.telegram_supergroup_id === selectedSupergroupId;
+        if (!matches) {
+          console.log('[SidebarChat] Chat filtered out:', conversation.id, 'supergroup:', conversation.telegram_supergroup_id, 'expected:', selectedSupergroupId);
+        }
+        return matches;
       }
       return !groupsPanelCollapsed ? conversation.telegram_supergroup_id == null : true;
     });
 
-    // Фильтруем по топикам - показываем только активные чаты (General и проверенные топики)
+    // Фильтруем по топикам - показываем только активные чаты
     if (selectedSupergroupId !== null) {
       filtered = filtered.filter(conversation => {
         const chat = chats.find(c => c.id === conversation.id);
         if (!chat) return true;
-        
+
         // Показываем только активные чаты
         if (chat.is_active === false) return false;
-        
-        // Показываем только General (topic_id = 1 или null) и проверенные топики
+
+        // Показываем:
+        // 1. General (topic_id = 1 или null)
+        // 2. Проверенные топики (обнаруженные через webhook и подтвержденные)
+        // 3. Топики созданные через приложение (имеют topic_id > 1, не требуют верификации)
         const isGeneral = chat.telegram_topic_id === 1 || chat.telegram_topic_id === null;
         const isVerified = chat.metadata?.topic_verified === true;
-        
-        return isGeneral || isVerified;
+        const isAppCreatedTopic = chat.telegram_topic_id !== null && chat.telegram_topic_id > 1;
+
+        const passes = isGeneral || isVerified || isAppCreatedTopic;
+        return passes;
       });
     }
 
@@ -417,105 +446,6 @@ const SidebarChat: React.FC = () => {
     }
   };
 
-  const handleTopicVerification = async (dryRun: boolean = false) => {
-    if (!selectedSupergroupId || isVerifying) return;
-
-    setIsVerifying(true);
-    try {
-      const result = await telegramApi.verifyTopics(selectedSupergroupId, dryRun);
-
-      if (!result) {
-        logger.error('Topic verification failed', null, {
-          supergroupId: selectedSupergroupId,
-          dryRun,
-          component: 'SidebarChat'
-        });
-        toast({
-          title: "Ошибка синхронизации",
-          description: "Не удалось синхронизировать топики с Telegram",
-          variant: "error"
-        });
-        return;
-      }
-
-      const { verificationResults, summary, duplicatesMerged } = result;
-      const { existingTopics, deletedTopics, messagesMoved, generalDuplicatesMerged } = summary;
-
-      logger.info('Topic verification completed', { 
-        supergroupId: selectedSupergroupId,
-        dryRun,
-        summary,
-        duplicatesMerged,
-        component: 'SidebarChat' 
-      });
-
-      const mode = dryRun ? "Проверка (без изменений)" : "Синхронизация";
-      let description = `Проверено топиков: ${(existingTopics ?? 0) + (deletedTopics ?? 0)}. Существующих: ${existingTopics ?? 0}, удаленных: ${deletedTopics ?? 0}`;
-      
-      if ((messagesMoved ?? 0) > 0) {
-        description += `, перенесено сообщений: ${messagesMoved}`;
-      }
-      
-      if ((generalDuplicatesMerged ?? 0) > 0) {
-        description += `, объединено дублей General: ${generalDuplicatesMerged}`;
-      }
-
-      toast({
-        title: `${mode} завершена`,
-        description,
-        variant: "success"
-      });
-
-      // Обновляем список чатов только если были реальные изменения
-      if (!dryRun) {
-        await loadChats();
-        
-        // Если активный чат был объединен, переключаемся на канонический
-        if (duplicatesMerged && activeChat && duplicatesMerged.duplicateIds.includes(activeChat.id)) {
-          logger.info('Active chat was merged, switching to canonical', {
-            activeChatId: activeChat.id,
-            canonicalChatId: duplicatesMerged.canonicalChatId,
-            component: 'SidebarChat'
-          });
-          
-          if (duplicatesMerged.canonicalChatId) {
-            selectChat(duplicatesMerged.canonicalChatId, true);
-            toast({
-              title: "General чат объединен",
-              description: "Вы переключены на основной General чат",
-              variant: "info"
-            });
-          }
-        }
-      }
-    } catch (error) {
-      logger.error('Topic verification error', error, { 
-        supergroupId: selectedSupergroupId,
-        dryRun,
-        component: 'SidebarChat' 
-      });
-      toast({
-        title: "Ошибка",
-        description: "Произошла ошибка при синхронизации топиков",
-        variant: "error"
-      });
-    } finally {
-      setIsVerifying(false);
-    }
-  };
-
-  const handleRefreshClick = (e: React.MouseEvent) => {
-    if (!selectedSupergroupId || isVerifying) return;
-    
-    const dryRun = e.shiftKey;
-    setPendingDryRun(dryRun);
-    setVerifyConfirmOpen(true);
-  };
-
-  const handleVerifyConfirm = () => {
-    setVerifyConfirmOpen(false);
-    handleTopicVerification(pendingDryRun);
-  };
 
   const handleChatClick = (conversation: any) => {
     logger.debug('Chat clicked', { conversationId: conversation.id, component: 'SidebarChat' });
@@ -557,15 +487,15 @@ const SidebarChat: React.FC = () => {
 
   const handleDeleteConversation = async (e: React.MouseEvent, conversationId: string) => {
     e.stopPropagation();
-    if (window.confirm('Удалить этот диалог?')) {
+    if (window.confirm('Удалить этот диалог навсегда? Это действие нельзя отменить.')) {
       try {
-        await deleteChat(conversationId);
+        await hardDeleteChat(conversationId);
         toast({
           title: "Успешно",
-          description: "Чат удален"
+          description: "Чат удален навсегда"
         });
       } catch (error) {
-        logger.error('Error deleting chat', error, { component: 'SidebarChat' });
+        logger.error('Error hard deleting chat', error, { component: 'SidebarChat' });
         toast({
           title: "Ошибка",
           description: "Не удалось удалить чат",
@@ -667,40 +597,21 @@ const SidebarChat: React.FC = () => {
             ) : null}
           </div>
           
-          {/* Кнопки действий */}
-          <div className="flex items-center gap-2">
-            {/* Кнопка синхронизации топиков */}
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={handleRefreshClick}
-              disabled={isVerifying || selectedSupergroupId === null}
-              className={`h-8 w-8 p-0 transition-colors ${
-                selectedSupergroupId !== null 
-                  ? 'text-gray-400 hover:text-white hover:bg-white/10' 
-                  : 'text-gray-500 cursor-not-allowed'
-              }`}
-              title={selectedSupergroupId ? "Синхронизировать топики с Telegram (Shift+клик — только проверка)" : "Выберите группу для синхронизации"}
-            >
-              <RefreshCw size={16} className={isVerifying ? 'animate-spin' : ''} />
-            </Button>
-            
-            {/* Кнопка создания новой темы */}
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={() => selectedSupergroupId ? setIsDialogOpen(true) : undefined}
-              disabled={isCreatingChat || selectedSupergroupId === null}
-              className={`h-8 w-8 p-0 transition-colors ${
-                selectedSupergroupId !== null 
-                  ? 'bg-accent-red hover:bg-accent-red-dark text-white' 
-                  : 'text-gray-500 cursor-not-allowed'
-              }`}
-              title={selectedSupergroupId ? "Создать новую тему" : "Выберите группу для создания темы"}
-            >
-              <Plus size={16} />
-            </Button>
-          </div>
+          {/* Кнопка создания новой темы */}
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => selectedSupergroupId ? setIsDialogOpen(true) : undefined}
+            disabled={isCreatingChat || selectedSupergroupId === null}
+            className={`h-8 w-8 p-0 transition-colors ${
+              selectedSupergroupId !== null
+                ? 'bg-accent-red hover:bg-accent-red-dark text-white'
+                : 'text-gray-500 cursor-not-allowed'
+            }`}
+            title={selectedSupergroupId ? "Создать новую тему" : "Выберите группу для создания темы"}
+          >
+            <Plus size={16} />
+          </Button>
         </div>
 
         {/* Панель поиска и фильтров */}
@@ -754,7 +665,7 @@ const SidebarChat: React.FC = () => {
                   <div className="hidden">
                     
                   </div>
-                ) : conversations.length === 0 ? (
+                ) : filteredConversations.length === 0 ? (
                   <div className="space-y-2 pb-4">
                     {selectedSupergroupId && showNoChatsHint ? (
                       <div className="text-center py-4">
@@ -784,7 +695,7 @@ const SidebarChat: React.FC = () => {
                     activeChat={activeChat}
                     onChatSelect={selectChat}
                     conversations={filteredConversations}
-                    effectiveUserType={isDeveloper ? 'developer' : 'user'}
+                    effectiveUserType={profile?.role || 'user'}
                     formatDate={formatDate}
                     handleRenameChat={handleRenameChat}
                     handleDeleteConversation={handleDeleteConversation}
@@ -831,21 +742,6 @@ const SidebarChat: React.FC = () => {
           icon={Plus}
         />
 
-        {/* Диалог подтверждения синхронизации топиков */}
-        <AppConfirmDialog
-          open={verifyConfirmOpen}
-          onOpenChange={setVerifyConfirmOpen}
-          onConfirm={handleVerifyConfirm}
-          title={pendingDryRun ? "Проверка топиков" : "Синхронизация топиков"}
-          description={
-            pendingDryRun 
-              ? "Будет выполнена проверка существования топиков в Telegram без внесения изменений в базу данных."
-              : "Топики будут синхронизированы с Telegram. Удаленные топики будут деактивированы, а их сообщения перенесены в General."
-          }
-          confirmText={pendingDryRun ? "Проверить" : "Синхронизировать"}
-          cancelText="Отмена"
-          icon={RefreshCw}
-        />
       </div>
     </div>
   );

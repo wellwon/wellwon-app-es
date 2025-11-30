@@ -396,6 +396,40 @@ class UserAccountProjector:
         except Exception as e:
             log.warning(f"Failed to clear profile cache: {e}")
 
+    @sync_projection("UserAdminStatusUpdated")
+    @monitor_projection
+    async def on_user_admin_status_updated(self, envelope: EventEnvelope) -> None:
+        """
+        Project UserAdminStatusUpdated event for admin panel updates.
+
+        Updates user status (is_active, is_developer) in read model.
+        Event is also forwarded to WSE for real-time frontend updates.
+        """
+        event_data = envelope.event_data
+        user_id = envelope.aggregate_id
+
+        log.info(
+            f"Projecting UserAdminStatusUpdated for user_id={user_id}: "
+            f"is_active={event_data.get('is_active')}, "
+            f"is_developer={event_data.get('is_developer')}, "
+            f"user_type={event_data.get('user_type')}, "
+            f"role={event_data.get('role')}"
+        )
+
+        # Update admin status in read model
+        await UserAccountReadRepo.update_user_admin_status(
+            user_id=user_id,
+            is_active=event_data.get('is_active'),
+            is_developer=event_data.get('is_developer'),
+            user_type=event_data.get('user_type'),
+            role=event_data.get('role'),
+        )
+
+        # Invalidate cache to ensure fresh data
+        await self._clear_user_caches(user_id)
+
+        log.info(f"Admin status projected and cache cleared for user {user_id}")
+
     # -------------------------------------------------------------------------
     # CES (Compensating Event System) Handlers
     # Pattern: Greg Young's Compensating Events for external change detection

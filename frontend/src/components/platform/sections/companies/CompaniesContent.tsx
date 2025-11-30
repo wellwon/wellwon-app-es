@@ -1,32 +1,20 @@
-import React, { useState, useEffect } from 'react';
+// =============================================================================
+// File: CompaniesContent.tsx
+// Description: Companies content using React Query + WSE
+// =============================================================================
+
+import React from 'react';
 import { GlassCard } from '@/components/design-system/GlassCard';
 import { useAuth } from '@/contexts/AuthContext';
-import * as companyApi from '@/api/company';
-import { logger } from '@/utils/logger';
-import type { Company } from '@/types/realtime-chat';
+import { useMyCompanies } from '@/hooks/company';
 
 const CompaniesContent = () => {
   const { user, profile } = useAuth();
-  const [userCompanies, setUserCompanies] = useState<(Company & { relationship_type: string })[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const { companies, isLoading } = useMyCompanies();
 
-  useEffect(() => {
-    const loadUserCompanies = async () => {
-      if (!user || !profile) return;
-      
-      setIsLoading(true);
-      try {
-        const companies = await companyApi.getMyCompanies();
-        setUserCompanies(companies);
-      } catch (error) {
-        logger.error('Error loading user companies', error, { component: 'CompaniesContent' });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadUserCompanies();
-  }, [user, profile]);
+  if (!user || !profile) {
+    return null;
+  }
 
   return (
     <div className="p-6 h-full overflow-y-auto">
@@ -43,12 +31,12 @@ const CompaniesContent = () => {
               <p className="text-gray-400">Получение данных о компаниях</p>
             </div>
           </GlassCard>
-        ) : userCompanies.length > 0 ? (
+        ) : companies.length > 0 ? (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {userCompanies.map((company) => (
-              <GlassCard key={company.id} variant="elevated" className="p-6">
+            {companies.map((company) => (
+              <GlassCard key={company.company_id} variant="elevated" className="p-6">
                 <div className="flex justify-between items-start mb-4">
-                  <h3 className="text-xl font-semibold text-white">{company.name}</h3>
+                  <h3 className="text-xl font-semibold text-white">{company.company_name}</h3>
                   <span className="text-xs px-2 py-1 bg-primary/20 text-primary rounded">
                     {company.relationship_type}
                   </span>
@@ -56,27 +44,19 @@ const CompaniesContent = () => {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-400">ID:</span>
-                    <span className="text-white">WID{company.id}</span>
+                    <span className="text-white">WID{company.company_id}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">Тип:</span>
-                    <span className="text-white">{company.company_type}</span>
+                    <span className="text-white">{company.company_type || 'N/A'}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">Статус:</span>
-                    <span className="text-white">{company.status}</span>
+                    <span className="text-white">{company.is_active ? 'Активна' : 'Архив'}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-400">Баланс:</span>
-                    <span className="text-white">${Number(company.balance).toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Заказов:</span>
-                    <span className="text-white">{company.orders_count}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Рейтинг:</span>
-                    <span className="text-white">{Number(company.rating).toFixed(1)}</span>
+                    <span className="text-gray-400">Добавлен:</span>
+                    <span className="text-white">{new Date(company.joined_at).toLocaleDateString()}</span>
                   </div>
                 </div>
               </GlassCard>

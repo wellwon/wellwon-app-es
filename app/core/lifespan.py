@@ -21,7 +21,8 @@ from app.core.startup.infrastructure import (
 from app.core.startup.services import (
    initialize_read_repositories,
    initialize_services,
-   initialize_optional_services
+   initialize_optional_services,
+   start_telegram_polling
 )
 from app.core.startup.distributed import initialize_distributed_features, register_sync_projections_phase
 from app.core.startup.cqrs import initialize_cqrs_and_handlers
@@ -89,8 +90,12 @@ async def lifespan(app_instance: FastAPI):
        logger.info("Phase 9: Running database schemas...")
        await run_database_schemas()
 
-       # Phase 10: Background Tasks
-       logger.info("Phase 10: Starting background tasks...")
+       # Phase 10: Telegram Polling (after CQRS handlers are registered)
+       logger.info("Phase 10: Starting Telegram polling...")
+       await start_telegram_polling(app_instance)
+
+       # Phase 11: Background Tasks
+       logger.info("Phase 11: Starting background tasks...")
        await start_background_tasks(app_instance)
 
        # Startup complete

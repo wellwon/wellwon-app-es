@@ -2,7 +2,7 @@ import React, { memo } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Edit3, Trash2 } from 'lucide-react';
+import { Edit3, Trash2, Archive } from 'lucide-react';
 import CompanyBadge from '@/components/platform/sidebar/CompanyBadge';
 import ChatDialog from '@/components/chat/core/ChatDialog';
 import TelegramIndicator from '../components/TelegramIndicator';
@@ -64,7 +64,9 @@ const ChatItem = memo<ChatItemProps>(({
   isLightTheme
 }) => {
   const isActive = activeChat?.id === conversation.id;
-  const isAdmin = effectiveUserType === 'ww_admin' || effectiveUserType === 'ww_manager' || effectiveUserType === 'ww_developer';
+  // Admin check for delete button visibility
+  // effectiveUserType now receives profile.role (not user_type)
+  const isAdmin = effectiveUserType === 'admin';
 
   const handleChatClick = () => {
     onChatSelect(conversation.id);
@@ -118,45 +120,60 @@ const ChatItem = memo<ChatItemProps>(({
                 )}
               </div>
             </div>
-            {/* Company badge for admins */}
-            {isAdmin ? (
-              <CompanyBadge chatId={conversation.id} />
-            ) : (
-              <p className={`text-xs ${isLightTheme ? 'text-gray-500' : 'text-gray-400'}`}>
-                {formatDate(conversation.updatedAt)}
-              </p>
-            )}
+            {/* Company badge - visible for all users */}
+            <CompanyBadge chatId={conversation.id} companyId={conversation.company_id} />
           </div>
         </div>
 
-        {/* Rename and Delete buttons - only for admin users */}
-        {isAdmin && (
-          <>
+        {/* Chat controls - Rename, Archive, Delete - visible for all users */}
+        <div className="absolute top-2 right-2 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             {/* Rename button */}
             <Button
               variant="ghost"
               size="icon"
               onClick={e => handleRenameChat(e, conversation.id)}
-              className={`absolute top-2 right-8 opacity-0 group-hover:opacity-100 h-6 w-6 ${
+              className={`h-6 w-6 ${
                 isLightTheme
                   ? 'hover:bg-gray-200 text-gray-500 hover:text-gray-900'
                   : 'hover:bg-white/20 text-gray-400 hover:text-white'
               }`}
+              title="Переименовать"
             >
               <Edit3 size={12} />
             </Button>
 
-            {/* Delete button */}
+            {/* Archive button */}
             <Button
               variant="ghost"
               size="icon"
-              onClick={e => handleDeleteConversation(e, conversation.id)}
-              className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 h-6 w-6 hover:bg-red-500/20 text-gray-400 hover:text-red-400"
+              onClick={e => {
+                e.stopPropagation();
+                // TODO: Implement archive functionality
+                console.log('Archive chat:', conversation.id);
+              }}
+              className={`h-6 w-6 ${
+                isLightTheme
+                  ? 'hover:bg-amber-100 text-gray-500 hover:text-amber-600'
+                  : 'hover:bg-amber-500/20 text-gray-400 hover:text-amber-400'
+              }`}
+              title="Архивировать"
             >
-              <Trash2 size={12} />
+              <Archive size={12} />
             </Button>
-          </>
-        )}
+
+            {/* Delete button - admin only */}
+            {isAdmin && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={e => handleDeleteConversation(e, conversation.id)}
+                className="h-6 w-6 hover:bg-red-500/20 text-gray-400 hover:text-red-400"
+                title="Удалить"
+              >
+                <Trash2 size={12} />
+              </Button>
+            )}
+          </div>
       </div>
 
       {/* Rename dialog is handled in parent component */}
@@ -173,6 +190,7 @@ const ChatItem = memo<ChatItemProps>(({
     prevProps.isOpen === nextProps.isOpen &&
     prevProps.contentType === nextProps.contentType &&
     prevProps.isLightTheme === nextProps.isLightTheme &&
+    prevProps.effectiveUserType === nextProps.effectiveUserType &&
     JSON.stringify(prevProps.selectedDeal) === JSON.stringify(nextProps.selectedDeal)
   );
 });
@@ -224,11 +242,13 @@ export const OptimizedChatListForSidebar = memo<OptimizedChatListForSidebarProps
   );
 }, (prevProps, nextProps) => {
   // Оптимизация ре-рендеров списка
+  // IMPORTANT: effectiveUserType must be compared for reactive admin status updates
   return (
     prevProps.conversations.length === nextProps.conversations.length &&
     prevProps.activeChat?.id === nextProps.activeChat?.id &&
     prevProps.editingChatId === nextProps.editingChatId &&
     prevProps.isLightTheme === nextProps.isLightTheme &&
+    prevProps.effectiveUserType === nextProps.effectiveUserType &&
     prevProps.conversations.every((conv, index) =>
       conv.id === nextProps.conversations[index]?.id &&
       conv.title === nextProps.conversations[index]?.title &&

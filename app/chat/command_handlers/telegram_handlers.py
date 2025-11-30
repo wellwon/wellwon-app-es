@@ -38,7 +38,7 @@ class LinkTelegramChatHandler(BaseCommandHandler):
     async def handle(self, command: LinkTelegramChatCommand) -> uuid.UUID:
         log.info(f"Linking Telegram chat {command.telegram_chat_id} to chat {command.chat_id}")
 
-        events = await self.event_store.get_events(command.chat_id, "chat")
+        events = await self.event_store.get_events(command.chat_id, "Chat")
         chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
 
         chat_aggregate.link_telegram_chat(
@@ -71,7 +71,7 @@ class UnlinkTelegramChatHandler(BaseCommandHandler):
     async def handle(self, command: UnlinkTelegramChatCommand) -> uuid.UUID:
         log.info(f"Unlinking Telegram chat from {command.chat_id}")
 
-        events = await self.event_store.get_events(command.chat_id, "chat")
+        events = await self.event_store.get_events(command.chat_id, "Chat")
         chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
 
         chat_aggregate.unlink_telegram_chat(unlinked_by=command.unlinked_by)
@@ -150,7 +150,7 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
             f"msg_id={command.telegram_message_id} chat_id={command.chat_id}"
         )
 
-        events = await self.event_store.get_events(command.chat_id, "chat")
+        events = await self.event_store.get_events(command.chat_id, "Chat")
         log.error(f"EVENTS: Got {len(events)} events from event store for chat {command.chat_id}")
 
         if events:

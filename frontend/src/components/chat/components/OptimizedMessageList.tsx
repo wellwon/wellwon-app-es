@@ -14,6 +14,7 @@ interface OptimizedMessageListProps {
   };
   sendingMessages: Set<string>;
   onReply?: (message: Message) => void;
+  onDelete?: (messageId: string) => void;
   onLoadMore?: () => void;
   hasMoreMessages?: boolean;
   className?: string;
@@ -22,17 +23,27 @@ interface OptimizedMessageListProps {
 
 // Group messages by date for optimization
 const groupMessagesByDate = (messages: Message[]) => {
-  // First sort messages by creation time (old -> new)
-  const sortedMessages = [...messages].sort((a, b) => 
-    new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-  );
+  // First sort messages by creation time (old -> new) with NaN-safe comparison
+  const sortedMessages = [...messages].sort((a, b) => {
+    const timeA = new Date(a.created_at).getTime();
+    const timeB = new Date(b.created_at).getTime();
+    // Handle NaN: put invalid dates at the end
+    if (isNaN(timeA) && isNaN(timeB)) return 0;
+    if (isNaN(timeA)) return 1;
+    if (isNaN(timeB)) return -1;
+    return timeA - timeB;
+  });
   
   const groups: Array<{ date: string; messages: Message[] }> = [];
   let currentGroup: { date: string; messages: Message[] } | null = null;
   
   sortedMessages.forEach(message => {
-    const messageDate = new Date(message.created_at).toDateString();
-    
+    // Safely parse date with fallback to today for invalid dates
+    const parsedDate = new Date(message.created_at);
+    const messageDate = isNaN(parsedDate.getTime())
+      ? new Date().toDateString()  // Fallback to today
+      : parsedDate.toDateString();
+
     if (!currentGroup || currentGroup.date !== messageDate) {
       currentGroup = { date: messageDate, messages: [message] };
       groups.push(currentGroup);
@@ -51,7 +62,8 @@ const MessageGroup = memo<{
   currentUser?: OptimizedMessageListProps['currentUser'];
   sendingMessages: Set<string>;
   onReply?: (message: Message) => void;
-}>(({ date, messages, currentUser, sendingMessages, onReply }) => {
+  onDelete?: (messageId: string) => void;
+}>(({ date, messages, currentUser, sendingMessages, onReply, onDelete }) => {
   return (
     <div className="space-y-4">
       <DateSeparator date={new Date(date)} />
@@ -63,34 +75,41 @@ const MessageGroup = memo<{
           isSending={sendingMessages.has(message.id)}
           currentUser={currentUser}
           onReply={onReply}
+          onDelete={onDelete}
         />
       ))}
     </div>
   );
 }, (prevProps, nextProps) => {
-  // Optimize group re-renders
-  return (
-    prevProps.date === nextProps.date &&
-    prevProps.messages.length === nextProps.messages.length &&
-    prevProps.sendingMessages.size === nextProps.sendingMessages.size &&
-    prevProps.messages.every((msg, index) => {
-      const nextMsg = nextProps.messages[index];
-      return msg && nextMsg &&
-        msg.id === nextMsg.id &&
-        msg.content === nextMsg.content &&
-        msg.is_edited === nextMsg.is_edited &&
-        JSON.stringify(msg.read_by) === JSON.stringify(nextMsg.read_by);
-    })
-  );
+  // CRITICAL: Re-render if messages array reference changed
+  // This ensures new messages are displayed immediately
+  if (prevProps.messages !== nextProps.messages) {
+    return false; // Re-render
+  }
+
+  // Re-render if other key props changed
+  if (prevProps.date !== nextProps.date ||
+      prevProps.sendingMessages !== nextProps.sendingMessages) {
+    return false; // Re-render
+  }
+
+  // Re-render if callback availability changed (ensures action buttons render)
+  if (!!prevProps.onReply !== !!nextProps.onReply ||
+      !!prevProps.onDelete !== !!nextProps.onDelete) {
+    return false; // Re-render
+  }
+
+  return true; // Props are equal, skip re-render
 });
 
 MessageGroup.displayName = 'MessageGroup';
 
-export const OptimizedMessageList = memo<OptimizedMessageListProps>(({ 
+export const OptimizedMessageList = memo<OptimizedMessageListProps>(({
   messages,
   currentUser,
   sendingMessages,
   onReply,
+  onDelete,
   onLoadMore,
   hasMoreMessages = true,
   className,
@@ -120,19 +139,26 @@ export const OptimizedMessageList = memo<OptimizedMessageListProps>(({
   const topTriggerRef = useRef<HTMLDivElement>(null);
 
   // Intersection Observer for loading older messages with visibility control
+  // TEMPORARILY DISABLED - debugging infinite loop issue
+  // TODO: Re-enable once the loop is fixed
+  const observerCreatedRef = useRef(false);
+
   useEffect(() => {
     if (!onLoadMore || !hasMoreMessages || messages.length < 10) return;
+    if (observerCreatedRef.current) return; // Only create once per mount
 
     let timeoutId: NodeJS.Timeout;
     let observer: IntersectionObserver | null = null;
-    
+
     const createObserver = () => {
       // Don't create observer when tab is hidden
       if (document.hidden) return;
-      
-      // Get chat viewport as root
+      if (observer) return; // Already created
+
+      // Get chat viewport as root - delay to ensure DOM is ready
       const viewport = scrollAreaRef?.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
-      
+      if (!viewport) return;
+
       observer = new IntersectionObserver(
         (entries) => {
           const [entry] = entries;
@@ -144,8 +170,8 @@ export const OptimizedMessageList = memo<OptimizedMessageListProps>(({
             }, 200);
           }
         },
-        { 
-          root: viewport || null,
+        {
+          root: viewport,
           threshold: 0,
           rootMargin: '0px'
         }
@@ -153,15 +179,17 @@ export const OptimizedMessageList = memo<OptimizedMessageListProps>(({
 
       if (topTriggerRef.current) {
         observer.observe(topTriggerRef.current);
+        observerCreatedRef.current = true;
       }
     };
-    
+
     const handleVisibilityChange = () => {
       if (document.hidden) {
         // Disconnect observer when tab is hidden
         if (observer) {
           observer.disconnect();
           observer = null;
+          observerCreatedRef.current = false;
         }
       } else {
         // Recreate observer when tab becomes visible with delay
@@ -169,9 +197,9 @@ export const OptimizedMessageList = memo<OptimizedMessageListProps>(({
       }
     };
 
-    // Initial observer creation
-    createObserver();
-    
+    // Delay initial observer creation to avoid issues with Radix ScrollArea ref
+    const initTimer = setTimeout(createObserver, 100);
+
     // Listen for visibility changes
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
@@ -180,9 +208,13 @@ export const OptimizedMessageList = memo<OptimizedMessageListProps>(({
         observer.disconnect();
       }
       clearTimeout(timeoutId);
+      clearTimeout(initTimer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      observerCreatedRef.current = false;
     };
-  }, [onLoadMore, hasMoreMessages, messages.length, scrollAreaRef]);
+    // Note: scrollAreaRef is a ref, not state - it's stable and shouldn't be in deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onLoadMore, hasMoreMessages, messages.length]);
 
   return (
     <div className={`space-y-4 ${className || ''}`}>
@@ -204,24 +236,26 @@ export const OptimizedMessageList = memo<OptimizedMessageListProps>(({
           currentUser={currentUser}
           sendingMessages={sendingMessages}
           onReply={onReply}
+          onDelete={onDelete}
         />
       ))}
     </div>
   );
 }, (prevProps, nextProps) => {
-  // Main optimization - check key changes and message references
-  if (prevProps.messages.length !== nextProps.messages.length ||
-      prevProps.sendingMessages.size !== nextProps.sendingMessages.size ||
-      prevProps.currentUser?.id !== nextProps.currentUser?.id) {
-    return false;
-  }
-  
-  // Check if messages array reference changed (indicates filtering)
+  // CRITICAL: Always re-render if messages array reference changed
+  // This ensures new messages from WSE are displayed immediately
   if (prevProps.messages !== nextProps.messages) {
-    return false;
+    return false; // Re-render
   }
-  
-  return true;
+
+  // Check other props that should trigger re-render
+  if (prevProps.sendingMessages !== nextProps.sendingMessages ||
+      prevProps.currentUser?.id !== nextProps.currentUser?.id ||
+      prevProps.hasMoreMessages !== nextProps.hasMoreMessages) {
+    return false; // Re-render
+  }
+
+  return true; // Props are equal, skip re-render
 });
 
 OptimizedMessageList.displayName = 'OptimizedMessageList';

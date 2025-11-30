@@ -1,5 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Eye, Send, Package, DollarSign, Truck, MapPin, Star, Edit3, Check } from 'lucide-react';
+// =============================================================================
+// File: MessageTemplatesContent.tsx
+// Description: Message templates using React Query + WSE
+// =============================================================================
+
+import React, { useState } from 'react';
+import { Eye, Send, Package, DollarSign, Truck, MapPin, Star, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
@@ -7,7 +12,7 @@ import { Card } from '@/components/ui/card';
 import { InlineChatTemplateEdit } from './InlineChatTemplateEdit';
 import { useToast } from '@/hooks/use-toast';
 import { useRealtimeChatContext } from '@/contexts/RealtimeChatContext';
-import * as chatApi from '@/api/chat';
+import { useMessageTemplates } from '@/hooks/chat';
 import type { MessageTemplate } from '@/utils/messageTemplates';
 
 const CATEGORY_ICONS = {
@@ -24,31 +29,9 @@ export const MessageTemplatesContent: React.FC = () => {
   const { toast } = useToast();
   const [editingTemplate, setEditingTemplate] = useState<MessageTemplate | null>(null);
   const [savedTemplateId, setSavedTemplateId] = useState<string | null>(null);
-  const [templates, setTemplates] = useState<Record<string, MessageTemplate[]>>({});
-  const [isLoading, setIsLoading] = useState(true);
 
-  // Load templates on component mount
-  useEffect(() => {
-    loadTemplates();
-    // Note: Real-time updates are handled via WSE, not subscription
-  }, []);
-
-  const loadTemplates = async () => {
-    setIsLoading(true);
-    try {
-      const templatesData = await chatApi.getTemplatesByCategory(true);
-      setTemplates(templatesData);
-    } catch (error) {
-      
-      toast({
-        title: "Ошибка",
-        description: "Не удалось загрузить шаблоны сообщений",
-        variant: "error",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // React Query hook for templates
+  const { templates, isLoading } = useMessageTemplates();
 
   const handlePreview = (template: MessageTemplate) => {
     // Send draft message event to chat interface
@@ -56,7 +39,6 @@ export const MessageTemplatesContent: React.FC = () => {
   };
 
   const handleSend = async (template: MessageTemplate) => {
-    // Проверяем, выбран ли чат
     if (!activeChat) {
       toast({
         title: "Выберите чат",
@@ -67,14 +49,12 @@ export const MessageTemplatesContent: React.FC = () => {
     }
 
     try {
-      
       await sendInteractiveMessage(template.template_data, template.name);
       toast({
         title: "Сообщение отправлено",
         description: `Шаблон "${template.name}" успешно отправлен`,
       });
     } catch (error) {
-      
       toast({
         title: "Ошибка отправки",
         description: "Не удалось отправить сообщение",
@@ -84,23 +64,11 @@ export const MessageTemplatesContent: React.FC = () => {
   };
 
   const handleEdit = (template: MessageTemplate) => {
-    
     setEditingTemplate(template);
   };
 
   const handleSaveTemplate = async (updatedTemplate: MessageTemplate) => {
-    // Template update API not yet implemented - apply changes locally only
-    // Update local state optimistically
-    setTemplates(prev => {
-      const newTemplates = { ...prev };
-      Object.keys(newTemplates).forEach(category => {
-        newTemplates[category] = newTemplates[category].map(t =>
-          t.id === updatedTemplate.id ? updatedTemplate : t
-        );
-      });
-      return newTemplates;
-    });
-
+    // Template update API not yet implemented - show feedback only
     toast({
       title: "Шаблон обновлен",
       description: "Изменения применены локально",
@@ -134,7 +102,7 @@ export const MessageTemplatesContent: React.FC = () => {
         <div className="p-4 space-y-4">
           {Object.entries(templates).map(([categoryKey, categoryTemplates]) => {
             const IconComponent = CATEGORY_ICONS[categoryKey as keyof typeof CATEGORY_ICONS];
-            
+
             return (
               <div key={categoryKey}>
                 <div className="flex items-center gap-2 mb-3">
@@ -143,9 +111,9 @@ export const MessageTemplatesContent: React.FC = () => {
                     {categoryKey === 'поиск товара' ? 'Поиск' : categoryKey}
                   </h4>
                 </div>
-                
+
                 <div className="space-y-2 ml-6">
-                  {categoryTemplates.map((template) => (
+                  {(categoryTemplates as MessageTemplate[]).map((template) => (
                     <div key={template.id}>
                       <Card className="p-3 bg-dark-gray/50 border-white/10">
                         <div className="flex items-center justify-between">
@@ -157,7 +125,7 @@ export const MessageTemplatesContent: React.FC = () => {
                               {template.description}
                             </p>
                           </div>
-                          
+
                           <div className="flex gap-1 ml-2">
                             {/* Preview Button */}
                             <Button
@@ -168,7 +136,7 @@ export const MessageTemplatesContent: React.FC = () => {
                             >
                               <Eye size={14} className="text-gray-400" />
                             </Button>
-                            
+
                             {/* Send Button */}
                             <Button
                               size="sm"
@@ -177,7 +145,7 @@ export const MessageTemplatesContent: React.FC = () => {
                             >
                               <Send size={14} />
                             </Button>
-                            
+
                             {/* Saved indicator */}
                             {savedTemplateId === template.id && (
                               <div className="h-8 w-8 flex items-center justify-center rounded-full bg-green-600">
@@ -190,7 +158,7 @@ export const MessageTemplatesContent: React.FC = () => {
                     </div>
                   ))}
                 </div>
-                
+
                 {/* Separator between categories */}
                 <Separator className="mt-4 bg-white/10" />
               </div>

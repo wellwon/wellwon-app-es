@@ -1,21 +1,23 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import * as telegramApi from '@/api/telegram';
 import * as companyApi from '@/api/company';
 import { useRealtimeChatContext } from '@/contexts/RealtimeChatContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { GlassButton } from '@/components/design-system';
 import { OptimizedImage } from '@/components/chat/components/OptimizedImage';
-import { Users, ChevronLeft, ChevronRight, Search, Archive, Filter, Edit3, Building, Plus, Briefcase, DollarSign, Truck, Package, ShoppingCart, Layers, Settings } from 'lucide-react';
+import { Users, ChevronLeft, ChevronRight, Search, Archive, Filter, Edit3, Building, Plus, Briefcase, DollarSign, Truck, Package, ShoppingCart, Layers, Settings, Trash2 } from 'lucide-react';
 import { logger } from '@/utils/logger';
 import { AdminFormsModal } from '@/components/chat/components/AdminFormsModal';
 import { EditCompanyGroupModal } from '@/components/chat/components/EditCompanyGroupModal';
 import AppConfirmDialog from '@/components/shared/AppConfirmDialog';
 import type { TelegramSupergroup } from '@/types/chat';
 import type { CompanyFormData, SupergroupFormData } from '@/types/company-form';
+import { useSupergroups, useInvalidateSupergroups } from '@/hooks/useSupergroups';
 
 interface GroupsPanelProps {
   selectedSupergroupId: number | null;
@@ -37,12 +39,28 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
   onModeChange
 }) => {
   const { setScopeBySupergroup } = useRealtimeChatContext();
-  const [activeSupergroups, setActiveSupergroups] = useState<TelegramSupergroup[]>([]);
-  const [archivedSupergroups, setArchivedSupergroups] = useState<TelegramSupergroup[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [chatCounts, setChatCounts] = useState<Record<number, number>>({});
-  const [companyBalances, setCompanyBalances] = useState<Record<string, number>>({});
+  const { profile } = useAuth();
+
+  // Check if user is admin - only admins can delete, regular users can only archive
+  // role = 'admin' | 'user' - for permissions
+  // user_type = employee type - for UI layouts
+  const isAdmin = profile?.role === 'admin';
+
+  // React Query hook - replaces useState + useEffect + manual WSE listeners
+  // TkDodo Pattern: WSE events invalidate cache, React Query refetches automatically
+  const {
+    activeSupergroups,
+    archivedSupergroups,
+    chatCounts,
+    companyBalances,
+    isLoading: loading,
+    isError,
+    refetch: loadSupergroups,
+  } = useSupergroups();
+
+  const invalidateSupergroups = useInvalidateSupergroups();
+
+  // Local UI state (not data state)
   const [isCreateCompanyModalOpen, setIsCreateCompanyModalOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -53,115 +71,13 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
   const [preloadedCompanyData, setPreloadedCompanyData] = useState<CompanyFormData | null>(null);
   const [preloadedSupergroupData, setPreloadedSupergroupData] = useState<SupergroupFormData | null>(null);
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState<number | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState<number | null>(null);
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string | null>(null);
 
-  useEffect(() => {
-    const loadSupergroups = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        // Загружаем активные и архивные супергруппы параллельно
-        const [activeSupergroupsData, archivedSupergroupsData, chatCountsData] = await Promise.all([
-          telegramApi.getAllSupergroups(true),  // active
-          telegramApi.getAllSupergroups(false), // archived
-          telegramApi.getSupergroupChatCounts()
-        ]);
-        
-        setActiveSupergroups(activeSupergroupsData);
-        setArchivedSupergroups(archivedSupergroupsData);
-        setChatCounts(chatCountsData);
-        
-        // Загружаем балансы компаний для всех групп
-        const allSupergroups = [...activeSupergroupsData, ...archivedSupergroupsData];
-        const companyIds = allSupergroups
-          .filter(group => group.company_id)
-          .map(group => group.company_id!);
-
-        if (companyIds.length > 0) {
-          try {
-            const balances: Record<string, number> = {};
-            await Promise.all(
-              companyIds.map(async (companyId) => {
-                try {
-                  const balance = await companyApi.getCompanyBalance(companyId);
-                  if (balance) {
-                    balances[companyId] = parseFloat(balance.balance) || 0;
-                  }
-                } catch (err) {
-                  logger.warn('Failed to load company balance', { companyId, error: err });
-                  balances[companyId] = 0;
-                }
-              })
-            );
-            setCompanyBalances(balances);
-          } catch (err) {
-            logger.error('Failed to load company balances', err);
-          }
-        }
-        
-        logger.info('Loaded supergroups and chat counts for panel', { 
-          activeCount: activeSupergroupsData.length,
-          archivedCount: archivedSupergroupsData.length,
-          chatCounts: chatCountsData
-        });
-      } catch (err) {
-        logger.error('Failed to load supergroups for panel', err);
-        setError('Ошибка загрузки');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadSupergroups();
-  }, []);
-
   const handleCreateCompanySuccess = () => {
-    // Перезагружаем супергруппы после создания компании
-    const loadSupergroups = async () => {
-      try {
-        const [activeSupergroupsData, archivedSupergroupsData, chatCountsData] = await Promise.all([
-          telegramApi.getAllSupergroups(true),
-          telegramApi.getAllSupergroups(false),
-          telegramApi.getSupergroupChatCounts()
-        ]);
-        
-        setActiveSupergroups(activeSupergroupsData);
-        setArchivedSupergroups(archivedSupergroupsData);
-        setChatCounts(chatCountsData);
-        
-        // Перезагружаем балансы компаний
-        const allSupergroups = [...activeSupergroupsData, ...archivedSupergroupsData];
-        const companyIds = allSupergroups
-          .filter(group => group.company_id)
-          .map(group => group.company_id!);
-
-        if (companyIds.length > 0) {
-          try {
-            const balances: Record<string, number> = {};
-            await Promise.all(
-              companyIds.map(async (companyId) => {
-                try {
-                  const balance = await companyApi.getCompanyBalance(companyId);
-                  if (balance) {
-                    balances[companyId] = parseFloat(balance.balance) || 0;
-                  }
-                } catch (err) {
-                  balances[companyId] = 0;
-                }
-              })
-            );
-            setCompanyBalances(balances);
-          } catch (err) {
-            logger.error('Failed to reload company balances', err);
-          }
-        }
-      } catch (err) {
-        logger.error('Failed to reload supergroups after company creation', err);
-      }
-    };
-    
-    loadSupergroups();
+    // React Query will auto-refetch via WSE event invalidation
+    // This is just for immediate feedback if needed
+    invalidateSupergroups();
   };
 
   const handleEditSuccess = async () => {
@@ -277,47 +193,64 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
   }, [currentSupergroups, searchQuery, selectedTypeFilter]);
 
   // Функция архивирования/разархивирования
+  // Pattern: Mutate then invalidate - React Query will refetch
   const handleToggleArchive = async (supergroupId: number, currentIsActive: boolean) => {
     try {
       const newIsActive = !currentIsActive;
-      
+
       await telegramApi.updateSupergroup(supergroupId, {
         is_active: newIsActive
       });
 
-      // Перемещаем группу между списками
-      if (currentIsActive) {
-        // Архивируем: перемещаем из активных в архивные
-        const groupToArchive = activeSupergroups.find(g => g.id === supergroupId);
-        if (groupToArchive) {
-          setActiveSupergroups(prev => prev.filter(g => g.id !== supergroupId));
-          setArchivedSupergroups(prev => [...prev, { ...groupToArchive, is_active: false }]);
-        }
-      } else {
-        // Разархивируем: перемещаем из архивных в активные
-        const groupToRestore = archivedSupergroups.find(g => g.id === supergroupId);
-        if (groupToRestore) {
-          setArchivedSupergroups(prev => prev.filter(g => g.id !== supergroupId));
-          setActiveSupergroups(prev => [...prev, { ...groupToRestore, is_active: true }]);
-        }
-      }
+      // Invalidate React Query cache - it will refetch automatically
+      // No manual state manipulation needed - React Query handles it
+      invalidateSupergroups();
 
-      logger.info('Supergroup archive status toggled', { 
-        supergroupId, 
+      logger.info('Supergroup archive status toggled', {
+        supergroupId,
         newIsActive,
-        component: 'GroupsPanel' 
+        component: 'GroupsPanel'
       });
     } catch (error) {
-      logger.error('Failed to toggle supergroup archive status', error, { 
+      logger.error('Failed to toggle supergroup archive status', error, {
         supergroupId,
-        component: 'GroupsPanel' 
+        component: 'GroupsPanel'
+      });
+    }
+  };
+
+  // Функция удаления супергруппы
+  const handleDeleteSupergroup = async (supergroupId: number) => {
+    try {
+      const success = await telegramApi.deleteSupergroup(supergroupId);
+
+      if (success) {
+        // Clear selection if deleted group was selected
+        if (selectedSupergroupId === supergroupId) {
+          onSelectGroup(null);
+        }
+
+        // Invalidate React Query cache
+        invalidateSupergroups();
+
+        logger.info('Supergroup deleted', {
+          supergroupId,
+          component: 'GroupsPanel'
+        });
+      } else {
+        logger.error('Failed to delete supergroup', { supergroupId });
+      }
+    } catch (error) {
+      logger.error('Failed to delete supergroup', error, {
+        supergroupId,
+        component: 'GroupsPanel'
       });
     }
   };
 
   if (loading) {
     return (
-      <div 
+      <div
         className="h-full border-r border-white/10 flex flex-col"
         style={{ width: `${width}px`, backgroundColor: '#232328' }}
       >
@@ -334,43 +267,39 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                 <ChevronRight size={16} />
               </Button>
             </div>
-            
-        {/* Кнопка архива */}
-        <div className="h-16 border-b border-white/10 flex items-center justify-center px-3">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-8 w-8 p-0 hover:bg-white/10 text-gray-300 hover:text-white transition-colors"
-          >
-            <Archive size={14} />
-          </Button>
-        </div>
-            
-            {/* Загрузка групп */}
-            <div className="flex items-center justify-center py-4">
-              <span className="text-gray-400 text-sm">Загрузка...</span>
+
+            {/* Кнопка архива */}
+            <div className="h-16 border-t border-b border-white/10 flex items-center justify-center px-3">
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 p-0 hover:bg-white/10 text-gray-300 hover:text-white transition-colors"
+              >
+                <Archive size={14} />
+              </Button>
+            </div>
+
+            {/* Загрузка групп - skeleton */}
+            <div className="flex-1 flex flex-col items-center py-3 space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className="w-12 h-12 rounded-md bg-white/10 animate-pulse"
+                />
+              ))}
             </div>
           </>
         ) : (
           <>
-            {/* Заголовок */}
+            {/* Заголовок - показываем все controls */}
             <div className="h-16 border-b border-white/10 flex items-center justify-between pl-6 pr-4">
               <div className="text-white">
                 <h2 className="font-semibold text-lg">Группы</h2>
                 <p className="text-xs text-gray-400">
-                  0 групп
+                  Загрузка...
                 </p>
               </div>
-              <div className="flex items-center gap-1">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => setIsCreateCompanyModalOpen(true)}
-                  className="h-8 w-8 p-0 hover:bg-white/10 text-gray-300 hover:text-white transition-colors"
-                  title="Создать компанию"
-                >
-                  <Plus size={16} />
-                </Button>
+              <div className="flex items-center gap-2">
                 <Button
                   size="icon"
                   variant="ghost"
@@ -379,33 +308,114 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                 >
                   <ChevronLeft size={16} />
                 </Button>
+                <Button
+                  size="icon"
+                  onClick={() => setIsCreateCompanyModalOpen(true)}
+                  className="bg-accent-red hover:bg-accent-red/90 text-white rounded-lg h-8 w-8"
+                >
+                  <Plus size={14} />
+                </Button>
               </div>
             </div>
-            
-            <div className="h-16 border-b border-white/10 flex flex-col justify-center px-6">
-              <span className="text-gray-400 text-sm">Загрузка...</span>
+
+            {/* Панель поиска и фильтров - показываем во время загрузки */}
+            <div className="h-16 px-4 border-b border-white/10 flex flex-col justify-center space-y-1">
+              <div className="flex items-center gap-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input
+                    placeholder="Поиск групп..."
+                    disabled
+                    className="pl-10 bg-white/5 border-white/10 text-white placeholder:!text-[#9da3af] focus:border-white/20 opacity-50"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    disabled
+                    className="h-8 w-8 text-gray-400 opacity-50"
+                    title="Архив"
+                  >
+                    <Archive size={14} />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    disabled
+                    className="h-8 w-8 text-gray-400 opacity-50"
+                    title="Фильтры"
+                  >
+                    <Filter size={14} />
+                  </Button>
+                </div>
+              </div>
             </div>
-            
+
+            {/* Skeleton список групп */}
             <div className="flex-1">
               <ScrollArea className="h-full">
-                <div className="flex items-center justify-center py-8">
-                  <span className="text-gray-400 text-sm">Загрузка групп...</span>
+                <div className="px-4 pt-3 pb-3 space-y-3">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div
+                      key={i}
+                      className="border rounded-lg overflow-hidden bg-[#2e2e33] border-white/10 p-3"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-md bg-white/10 animate-pulse" />
+                        <div className="flex-1 space-y-2">
+                          <div className="h-4 bg-white/10 rounded animate-pulse w-3/4" />
+                          <div className="h-3 bg-white/10 rounded animate-pulse w-1/2" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </ScrollArea>
             </div>
+
+            {/* Кнопки типов групп внизу */}
+            <div className="min-h-24 border-t border-white/10 mt-auto px-4 py-3 shrink-0">
+              <div className="grid grid-cols-3 gap-2">
+                {groupTypes.map((groupType) => {
+                  const IconComponent = groupType.icon;
+                  return (
+                    <Button
+                      key={groupType.type}
+                      size="sm"
+                      variant="ghost"
+                      disabled
+                      className="h-8 px-2 text-xs text-gray-300 opacity-50 flex items-center gap-1"
+                    >
+                      <IconComponent size={14} />
+                      <span className="truncate">{groupType.label}</span>
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
           </>
         )}
+
+        {/* Модальные окна доступны во время загрузки */}
+        <AdminFormsModal
+          isOpen={isCreateCompanyModalOpen}
+          onClose={() => setIsCreateCompanyModalOpen(false)}
+          formType="company-registration"
+          onSuccess={handleCreateCompanySuccess}
+        />
       </div>
     );
   }
 
-  if (error) {
+  if (isError) {
     return (
-      <div 
+      <div
         className="h-full border-r border-white/10 flex flex-col items-center justify-center p-4"
         style={{ width: `${width}px`, backgroundColor: '#232328' }}
       >
-        {!collapsed && <p className="text-red-400 text-sm text-center">{error}</p>}
+        {!collapsed && <p className="text-red-400 text-sm text-center">Failed to load groups</p>}
       </div>
     );
   }
@@ -719,7 +729,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                         <div className="flex items-center justify-between px-3 py-2 bg-white/5 rounded-lg">
                           <span className="text-xs text-gray-400">Баланс компании:</span>
                           <span className="text-sm font-medium text-white">
-                            {companyBalance !== null 
+                            {companyBalance != null
                               ? `${companyBalance.toLocaleString('ru-RU')} ₽`
                               : 'Загрузка...'
                             }
@@ -760,6 +770,21 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                             >
                               <Edit3 size={12} />
                             </Button>
+                            {/* Delete button - only for admin users */}
+                            {isAdmin && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteConfirmOpen(group.id);
+                                }}
+                                className="h-6 w-6 p-0 text-gray-400 hover:text-red-400 hover:bg-red-500/10"
+                                title="Удалить группу"
+                              >
+                                <Trash2 size={12} />
+                              </Button>
+                            )}
                           </div>
                         </div>
                         
@@ -799,7 +824,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
           })()}
           description={(() => {
             const group = filteredSupergroups.find(g => g.id === archiveConfirmOpen);
-            return group?.is_active 
+            return group?.is_active
               ? "Группа будет перемещена в архив и скрыта из основного списка."
               : "Группа будет восстановлена из архива и появится в основном списке.";
           })()}
@@ -809,6 +834,26 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
           })()}
           variant="default"
           icon={Archive}
+        />
+      )}
+
+      {/* Диалог подтверждения удаления */}
+      {deleteConfirmOpen && (
+        <AppConfirmDialog
+          open={!!deleteConfirmOpen}
+          onOpenChange={(open) => !open && setDeleteConfirmOpen(null)}
+          onConfirm={() => {
+            handleDeleteSupergroup(deleteConfirmOpen);
+            setDeleteConfirmOpen(null);
+          }}
+          title="Удалить группу?"
+          description={(() => {
+            const group = filteredSupergroups.find(g => g.id === deleteConfirmOpen);
+            return `Группа "${group?.title || ''}" будет удалена. Это действие нельзя отменить.`;
+          })()}
+          confirmText="Удалить"
+          variant="destructive"
+          icon={Trash2}
         />
       )}
 

@@ -273,11 +273,79 @@ export class MessageProcessor {
     }
 
     try {
-      return JSON.parse(data);
+      // WSE Protocol v2: Messages have a category prefix before JSON
+      // Wire format: {category}{json}
+      // Categories:
+      //   S  = Snapshot (full state dump for initial sync)
+      //   U  = Update (incremental delta updates) - default
+      //   WSE = System (protocol/system messages: ping, pong, errors, etc.)
+      //
+      // Examples:
+      //   U{"t":"chat_created","p":{...}}
+      //   S{"t":"broker_connection_snapshot","p":{...}}
+      //   WSE{"t":"server_ready","p":{...}}
+
+      let jsonData = data;
+      let messageCategory: string | undefined;
+
+      // Check for WSE prefix (3 chars)
+      if (data.startsWith('WSE{')) {
+        messageCategory = 'WSE';
+        jsonData = data.substring(3);
+      }
+      // Check for single-letter prefix (S or U)
+      else if (data.length > 1 && /^[SU]/.test(data[0]) && data[1] === '{') {
+        messageCategory = data[0];
+        jsonData = data.substring(1);
+      }
+
+      const message = JSON.parse(jsonData) as WSMessage;
+
+      // Attach category to message for routing/logging purposes
+      if (messageCategory) {
+        message._category = messageCategory;
+        logger.debug(`WSE Protocol v2: Category=${messageCategory}, Type=${message.t}`);
+      }
+
+      return message;
     } catch (error) {
-      logger.error('Invalid JSON message:', error);
+      logger.error('Invalid JSON message:', error, { data: data.substring(0, 100) });
       return null;
     }
+  }
+
+  /**
+   * Parse JSON string with WSE Protocol v2 category prefix handling.
+   *
+   * Wire format: {category}{json}
+   * Categories:
+   *   S   = Snapshot (full state dump for initial sync)
+   *   U   = Update (incremental delta updates) - default
+   *   WSE = System (protocol/system messages)
+   */
+  private parseWithCategory(text: string): WSMessage {
+    let jsonData = text;
+    let messageCategory: string | undefined;
+
+    // Check for WSE prefix (3 chars)
+    if (text.startsWith('WSE{')) {
+      messageCategory = 'WSE';
+      jsonData = text.substring(3);
+    }
+    // Check for single-letter prefix (S or U)
+    else if (text.length > 1 && /^[SU]/.test(text[0]) && text[1] === '{') {
+      messageCategory = text[0];
+      jsonData = text.substring(1);
+    }
+
+    const message = JSON.parse(jsonData) as WSMessage;
+
+    // Attach category to message for routing/logging purposes
+    if (messageCategory) {
+      message._category = messageCategory;
+    }
+
+    return message;
   }
 
   private async processBinaryMessage(data: ArrayBuffer): Promise<WSMessage | null> {
@@ -307,7 +375,9 @@ export class MessageProcessor {
           console.log('>>> Detected raw zlib compressed data (0x78 header)');
           const decompressed = this.compression.decompress(data);
           const text = new TextDecoder().decode(decompressed);
-          const parsed = JSON.parse(text);
+
+          // Parse with WSE Protocol v2 category prefix handling
+          const parsed = this.parseWithCategory(text);
 
           console.log('=== DECOMPRESSED RAW ZLIB MESSAGE ===');
           console.log('Type:', parsed.t);
@@ -364,12 +434,12 @@ export class MessageProcessor {
         const compressed = data.slice(2);
         const decompressed = this.compression.decompress(compressed);
 
-        // Backend sends compressed JSON, not compressed MessagePack
+        // Backend sends compressed JSON with WSE Protocol v2 category prefix
         const text = new TextDecoder().decode(decompressed);
-        const parsed = JSON.parse(text);
+        const parsed = this.parseWithCategory(text);
 
         logger.info('=== DECOMPRESSED MESSAGE WITH C: HEADER ===');
-        logger.info('Type:', parsed.t);
+        logger.info('Type:', parsed.t, 'Category:', parsed._category);
 
         return parsed;
       } catch (error) {
@@ -397,10 +467,12 @@ export class MessageProcessor {
     // 4. Try as JSON first (backend might be sending JSON without headers)
     try {
       const text = new TextDecoder().decode(data);
-      // Quick check if it looks like JSON
-      if (text.startsWith('{') || text.startsWith('[')) {
-        const parsed = JSON.parse(text);
-        logger.debug('Parsed as plain JSON:', parsed.t);
+
+      // Check if it looks like JSON (with or without WSE category prefix)
+      if (text.startsWith('{') || text.startsWith('[') ||
+          text.startsWith('U{') || text.startsWith('S{') || text.startsWith('WSE{')) {
+        const parsed = this.parseWithCategory(text);
+        logger.debug('Parsed as plain JSON:', parsed.t, 'Category:', parsed._category);
         return parsed;
       }
     } catch {

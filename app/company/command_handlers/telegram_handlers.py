@@ -15,6 +15,7 @@ from app.company.commands import (
     LinkTelegramSupergroupCommand,
     UnlinkTelegramSupergroupCommand,
     UpdateTelegramSupergroupCommand,
+    DeleteTelegramSupergroupCommand,
 )
 from app.company.aggregate import CompanyAggregate
 from app.infra.cqrs.decorators import command_handler
@@ -184,3 +185,54 @@ class UpdateTelegramSupergroupHandler(BaseCommandHandler):
 
         log.info(f"Telegram supergroup {command.telegram_group_id} updated for company {command.company_id}")
         return command.company_id
+
+
+# -----------------------------------------------------------------------------
+# DeleteTelegramSupergroupHandler
+# -----------------------------------------------------------------------------
+@command_handler(DeleteTelegramSupergroupCommand)
+class DeleteTelegramSupergroupHandler(BaseCommandHandler):
+    """
+    Handles the DeleteTelegramSupergroupCommand - permanent deletion of supergroup.
+
+    This handler:
+    1. Looks up the supergroup to find linked company (if any)
+    2. Creates TelegramSupergroupDeleted event
+    3. Publishes event for projector to delete from read model
+    """
+
+    def __init__(self, deps: 'HandlerDependencies'):
+        super().__init__(
+            event_bus=deps.event_bus,
+            transport_topic="transport.company-events",
+            event_store=deps.event_store
+        )
+        self.company_read_repo = deps.company_read_repo
+
+    async def handle(self, command: DeleteTelegramSupergroupCommand) -> int:
+        log.info(f"Deleting Telegram supergroup {command.telegram_group_id}")
+
+        # Look up supergroup to get company_id (may be None)
+        supergroup = await self.company_read_repo.get_telegram_supergroup(command.telegram_group_id)
+        company_id = supergroup.get('company_id') if supergroup else None
+
+        # Create aggregate with company_id or a synthetic one for event publishing
+        # If no company, we use a synthetic UUID for the event stream
+        aggregate_company_id = uuid.UUID(str(company_id)) if company_id else uuid.uuid4()
+        company_aggregate = CompanyAggregate(company_id=aggregate_company_id)
+
+        company_aggregate.delete_telegram_supergroup(
+            telegram_group_id=command.telegram_group_id,
+            company_id=uuid.UUID(str(company_id)) if company_id else None,
+            deleted_by=command.deleted_by,
+            reason=command.reason,
+        )
+
+        await self.publish_and_commit_events(
+            aggregate=company_aggregate,
+            aggregate_type="Company",
+            expected_version=None,
+        )
+
+        log.info(f"Telegram supergroup {command.telegram_group_id} deleted")
+        return command.telegram_group_id

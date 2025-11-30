@@ -78,7 +78,8 @@ const ChatInterface = React.memo(() => {
     startTyping,
     stopTyping,
     markAsRead,
-    setMessageFilter
+    setMessageFilter,
+    deleteMessage
   } = useRealtimeChatContext();
   const { user } = useAuth();
   const { isDeveloper, isLightTheme } = usePlatform();
@@ -156,12 +157,10 @@ const ChatInterface = React.memo(() => {
     const observer = new IntersectionObserver(
       ([entry]) => {
         const isCurrentlyAtBottom = entry.isIntersecting;
-        console.log('ScrollToBottom: isAtBottom changed', isCurrentlyAtBottom);
         setIsAtBottom(isCurrentlyAtBottom);
-        
+
         // Сброс счётчика если пользователь промотал вниз
-        if (isCurrentlyAtBottom && newMessagesCount > 0) {
-          console.log('ScrollToBottom: resetting message count', newMessagesCount);
+        if (isCurrentlyAtBottom) {
           setNewMessagesCount(0);
         }
       },
@@ -173,24 +172,27 @@ const ChatInterface = React.memo(() => {
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [newMessagesCount, getViewport]);
+  }, [getViewport]);
+
+  // Track the last message ID to detect new incoming messages
+  const lastProcessedMessageIdRef = useRef<string | null>(null);
 
   // Подсчёт новых сообщений когда пользователь не внизу
   useEffect(() => {
-    if (displayedMessages.length > 0 && !isFirstLoad && !isAtBottom && !loadingMoreMessages) {
-      // Только для входящих сообщений (не от текущего пользователя)
+    if (displayedMessages.length > 0 && !isFirstLoad && !loadingMoreMessages) {
       const lastMessage = displayedMessages[displayedMessages.length - 1];
-      if (lastMessage.sender_id !== user?.id) {
-        console.log('ScrollToBottom: incrementing message count', { 
-          isAtBottom, 
-          messageCount: newMessagesCount + 1,
-          senderId: lastMessage.sender_id,
-          userId: user?.id 
-        });
-        setNewMessagesCount(prev => prev + 1);
+
+      // Only process if this is a new message we haven't seen
+      if (lastMessage.id !== lastProcessedMessageIdRef.current) {
+        lastProcessedMessageIdRef.current = lastMessage.id;
+
+        // Only increment for incoming messages (not from current user) when not at bottom
+        if (!isAtBottom && lastMessage.sender_id !== user?.id) {
+          setNewMessagesCount(prev => prev + 1);
+        }
       }
     }
-  }, [displayedMessages.length, isAtBottom, isFirstLoad, loadingMoreMessages, displayedMessages, user?.id, newMessagesCount]);
+  }, [displayedMessages.length, isAtBottom, isFirstLoad, loadingMoreMessages, displayedMessages, user?.id]);
 
   // Функция промотки вниз по клику на кнопку
   const handleScrollToBottomClick = useCallback(() => {
@@ -220,47 +222,63 @@ const ChatInterface = React.memo(() => {
     const viewport = getViewport();
     if (!viewport) return;
 
-    // Заморозка анимаций во время загрузки
+    // Заморозка анимаций во время загрузки (отключаем animation для новых сообщений)
     viewport.classList.add('chat-freeze');
+    viewport.classList.add('chat-loading-history');
+
+    // Запоминаем текущую позицию скролла и высоту
+    const prevScrollHeight = viewport.scrollHeight;
+    const prevScrollTop = viewport.scrollTop;
 
     // Жесткий анчоринг: запоминаем первое видимое сообщение
-    const firstVisibleMessage = Array.from(viewport.querySelectorAll('[data-message-id]'))
-      .find(el => {
-        const rect = el.getBoundingClientRect();
-        const viewportRect = viewport.getBoundingClientRect();
-        return rect.top >= viewportRect.top && rect.bottom <= viewportRect.bottom;
-      }) as HTMLElement;
+    const allMessages = Array.from(viewport.querySelectorAll('[data-message-id]'));
+    const firstVisibleMessage = allMessages.find(el => {
+      const rect = el.getBoundingClientRect();
+      const viewportRect = viewport.getBoundingClientRect();
+      return rect.top >= viewportRect.top - 10 && rect.top <= viewportRect.bottom;
+    }) as HTMLElement;
 
     const anchorMessageId = firstVisibleMessage?.getAttribute('data-message-id');
-    const relativeTop = firstVisibleMessage ? 
-      firstVisibleMessage.offsetTop - viewport.scrollTop : 0;
+    const anchorOffsetTop = firstVisibleMessage?.offsetTop || 0;
 
     try {
       await loadMoreMessages();
-      
-      // Восстанавливаем позицию по первому видимому сообщению
-      if (anchorMessageId && !atBottomRef.current) {
-        requestAnimationFrame(() => {
+
+      // Мгновенное восстановление позиции без анимации
+      requestAnimationFrame(() => {
+        const newScrollHeight = viewport.scrollHeight;
+        const heightDelta = newScrollHeight - prevScrollHeight;
+
+        if (anchorMessageId && !atBottomRef.current) {
+          // Пытаемся найти якорное сообщение
           const anchorElement = viewport.querySelector(`[data-message-id="${anchorMessageId}"]`) as HTMLElement;
           if (anchorElement) {
-            viewport.scrollTop = anchorElement.offsetTop - relativeTop;
+            // Восстанавливаем позицию относительно якоря
+            const newAnchorOffsetTop = anchorElement.offsetTop;
+            const offsetDelta = newAnchorOffsetTop - anchorOffsetTop;
+            viewport.scrollTop = prevScrollTop + offsetDelta;
           } else {
-            // Fallback: обычный дельта-анчоринг
-            const newScrollHeight = viewport.scrollHeight;
-            const prevScrollHeight = viewport.scrollHeight - (newScrollHeight - viewport.scrollHeight);
-            const delta = newScrollHeight - prevScrollHeight;
-            if (delta > 0) {
-              viewport.scrollTop = viewport.scrollTop + delta;
-            }
+            // Fallback: просто добавляем дельту высоты
+            viewport.scrollTop = prevScrollTop + heightDelta;
           }
-        });
-      }
+        } else if (heightDelta > 0) {
+          // Просто корректируем на дельту высоты
+          viewport.scrollTop = prevScrollTop + heightDelta;
+        }
+      });
     } finally {
-      // Убираем заморозку и сбрасываем состояние анчоринга
+      // Плавно убираем заморозку
       setTimeout(() => {
         viewport.classList.remove('chat-freeze');
-        anchoringRef.current = false;
-      }, 200);
+        // Добавляем fade-in эффект
+        viewport.classList.add('pagination-reveal');
+
+        setTimeout(() => {
+          viewport.classList.remove('chat-loading-history');
+          viewport.classList.remove('pagination-reveal');
+          anchoringRef.current = false;
+        }, 150);
+      }, 50);
     }
   }, [activeChat, loadingMoreMessages, loadMoreMessages, checkIfAtBottom, getViewport]);
   
@@ -471,10 +489,15 @@ const ChatInterface = React.memo(() => {
       // sendMessage in useRealtimeChat handles auto-creating chat if no activeChat
       await sendMessage(content, replyTarget?.id);
       setReplyTarget(null); // Clear reply target after sending
+
+      // Smooth scroll to bottom after sending
+      setTimeout(() => {
+        scrollToBottom(scrollAreaRef, { force: true });
+      }, 100);
     } catch (error) {
       logger.error('Failed to send message', error, { component: 'ChatInterface' });
     }
-  }, [inputValue, sendMessage, replyTarget, closeMentions]);
+  }, [inputValue, sendMessage, replyTarget, closeMentions, scrollToBottom]);
   
   // Create properly ordered displayedItems that match MentionsDropdown visual order
   const displayedItems = React.useMemo(() => {
@@ -757,6 +780,7 @@ const ChatInterface = React.memo(() => {
                       currentUser={user}
                       sendingMessages={sendingMessages}
                       onReply={handleReply}
+                      onDelete={deleteMessage}
                       onLoadMore={handleLoadMoreWithAnchor}
                       hasMoreMessages={messageFilter === 'all' ? hasMoreMessages : filteredHasMore}
                       scrollAreaRef={scrollAreaRef}
@@ -786,17 +810,17 @@ const ChatInterface = React.memo(() => {
 
 
       {/* Input Area - зафиксировано внизу экрана */}
-      <div className={`border-t ${theme.border} min-h-24 ${theme.main}`}>
-        <div className="flex items-center px-6 py-3">
+      <div className={`border-t ${theme.border} ${theme.main} flex-shrink-0`}>
+        <div className="flex items-center px-6 py-2">
           <div className="max-w-4xl mx-auto w-full">
-            <div className={`flex-1 flex items-center gap-3 ${theme.input.bg} ${theme.input.border} rounded-[32px] px-4 py-3`}>
+            <div className={`flex items-center gap-2 ${theme.input.bg} ${theme.input.border} rounded-[24px] px-3 py-1`}>
               {/* Иконки прикреплений */}
               <div className="flex gap-1 self-center">
                 <FileUploadButton disabled={!activeChat} />
               </div>
 
               {/* Поле ввода */}
-              <div ref={inputContainerRef} className="flex-1 flex items-center relative">
+              <div ref={inputContainerRef} className="flex-1 flex items-center relative min-h-[36px]">
                 <AutoResizeTextarea
                   ref={textareaRef}
                   value={inputValue}
@@ -805,9 +829,9 @@ const ChatInterface = React.memo(() => {
                   onBlur={handleInputBlur}
                   onHeightChange={setTextareaHeight}
                   placeholder="Напишите ваш запрос"
-                  className={`flex-1 border-0 bg-transparent ${theme.input.text} ${theme.input.placeholder} outline-none focus:outline-none focus-visible:outline-none resize-none`}
-                  minHeight={24}
-                  maxHeight={500}
+                  className={`flex-1 border-0 bg-transparent ${theme.input.text} ${theme.input.placeholder} outline-none focus:outline-none focus-visible:outline-none resize-none text-sm leading-[36px]`}
+                  minHeight={36}
+                  maxHeight={120}
                 />
                 
                 {/* Mentions Dropdown */}
@@ -838,15 +862,15 @@ const ChatInterface = React.memo(() => {
 
               {/* Кнопка отправки/микрофона в поле ввода */}
               <div className="self-center">
-                {inputValue.trim() || sendingMessages.size > 0 ? <Button 
-                    onClick={handleSendMessage} 
-                    className="rounded-full bg-accent-red hover:bg-accent-red/90 h-11 w-11 p-0 transition-all duration-300 hover:scale-105 shadow-lg flex-shrink-0"
+                {inputValue.trim() || sendingMessages.size > 0 ? <Button
+                    onClick={handleSendMessage}
+                    className="rounded-full bg-accent-red hover:bg-accent-red/90 h-10 w-10 p-0 transition-all duration-300 hover:scale-105 shadow-lg flex-shrink-0"
                     disabled={sendingMessages.size > 0}
                   >
                     {sendingMessages.size > 0 ? (
                       <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     ) : (
-                      <Send size={22} />
+                      <Send size={20} />
                     )}
                   </Button> : <VoiceRecordButton disabled={!activeChat} />}
               </div>

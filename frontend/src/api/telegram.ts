@@ -165,10 +165,7 @@ export async function sendMessage(
 // Topic Verification
 // -----------------------------------------------------------------------------
 
-export async function verifyTopics(
-  supergroupId: number,
-  dryRun: boolean = false
-): Promise<{
+export interface VerifyTopicsResult {
   verificationResults: unknown[];
   summary: {
     existingTopics: number;
@@ -180,12 +177,30 @@ export async function verifyTopics(
     canonicalChatId: string;
     duplicateIds: string[];
   };
-} | null> {
+}
+
+export async function verifyTopics(
+  supergroupId: number,
+  dryRun: boolean = false
+): Promise<VerifyTopicsResult | null> {
   try {
     const { data } = await API.post(`/telegram/groups/${supergroupId}/verify-topics`, {
       dry_run: dryRun,
     });
-    return data;
+
+    // Transform backend response to frontend expected format
+    // Backend returns: { success, verified_count, created_count, errors, dry_run }
+    // Frontend expects: { verificationResults, summary, duplicatesMerged }
+    return {
+      verificationResults: data.errors || [],
+      summary: {
+        existingTopics: data.verified_count || 0,
+        deletedTopics: 0,
+        messagesMoved: 0,
+        generalDuplicatesMerged: 0,
+      },
+      duplicatesMerged: undefined,
+    };
   } catch {
     return null;
   }
@@ -226,6 +241,15 @@ export async function updateSupergroup(
 ): Promise<boolean> {
   try {
     await API.patch(`/telegram/supergroups/${supergroupId}`, updates);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function deleteSupergroup(supergroupId: number): Promise<boolean> {
+  try {
+    await API.delete(`/telegram/supergroups/${supergroupId}`);
     return true;
   } catch {
     return false;

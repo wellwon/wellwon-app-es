@@ -23,7 +23,8 @@ export interface ChatDetail {
   last_message_content: string | null;
   last_message_sender_id: string | null;
   // Telegram integration
-  telegram_chat_id: number | null;
+  telegram_chat_id: number | null;  // Legacy field
+  telegram_supergroup_id: number | null;  // New field matching database
   telegram_topic_id: number | null;
 }
 
@@ -37,6 +38,10 @@ export interface ChatListItem {
   is_active: boolean;
   unread_count: number;
   other_participant_name: string | null;
+  // Company and Telegram fields for filtering by scope
+  company_id: string | null;
+  telegram_supergroup_id: number | null;
+  telegram_topic_id: number | null;
 }
 
 export interface Message {
@@ -102,6 +107,7 @@ export interface UpdateChatRequest {
 }
 
 export interface SendMessageRequest {
+  message_id?: string;  // Client-generated UUID for idempotency
   content: string;
   message_type?: string;
   reply_to_id?: string;
@@ -127,7 +133,7 @@ export interface LinkTelegramRequest {
 }
 
 export interface MarkAsReadRequest {
-  message_ids: string[];
+  last_read_message_id: string;
 }
 
 // Response wrapper for command results
@@ -135,6 +141,26 @@ export interface CommandResponse {
   id: string;
   status: string;
   message?: string;
+}
+
+// -----------------------------------------------------------------------------
+// Message Normalization (ensures consistent 'id' field)
+// -----------------------------------------------------------------------------
+
+/**
+ * Normalizes a message object to ensure consistent 'id' field.
+ * Backend may send 'message_id' or 'id' - this ensures frontend always uses 'id'.
+ */
+function normalizeMessage(msg: any): Message {
+  const normalizedId = msg.id || msg.message_id;
+
+  // Create a clean message without message_id field
+  const { message_id, ...rest } = msg;
+
+  return {
+    ...rest,
+    id: normalizedId,
+  } as Message;
 }
 
 // -----------------------------------------------------------------------------
@@ -188,6 +214,11 @@ export async function deleteChat(chatId: string): Promise<CommandResponse> {
   return data;
 }
 
+export async function hardDeleteChat(chatId: string, reason?: string): Promise<CommandResponse> {
+  const { data } = await API.post<CommandResponse>(`/chats/${chatId}/delete`, { reason });
+  return data;
+}
+
 export async function searchChats(
   searchTerm: string,
   limit: number = 20
@@ -219,7 +250,7 @@ export async function getMessages(
   const { data } = await API.get<Message[]>(`/chats/${chatId}/messages`, {
     params: options,
   });
-  return data;
+  return data.map(normalizeMessage);
 }
 
 export async function sendMessage(
@@ -266,7 +297,7 @@ export async function searchMessages(
   const { data } = await API.get<Message[]>(`/chats/${chatId}/messages/search`, {
     params: { q: searchTerm, limit },
   });
-  return data;
+  return data.map(normalizeMessage);
 }
 
 // -----------------------------------------------------------------------------

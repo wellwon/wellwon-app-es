@@ -165,6 +165,11 @@ class TelegramBotClient:
         Process incoming webhook update.
 
         Returns TelegramMessage if it's a message update, None otherwise.
+        Handles:
+        - Regular messages (text, files, voice, etc.)
+        - Edited messages
+        - Channel posts
+        - Forum topic created events (service messages)
         """
         if not PTB_AVAILABLE or not self._initialized:
             return None
@@ -173,6 +178,9 @@ class TelegramBotClient:
             update = Update.de_json(update_data, self._bot)
 
             if update.message:
+                # Check for forum_topic_created service message
+                if update.message.forum_topic_created:
+                    return self._parse_forum_topic_created(update.message)
                 return self._parse_message(update.message)
             elif update.edited_message:
                 return self._parse_message(update.edited_message)
@@ -184,6 +192,33 @@ class TelegramBotClient:
         except Exception as e:
             log.error(f"Failed to process update: {e}", exc_info=True)
             return None
+
+    def _parse_forum_topic_created(self, msg) -> TelegramMessage:
+        """
+        Parse forum_topic_created service message.
+
+        When a new forum topic is created in Telegram, this creates a TelegramMessage
+        with the topic name as text and a special marker for the router to handle.
+        """
+        topic_info = msg.forum_topic_created
+        topic_name = topic_info.name if topic_info else "New Topic"
+        topic_emoji = topic_info.icon_custom_emoji_id if topic_info else None
+
+        log.info(f"Parsed forum_topic_created: name={topic_name}, topic_id={msg.message_thread_id}, chat_id={msg.chat.id}")
+
+        return TelegramMessage(
+            message_id=msg.message_id,
+            chat_id=msg.chat.id,
+            topic_id=msg.message_thread_id,
+            from_user_id=msg.from_user.id if msg.from_user else None,
+            from_username=msg.from_user.username if msg.from_user else None,
+            from_first_name=msg.from_user.first_name if msg.from_user else None,
+            from_last_name=msg.from_user.last_name if msg.from_user else None,
+            from_is_bot=msg.from_user.is_bot if msg.from_user else False,
+            # Use special format to indicate this is a topic creation event
+            text=f"__TOPIC_CREATED__:{topic_name}",
+            date=msg.date,
+        )
 
     def _parse_message(self, msg) -> TelegramMessage:
         """Parse telegram Message to TelegramMessage"""

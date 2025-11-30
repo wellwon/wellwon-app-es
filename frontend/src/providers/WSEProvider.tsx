@@ -1,8 +1,7 @@
 // src/providers/WSEProvider.tsx
 import React, { ReactNode, useMemo, useRef, useEffect, useReducer, createContext, useContext } from 'react';
 import { useWSE } from '@/wse/hooks/useWSE';
-import { useUserAccount } from '@/hooks/useUserAccount';
-import { getStoredToken } from '@/api/user_account';
+import { useAuthStore, getAuthToken } from '@/hooks/auth';
 import { WSEConfig, UseWSEReturn } from '@/wse/types';
 import { Logger } from '@/wse';
 
@@ -52,21 +51,15 @@ export function WSEProvider({
   config,
   initialTopics = ['user_account_events', 'system_events']
 }: WSEProviderProps) {
-  const userAccountHook = useUserAccount();
-  const { isAuthenticated, sessionReady, user } = userAccountHook;
+  // Zustand auth store (synchronous)
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const token = useAuthStore((state) => state.token);
+
   const previousTokenRef = useRef<string | undefined>(undefined);
   const [updateCounter, forceUpdate] = useReducer((x: number) => x + 1, 0);
 
-  // Listen for auth changes via storage events for cross-component reactivity
+  // Listen for auth changes via custom events
   useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'auth') {
-        logger.info('[WSEProvider] Auth storage changed, forcing update');
-        forceUpdate();
-      }
-    };
-
-    // Also listen for custom auth events
     const handleAuthSuccess = () => {
       logger.info('[WSEProvider] Auth success event received');
       forceUpdate();
@@ -77,53 +70,42 @@ export function WSEProvider({
       forceUpdate();
     };
 
-    window.addEventListener('storage', handleStorageChange);
     window.addEventListener('authSuccess', handleAuthSuccess);
     window.addEventListener('authLogout', handleAuthLogout);
 
     return () => {
-      window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('authSuccess', handleAuthSuccess);
       window.removeEventListener('authLogout', handleAuthLogout);
     };
   }, []);
 
-  // FIXED: isAuthenticated is now a boolean value, not a function
-  const isAuth = isAuthenticated;
-
-  // Token retrieval - directly check localStorage for immediate updates
+  // Token retrieval - use Zustand store directly
   const accessToken = useMemo(() => {
     // Force dependency on updateCounter to ensure re-evaluation
     const _ = updateCounter;
 
     logger.info('[WSEProvider] Token check:', {
-      isAuthenticated: isAuth,
-      sessionReady,
-      hasUser: !!user,
+      isAuthenticated,
+      hasToken: !!token,
       updateCounter
     });
 
-    // Direct localStorage check for immediate token availability
-    try {
-      const token = getStoredToken();
+    // Get token from Zustand store (already validated)
+    const currentToken = getAuthToken();
 
-      if (!token) {
-        logger.debug('[WSEProvider] No valid token in storage');
-        return undefined;
-      }
-
-      // Only log if token actually changed
-      if (previousTokenRef.current !== token) {
-        logger.info(`[WSEProvider] Token changed from ${previousTokenRef.current ? 'exists' : 'none'} to ${token ? 'exists' : 'none'}`);
-        previousTokenRef.current = token;
-      }
-
-      return token;
-    } catch (error) {
-      logger.debug('[WSEProvider] Failed to get access token:', error);
+    if (!currentToken) {
+      logger.debug('[WSEProvider] No valid token in store');
       return undefined;
     }
-  }, [isAuth, sessionReady, user, updateCounter]); // Include updateCounter as dependency
+
+    // Only log if token actually changed
+    if (previousTokenRef.current !== currentToken) {
+      logger.info(`[WSEProvider] Token changed from ${previousTokenRef.current ? 'exists' : 'none'} to ${currentToken ? 'exists' : 'none'}`);
+      previousTokenRef.current = currentToken;
+    }
+
+    return currentToken;
+  }, [isAuthenticated, token, updateCounter]);
 
   // Use the WSE hook - it handles all the complexity
   const wseHook = useWSE(accessToken, initialTopics, config);
@@ -133,8 +115,8 @@ export function WSEProvider({
     ...wseHook,
     isInitialized: !!accessToken && wseHook.connectionHealth !== 'pending',
     isConnected: wseHook.connectionHealth === 'connected',
-    authError: !accessToken && isAuth && sessionReady ? 'No valid access token available' : null,
-  }), [wseHook, accessToken, isAuth, sessionReady]);
+    authError: !accessToken && isAuthenticated ? 'No valid access token available' : null,
+  }), [wseHook, accessToken, isAuthenticated]);
 
   // Debug logging for connection state changes
   useEffect(() => {

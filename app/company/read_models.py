@@ -73,8 +73,10 @@ class UserCompanyReadModel(BaseModel):
     company_id: uuid.UUID
     user_id: uuid.UUID
     relationship_type: str = "participant"  # owner, participant, declarant, accountant, manager
-    joined_at: datetime
+    joined_at: datetime  # Maps from assigned_at column via alias
     is_active: bool = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -90,10 +92,10 @@ class TelegramSupergroupReadModel(BaseModel):
     Read model for Telegram supergroups (PostgreSQL table: telegram_supergroups).
 
     Note: The table uses BIGINT for id which IS the Telegram group ID.
-    company_id is also BIGINT (FK to companies.id which may be BIGINT).
+    company_id is UUID (FK to companies.id which is UUID).
     """
     id: int  # Telegram group ID (BIGINT primary key)
-    company_id: Optional[int] = None  # FK to companies.id (BIGINT)
+    company_id: Optional[uuid.UUID] = None  # FK to companies.id (UUID)
     title: str
     username: Optional[str] = None
     description: Optional[str] = None

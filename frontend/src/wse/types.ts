@@ -39,6 +39,21 @@ export enum CircuitBreakerState {
   HALF_OPEN = "half-open"
 }
 
+/**
+ * WSE Protocol v2 Message Categories
+ *
+ * Wire format: {category}{json}
+ * Example: U{"t":"chat_created","p":{...}}
+ */
+export enum MessageCategory {
+  /** Snapshot: Full state dump for initial sync or reconnect */
+  SNAPSHOT = "S",
+  /** Update: Incremental delta updates (default) */
+  UPDATE = "U",
+  /** System: Protocol/system messages (ping, pong, errors, etc.) */
+  SYSTEM = "WSE"
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration
 // ─────────────────────────────────────────────────────────────────────────────
@@ -196,6 +211,9 @@ export interface WSMessage {
   latency_ms?: number; // end-to-end event latency (event creation -> WSE transformation)
   wse_processing_ms?: number; // WSE processing time (received -> sent)
   trace_id?: string; // distributed tracing ID
+  // WSE Protocol v2 category (parsed from wire format prefix)
+  // S = Snapshot, U = Update, WSE = System
+  _category?: 'S' | 'U' | 'WSE';
 }
 
 export interface QueuedMessage {

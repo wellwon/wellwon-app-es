@@ -2,7 +2,6 @@ import React from 'react';
 import { usePlatform } from '@/contexts/PlatformContext';
 import PlatformSidebar from '../sidebar/PlatformSidebar';
 import SafeContentRenderer from './SafeContentRenderer';
-import DeveloperPanel from '../developer/DeveloperPanel';
 
 
 const PlatformLayout = () => {
@@ -21,9 +20,6 @@ const PlatformLayout = () => {
       <div className={`flex-1 flex flex-col min-w-0 relative ${contentBgClass}`}>
         <SafeContentRenderer sectionId={activeSection} />
       </div>
-
-      {/* Floating Developer Panel */}
-      <DeveloperPanel />
     </div>
   );
 };

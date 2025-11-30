@@ -17,6 +17,7 @@ from app.chat.events import (
     ChatUpdated,
     ChatArchived,
     ChatRestored,
+    ChatHardDeleted,
     ChatLinkedToCompany,
     ChatUnlinkedFromCompany,
     ParticipantAdded,
@@ -81,6 +82,7 @@ class ChatAggregateState(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     is_active: bool = True
+    is_deleted: bool = False
 
     # Participants (user_id -> ParticipantState)
     participants: Dict[str, ParticipantState] = Field(default_factory=dict)
@@ -183,7 +185,12 @@ class ChatAggregate:
         )
         self._apply_and_record(event)
 
-    def archive_chat(self, archived_by: uuid.UUID) -> None:
+    def archive_chat(
+        self,
+        archived_by: uuid.UUID,
+        telegram_supergroup_id: Optional[int] = None,
+        telegram_topic_id: Optional[int] = None,
+    ) -> None:
         """Archive the chat"""
         self._ensure_active()
         self._ensure_admin(archived_by)
@@ -191,6 +198,8 @@ class ChatAggregate:
         event = ChatArchived(
             chat_id=self.id,
             archived_by=archived_by,
+            telegram_supergroup_id=telegram_supergroup_id,
+            telegram_topic_id=telegram_topic_id,
         )
         self._apply_and_record(event)
 
@@ -202,6 +211,28 @@ class ChatAggregate:
         event = ChatRestored(
             chat_id=self.id,
             restored_by=restored_by,
+        )
+        self._apply_and_record(event)
+
+    def hard_delete_chat(
+        self,
+        deleted_by: uuid.UUID,
+        reason: Optional[str] = None,
+        telegram_supergroup_id: Optional[int] = None,
+        telegram_topic_id: Optional[int] = None,
+    ) -> None:
+        """Permanently delete the chat (hard delete)"""
+        # Prevent double deletion
+        if self.state.is_deleted:
+            log.warning(f"Chat {self.id} is already deleted, skipping")
+            return
+
+        event = ChatHardDeleted(
+            chat_id=self.id,
+            deleted_by=deleted_by,
+            reason=reason,
+            telegram_supergroup_id=telegram_supergroup_id,
+            telegram_topic_id=telegram_topic_id,
         )
         self._apply_and_record(event)
 
@@ -428,6 +459,8 @@ class ChatAggregate:
         self,
         message_id: uuid.UUID,
         deleted_by: uuid.UUID,
+        telegram_message_id: Optional[int] = None,
+        telegram_chat_id: Optional[int] = None,
     ) -> None:
         """Soft-delete a message"""
         self._ensure_active()
@@ -444,6 +477,8 @@ class ChatAggregate:
             message_id=message_id,
             chat_id=self.id,
             deleted_by=deleted_by,
+            telegram_message_id=telegram_message_id,
+            telegram_chat_id=telegram_chat_id,
         )
         self._apply_and_record(event)
 
@@ -617,6 +652,7 @@ class ChatAggregate:
             ChatUpdated: self._on_chat_updated,
             ChatArchived: self._on_chat_archived,
             ChatRestored: self._on_chat_restored,
+            ChatHardDeleted: self._on_chat_hard_deleted,
             ChatLinkedToCompany: self._on_chat_linked_to_company,
             ChatUnlinkedFromCompany: self._on_chat_unlinked_from_company,
             ParticipantAdded: self._on_participant_added,
@@ -658,6 +694,11 @@ class ChatAggregate:
 
     def _on_chat_restored(self, event: ChatRestored) -> None:
         self.state.is_active = True
+        self.state.updated_at = event.timestamp
+
+    def _on_chat_hard_deleted(self, event: ChatHardDeleted) -> None:
+        self.state.is_deleted = True
+        self.state.is_active = False
         self.state.updated_at = event.timestamp
 
     def _on_chat_linked_to_company(self, event: ChatLinkedToCompany) -> None:
@@ -802,10 +843,37 @@ class ChatAggregate:
 
     @classmethod
     def replay_from_events(cls, chat_id: uuid.UUID, events: List[BaseEvent]) -> 'ChatAggregate':
-        """Reconstruct aggregate from event history"""
+        """
+        Reconstruct aggregate from event history.
+
+        Handles both BaseEvent objects and EventEnvelope objects (from KurrentDB).
+        EventEnvelopes are converted to domain events using the event registry.
+        """
+        from app.infra.event_store.event_envelope import EventEnvelope
+        from app.chat.events import CHAT_EVENT_TYPES
+
         agg = cls(chat_id)
         for evt in events:
-            agg._apply(evt)
+            # Handle EventEnvelope from KurrentDB
+            if isinstance(evt, EventEnvelope):
+                # Try to convert envelope to domain event object
+                event_obj = evt.to_event_object()
+                if event_obj is None:
+                    # Fallback: use CHAT_EVENT_TYPES registry
+                    event_class = CHAT_EVENT_TYPES.get(evt.event_type)
+                    if event_class:
+                        try:
+                            event_obj = event_class(**evt.event_data)
+                        except Exception as e:
+                            log.warning(f"Failed to deserialize {evt.event_type}: {e}")
+                            continue
+                    else:
+                        log.warning(f"Unknown event type in replay: {evt.event_type}")
+                        continue
+                agg._apply(event_obj)
+            else:
+                # Direct BaseEvent object
+                agg._apply(evt)
             agg.version += 1
         agg.mark_events_committed()
         return agg

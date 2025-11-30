@@ -44,6 +44,11 @@ class GetChatByTelegramIdQuery(Query):
     telegram_topic_id: Optional[int] = None
 
 
+class GetLinkedTelegramChatsQuery(Query):
+    """Get all chats that have a linked Telegram supergroup (for polling)"""
+    active_only: bool = True
+
+
 class SearchChatsQuery(Query):
     """Search chats by name"""
     user_id: uuid.UUID
@@ -120,8 +125,9 @@ class ChatDetail(BaseModel):
     participant_count: int = 0
     last_message_at: Optional[datetime] = None
     unread_count: int = 0
-    # Telegram
-    telegram_chat_id: Optional[int] = None
+    # Telegram - both fields for compatibility
+    telegram_chat_id: Optional[int] = None  # Legacy field name
+    telegram_supergroup_id: Optional[int] = None  # New field (same value as telegram_chat_id)
     telegram_topic_id: Optional[int] = None
     # Last message preview
     last_message_content: Optional[str] = None
@@ -138,6 +144,12 @@ class ChatSummary(BaseModel):
     last_message_content: Optional[str] = None
     unread_count: int = 0
     is_active: bool = True
+    # Company and Telegram fields for filtering
+    company_id: Optional[uuid.UUID] = None
+    telegram_supergroup_id: Optional[int] = None
+    telegram_topic_id: Optional[int] = None
+    # Other participant info for direct chats
+    other_participant_name: Optional[str] = None
 
 
 class ParticipantInfo(BaseModel):
@@ -202,6 +214,15 @@ class UnreadCount(BaseModel):
     """Unread messages count"""
     chat_id: uuid.UUID
     count: int
+
+
+class LinkedTelegramChat(BaseModel):
+    """Linked Telegram chat for polling"""
+    chat_id: uuid.UUID
+    telegram_supergroup_id: int
+    telegram_topic_id: Optional[int] = None
+    name: Optional[str] = None
+    last_telegram_message_id: int = 0  # For tracking which messages were already processed
 
 
 class UserParticipation(BaseModel):

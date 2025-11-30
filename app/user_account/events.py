@@ -99,13 +99,32 @@ class UserProfileUpdated(BaseEvent):
 
 @domain_event(category="domain")
 class UserAdminStatusUpdated(BaseEvent):
-    """User admin status updated (active, developer flags) by admin"""
+    """User admin status updated (active, developer, user_type, role) by admin"""
     event_type: Literal["UserAdminStatusUpdated"] = "UserAdminStatusUpdated"
     user_id: uuid.UUID
     admin_user_id: uuid.UUID
     is_active: Optional[bool] = None
     is_developer: Optional[bool] = None
+    user_type: Optional[str] = None
+    role: Optional[str] = None
 
+
+# =============================================================================
+# Event Type Registry (for deserialization)
+# =============================================================================
+
+USER_ACCOUNT_EVENT_TYPES = {
+    "UserAccountCreated": UserAccountCreated,
+    "UserPasswordChanged": UserPasswordChanged,
+    "UserPasswordResetViaSecret": UserPasswordResetViaSecret,
+    "UserAuthenticationSucceeded": UserAuthenticationSucceeded,
+    "UserLoggedOut": UserLoggedOut,
+    "UserAuthenticationFailed": UserAuthenticationFailed,
+    "UserAccountDeleted": UserAccountDeleted,
+    "UserEmailVerified": UserEmailVerified,
+    "UserProfileUpdated": UserProfileUpdated,
+    "UserAdminStatusUpdated": UserAdminStatusUpdated,
+}
 
 # =============================================================================
 # EOF

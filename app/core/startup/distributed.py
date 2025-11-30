@@ -293,6 +293,13 @@ async def register_sync_projections_phase(app: FastAPI) -> None:
             app.state.chat_read_repo
         )
 
+    # Company Projector
+    if hasattr(app.state, 'company_read_repo'):
+        from app.company.projectors import CompanyProjector
+        projector_instances["company"] = CompanyProjector(
+            app.state.company_read_repo
+        )
+
     # Store projector instances in app state for debugging
     app.state.projector_instances = projector_instances
 

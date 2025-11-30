@@ -103,9 +103,11 @@ class TelegramEventListener:
 
         handler_map = {
             "MessageSent": self.on_message_sent,
+            "MessageDeleted": self.on_message_deleted,
             "ChatCreated": self.on_chat_created,
             "ChatUpdated": self.on_chat_updated,
-            "ChatDeleted": self.on_chat_deleted,
+            "ChatArchived": self.on_chat_archived,
+            "ChatHardDeleted": self.on_chat_deleted,  # Hard delete with Telegram topic removal
         }
 
         handler = handler_map.get(event_type)
@@ -149,9 +151,13 @@ class TelegramEventListener:
             return
 
         # Skip messages that came FROM Telegram (avoid echo)
+        # Also skip messages from web - SendMessageHandler already syncs those to Telegram
         source = event.get("source", "web")
         if source == "telegram":
             log.debug(f"Skipping message {event.get('message_id')} - already from Telegram")
+            return
+        if source == "web":
+            log.debug(f"Skipping message {event.get('message_id')} - web messages synced by SendMessageHandler")
             return
 
         try:
@@ -166,7 +172,7 @@ class TelegramEventListener:
             if sender_id:
                 try:
                     from app.user_account.queries import GetUserProfileQuery
-                    user = await self._query_bus.dispatch(
+                    user = await self._query_bus.query(
                         GetUserProfileQuery(
                             user_id=UUID(sender_id) if isinstance(sender_id, str) else sender_id,
                             include_preferences=False,
@@ -183,7 +189,7 @@ class TelegramEventListener:
 
             # Get chat configuration via QueryBus (CQRS compliant)
             from app.chat.queries import GetChatByIdQuery
-            chat = await self._query_bus.dispatch(
+            chat = await self._query_bus.query(
                 GetChatByIdQuery(
                     chat_id=UUID(chat_id) if isinstance(chat_id, str) else chat_id
                 )
@@ -241,6 +247,72 @@ class TelegramEventListener:
 
         except Exception as e:
             log.error(f"Error handling MessageSent event: {e}", exc_info=True)
+
+    async def on_message_deleted(self, event: dict) -> None:
+        """
+        Handle MessageDeleted event - delete message in Telegram.
+
+        Event payload:
+        {
+            "message_id": UUID,
+            "chat_id": UUID,
+            "deleted_by": UUID,
+            "telegram_message_id": Optional[int],
+            "telegram_chat_id": Optional[int]
+        }
+        """
+        if not self._initialized or not self._telegram:
+            log.warning("Listener not initialized, skipping event")
+            return
+
+        try:
+            telegram_message_id = event.get("telegram_message_id")
+            telegram_chat_id = event.get("telegram_chat_id")
+
+            # If telegram IDs are not in the event, try to look up from chat/message
+            if not telegram_message_id or not telegram_chat_id:
+                message_id = event.get("message_id")
+                chat_id = event.get("chat_id")
+
+                # Lookup chat to get telegram_chat_id
+                if chat_id and not telegram_chat_id:
+                    from app.chat.queries import GetChatByIdQuery
+                    chat = await self._query_bus.query(
+                        GetChatByIdQuery(
+                            chat_id=UUID(chat_id) if isinstance(chat_id, str) else chat_id
+                        )
+                    )
+                    if chat:
+                        telegram_chat_id = getattr(chat, 'telegram_chat_id', None) or getattr(chat, 'telegram_supergroup_id', None)
+
+                # Without telegram_message_id, we cannot delete the message in Telegram
+                if not telegram_message_id:
+                    log.debug(
+                        f"No telegram_message_id for message {message_id}, cannot sync deletion to Telegram"
+                    )
+                    return
+
+            if not telegram_chat_id:
+                log.debug(f"No telegram_chat_id available, cannot sync deletion to Telegram")
+                return
+
+            # Delete message in Telegram
+            success = await self._telegram.delete_message(
+                chat_id=telegram_chat_id,
+                message_id=telegram_message_id
+            )
+
+            if success:
+                log.info(
+                    f"Deleted Telegram message {telegram_message_id} in chat {telegram_chat_id}"
+                )
+            else:
+                log.warning(
+                    f"Failed to delete Telegram message {telegram_message_id} in chat {telegram_chat_id}"
+                )
+
+        except Exception as e:
+            log.error(f"Error handling MessageDeleted event: {e}", exc_info=True)
 
     async def on_chat_created(self, event: dict) -> None:
         """
@@ -303,71 +375,172 @@ class TelegramEventListener:
         Event payload:
         {
             "chat_id": UUID,
-            "chat_name": Optional[str],
-            "topic_emoji": Optional[str],
-            "external_topic_id": Optional[str],
-            "telegram_group_id": Optional[int]
+            "name": Optional[str],
+            "updated_by": UUID
         }
         """
         if not self._initialized or not self._telegram:
             return
 
         try:
-            telegram_group_id = event.get("telegram_group_id")
-            external_topic_id = event.get("external_topic_id")
+            chat_id = event.get("chat_id")
+            new_name = event.get("name")
 
-            if not telegram_group_id or not external_topic_id:
+            if not new_name:
+                log.debug(f"ChatUpdated event has no name change, skipping Telegram sync")
                 return
 
-            new_name = event.get("chat_name")
-            new_emoji = event.get("topic_emoji")
+            # Fetch chat details to get Telegram integration info
+            from app.chat.queries import GetChatByIdQuery
+            chat = await self._query_bus.query(
+                GetChatByIdQuery(
+                    chat_id=UUID(chat_id) if isinstance(chat_id, str) else chat_id
+                )
+            )
 
-            if not new_name and not new_emoji:
+            if not chat:
+                log.debug(f"Chat {chat_id} not found")
                 return
+
+            # Check if chat has Telegram integration
+            telegram_chat_id = getattr(chat, 'telegram_chat_id', None)
+            telegram_topic_id = getattr(chat, 'telegram_topic_id', None)
+
+            if not telegram_chat_id or not telegram_topic_id:
+                log.debug(f"Chat {chat_id} has no Telegram topic integration")
+                return
+
+            # Topic ID 1 (General) cannot be renamed
+            if telegram_topic_id == 1:
+                log.info("Cannot rename General topic (ID 1), skipping Telegram sync")
+                return
+
+            log.info(f"Syncing chat name to Telegram: chat_id={chat_id}, name={new_name}, topic_id={telegram_topic_id}")
 
             success = await self._telegram.update_chat_topic(
-                group_id=telegram_group_id,
-                topic_id=int(external_topic_id),
+                group_id=telegram_chat_id,
+                topic_id=telegram_topic_id,
                 new_name=new_name,
-                new_emoji=new_emoji
+                new_emoji=None
             )
 
             if success:
-                log.debug(f"Updated Telegram topic {external_topic_id}")
+                log.info(f"Updated Telegram topic {telegram_topic_id} with name '{new_name}'")
             else:
-                log.error(f"Failed to update Telegram topic {external_topic_id}")
+                log.error(f"Failed to update Telegram topic {telegram_topic_id}")
 
         except Exception as e:
             log.error(f"Error handling ChatUpdated event: {e}", exc_info=True)
 
-    async def on_chat_deleted(self, event: dict) -> None:
+    async def on_chat_archived(self, event: dict) -> None:
         """
-        Handle ChatDeleted event - optionally close/archive Telegram topic.
+        Handle ChatArchived event - close/archive Telegram topic.
+
+        Event payload:
+        {
+            "chat_id": UUID,
+            "archived_by": UUID,
+            "telegram_supergroup_id": Optional[int],
+            "telegram_topic_id": Optional[int]
+        }
 
         Note: Telegram topics cannot be truly deleted, only closed.
+        Closing a topic hides it from the topic list but preserves messages.
         """
         if not self._initialized or not self._telegram:
+            log.warning("Listener not initialized, skipping event")
             return
 
         try:
-            telegram_group_id = event.get("telegram_group_id")
-            external_topic_id = event.get("external_topic_id")
-            delete_topic = event.get("delete_telegram_topic", False)
+            telegram_supergroup_id = event.get("telegram_supergroup_id")
+            telegram_topic_id = event.get("telegram_topic_id")
 
-            if not delete_topic or not telegram_group_id or not external_topic_id:
+            if not telegram_supergroup_id or not telegram_topic_id:
+                log.debug(
+                    f"Chat {event.get('chat_id')} has no Telegram integration, skipping archive sync"
+                )
                 return
 
-            # Note: This actually deletes the topic history
-            # Consider just closing it instead
-            success = await self._telegram.delete_chat_topic(
-                group_id=telegram_group_id,
-                topic_id=int(external_topic_id)
-            )
+            # Topic ID 1 (General) cannot be closed
+            if telegram_topic_id == 1:
+                log.info("Cannot close General topic (ID 1), skipping Telegram sync")
+                return
 
-            if success:
-                log.info(f"Deleted Telegram topic {external_topic_id}")
+            # Close the topic in Telegram (this hides it from the topic list)
+            # Using MTProto client's close_forum_topic if available
+            if self._telegram.mtproto_client:
+                try:
+                    # Try to close the topic (hide from list)
+                    success = await self._telegram.mtproto_client.close_forum_topic(
+                        group_id=telegram_supergroup_id,
+                        topic_id=telegram_topic_id
+                    )
+                    if success:
+                        log.info(
+                            f"Closed Telegram topic {telegram_topic_id} in group {telegram_supergroup_id}"
+                        )
+                    else:
+                        log.warning(
+                            f"Failed to close Telegram topic {telegram_topic_id}"
+                        )
+                except AttributeError:
+                    # close_forum_topic might not exist yet
+                    log.debug("close_forum_topic not available, skipping topic close")
             else:
-                log.error(f"Failed to delete Telegram topic {external_topic_id}")
+                log.debug("MTProto client not available for topic close")
+
+        except Exception as e:
+            log.error(f"Error handling ChatArchived event: {e}", exc_info=True)
+
+    async def on_chat_deleted(self, event: dict) -> None:
+        """
+        Handle ChatHardDeleted event - delete Telegram topic.
+
+        Event payload from ChatHardDeleted:
+        {
+            "chat_id": UUID,
+            "deleted_by": UUID,
+            "reason": Optional[str],
+            "telegram_supergroup_id": Optional[int],
+            "telegram_topic_id": Optional[int]
+        }
+
+        Note: This actually deletes the topic and its message history.
+        """
+        if not self._initialized or not self._telegram:
+            log.warning("Listener not initialized, skipping chat delete event")
+            return
+
+        try:
+            telegram_supergroup_id = event.get("telegram_supergroup_id")
+            telegram_topic_id = event.get("telegram_topic_id")
+
+            if not telegram_supergroup_id or not telegram_topic_id:
+                log.debug(
+                    f"Chat {event.get('chat_id')} has no Telegram integration, skipping delete sync"
+                )
+                return
+
+            # Topic ID 1 (General) cannot be deleted
+            if telegram_topic_id == 1:
+                log.info("Cannot delete General topic (ID 1), skipping Telegram sync")
+                return
+
+            # Delete the topic and its history in Telegram
+            if self._telegram.mtproto_client:
+                success = await self._telegram.mtproto_client.delete_forum_topic(
+                    group_id=telegram_supergroup_id,
+                    topic_id=telegram_topic_id
+                )
+
+                if success:
+                    log.info(
+                        f"Deleted Telegram topic {telegram_topic_id} in group {telegram_supergroup_id}"
+                    )
+                else:
+                    log.warning(f"Failed to delete Telegram topic {telegram_topic_id}")
+            else:
+                log.debug("MTProto client not available for topic deletion")
 
         except Exception as e:
             log.error(f"Error handling ChatDeleted event: {e}", exc_info=True)

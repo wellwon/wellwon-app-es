@@ -28,12 +28,13 @@ class CompanyCreationSaga(BaseSaga):
     - company_id, company_name, created_by
     - create_telegram_group: bool - whether to create telegram group
     - telegram_group_title, telegram_group_description - telegram group options
+    - create_chat: bool - whether to create company chat (default: True)
     - link_chat_id: UUID - if provided, link existing chat instead of creating new
 
     Steps:
     1. Create Telegram Supergroup (via MTProto adapter) - only if create_telegram_group=True
     2. Link Telegram Supergroup to Company (CreateTelegramSupergroupCommand)
-    3. Create/Link Company Chat (CreateChatCommand or LinkChatToCompanyCommand)
+    3. Create/Link Company Chat - only if create_chat=True (default)
     4. Publish completion event
 
     Compensation:
@@ -242,11 +243,22 @@ class CompanyCreationSaga(BaseSaga):
     async def _create_or_link_chat(self, **context) -> Dict[str, Any]:
         """
         Step 3: Create company chat or link existing chat.
+        - If create_chat=False: Skip chat creation entirely
         - If link_chat_id is provided: Link existing chat to company
         - Otherwise: Create new company chat
 
         TRUE SAGA: Cross-domain orchestration (Company → Chat domain).
         """
+        # Check if chat creation is explicitly disabled
+        create_chat = context.get('create_chat', True)
+        if not create_chat:
+            log.info(f"Saga {self.saga_id}: Skipping chat creation (not requested)")
+            return {
+                'chat_created': False,
+                'chat_linked': False,
+                'chat_skipped': True,
+            }
+
         company_id = uuid.UUID(context['company_id']) if isinstance(context['company_id'], str) else context['company_id']
         created_by = uuid.UUID(context['created_by']) if isinstance(context['created_by'], str) else context['created_by']
         company_name = context['company_name']
@@ -294,7 +306,7 @@ class CompanyCreationSaga(BaseSaga):
         log.info(f"Saga {self.saga_id}: Creating new company chat for {company_name}")
 
         try:
-            from app.chat.commands import CreateChatCommand
+            from app.chat.commands import CreateChatCommand, SendMessageCommand
 
             chat_id = uuid.uuid4()
             self._chat_id = chat_id
@@ -302,7 +314,7 @@ class CompanyCreationSaga(BaseSaga):
 
             command = CreateChatCommand(
                 chat_id=chat_id,
-                name=company_name,
+                name="Чат компании",
                 chat_type='company',
                 created_by=created_by,
                 company_id=company_id,
@@ -313,6 +325,19 @@ class CompanyCreationSaga(BaseSaga):
             await command_bus.send(command)
 
             log.info(f"Saga {self.saga_id}: Company chat created with ID {chat_id}")
+
+            # Send welcome message
+            welcome_message = SendMessageCommand(
+                chat_id=chat_id,
+                sender_id=created_by,
+                content="Это общий чат компании в котором обсуждаются текущие организационные вопросы.",
+                message_type="system",
+                source="api",
+            )
+
+            await command_bus.send(welcome_message)
+
+            log.info(f"Saga {self.saga_id}: Welcome message sent to chat {chat_id}")
 
             return {
                 'chat_created': True,

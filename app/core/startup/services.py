@@ -11,6 +11,7 @@ from app.core.fastapi_types import FastAPI
 # Read repositories
 from app.infra.read_repos.user_account_read_repo import UserAccountReadRepo
 from app.infra.read_repos.chat_read_repo import ChatReadRepo
+from app.infra.read_repos.company_read_repo import CompanyReadRepo
 
 # Services
 from app.services.application.user_auth_service import UserAuthenticationService
@@ -23,6 +24,7 @@ async def initialize_read_repositories(app: FastAPI) -> None:
 
     app.state.user_account_read_repo = UserAccountReadRepo()
     app.state.chat_read_repo = ChatReadRepo()
+    app.state.company_read_repo = CompanyReadRepo()
 
     logger.info("Read repositories initialized.")
 
@@ -79,22 +81,166 @@ async def initialize_services(app: FastAPI) -> None:
 
 
 async def initialize_telegram_event_listener(app: FastAPI) -> None:
-    """Initialize Telegram Event Listener for bidirectional chat sync"""
-    logger.info("Initializing Telegram Event Listener...")
+    """Initialize Telegram Event Listener and Adapter for bidirectional chat sync"""
+    logger.info("Initializing Telegram Event Listener and Adapter...")
 
     enable_telegram = os.getenv("ENABLE_TELEGRAM_SYNC", "true").lower() == "true"
 
     if not enable_telegram:
-        logger.info("Telegram Event Listener disabled by configuration")
+        logger.info("Telegram disabled by configuration")
         app.state.telegram_event_listener = None
+        app.state.telegram_adapter = None
         return
 
     # Ensure QueryBus is available (CQRS compliance)
     if not hasattr(app.state, 'query_bus') or not app.state.query_bus:
-        logger.warning("QueryBus not available, Telegram Event Listener disabled")
+        logger.warning("QueryBus not available, Telegram disabled")
         app.state.telegram_event_listener = None
+        app.state.telegram_adapter = None
         return
 
+    # Initialize TelegramAdapter first (singleton for API calls)
+    try:
+        from app.infra.telegram.adapter import get_telegram_adapter
+
+        telegram_adapter = await get_telegram_adapter()
+        app.state.telegram_adapter = telegram_adapter
+        logger.info("TelegramAdapter initialized - outgoing Telegram API calls enabled")
+
+        # Register incoming message handler for MTProto
+        if telegram_adapter and hasattr(app.state, 'command_bus') and hasattr(app.state, 'query_bus'):
+            from app.infra.telegram.mtproto_client import IncomingMessage
+            from app.chat.commands import ProcessTelegramMessageCommand
+            from app.chat.queries import GetChatByTelegramIdQuery
+            import uuid
+
+            async def handle_incoming_telegram_message(msg: IncomingMessage):
+                """Handle incoming message from Telegram MTProto and dispatch to Chat domain"""
+                logger.info(f"Received Telegram message: chat_id={msg.chat_id}, topic_id={msg.topic_id}")
+                try:
+                    # Normalize chat ID (remove -100 prefix for supergroups)
+                    chat_id_str = str(msg.chat_id)
+                    if chat_id_str.startswith("-100") and len(chat_id_str) > 4:
+                        normalized_chat_id = int(chat_id_str[4:])
+                    else:
+                        normalized_chat_id = abs(msg.chat_id)
+
+                    logger.debug(f"Normalized chat_id={normalized_chat_id}, querying for WellWon chat")
+
+                    # Find WellWon chat by Telegram ID
+                    query = GetChatByTelegramIdQuery(
+                        telegram_chat_id=normalized_chat_id,
+                        telegram_topic_id=msg.topic_id,
+                    )
+                    chat_detail = await app.state.query_bus.query(query)
+
+                    if not chat_detail:
+                        logger.warning(f"No chat found for telegram_chat_id={normalized_chat_id}, topic_id={msg.topic_id}")
+                        return
+
+                    logger.info(f"Found chat id={chat_detail.id}, dispatching command")
+
+                    # Determine message type
+                    message_type = "text"
+                    if msg.file_type == "voice":
+                        message_type = "voice"
+                    elif msg.file_type == "photo":
+                        message_type = "image"
+                    elif msg.file_type:
+                        message_type = "file"
+
+                    # Dispatch ProcessTelegramMessageCommand
+                    command = ProcessTelegramMessageCommand(
+                        chat_id=chat_detail.id,
+                        message_id=uuid.uuid4(),
+                        telegram_message_id=msg.message_id,
+                        telegram_user_id=msg.sender_id,
+                        sender_id=None,  # External Telegram user
+                        content=msg.text or "",
+                        message_type=message_type,
+                        file_url=None,  # TODO: Download file if needed
+                        file_name=msg.file_name,
+                        file_size=msg.file_size,
+                        file_type=msg.file_type,
+                        voice_duration=msg.voice_duration,
+                        telegram_topic_id=msg.topic_id,
+                        telegram_user_data={
+                            "first_name": msg.sender_first_name,
+                            "last_name": msg.sender_last_name,
+                            "username": msg.sender_username,
+                            "is_bot": msg.sender_is_bot,
+                        },
+                    )
+                    await app.state.command_bus.send(command)
+                    logger.info(f"Command dispatched for chat {chat_detail.id}")
+
+                except Exception as e:
+                    logger.error(f"Error handling Telegram message: {e}", exc_info=True)
+
+            telegram_adapter.set_incoming_message_handler(handle_incoming_telegram_message)
+            logger.info("MTProto incoming message handler registered")
+
+            # NOTE: Polling setup is deferred to after CQRS handlers are registered
+            # See start_telegram_polling() which is called from lifespan.py Phase 10
+
+    except ImportError as import_error:
+        logger.warning(f"TelegramAdapter not available: {import_error}")
+        app.state.telegram_adapter = None
+    except Exception as adapter_error:
+        logger.error(f"Failed to initialize TelegramAdapter: {adapter_error}", exc_info=True)
+        logger.warning("TelegramAdapter disabled - chat topics will not be created in Telegram")
+        app.state.telegram_adapter = None
+
+
+async def _setup_telegram_polling(app: FastAPI, telegram_adapter) -> None:
+    """
+    Setup Telegram polling by loading all linked chats and starting the polling task.
+
+    This is necessary because Telethon's event-based system doesn't work reliably
+    when the same session is used on multiple devices (phone, desktop, etc.).
+    Polling ensures we always receive messages regardless of session conflicts.
+    """
+    try:
+        # Get the MTProto client from the adapter
+        mtproto_client = telegram_adapter._mtproto_client
+        if not mtproto_client:
+            logger.warning("MTProto client not available, polling disabled")
+            return
+
+        # Query all chats that have a linked Telegram supergroup via CQRS
+        from app.chat.queries import GetLinkedTelegramChatsQuery
+
+        linked_chats = await app.state.query_bus.query(GetLinkedTelegramChatsQuery())
+        logger.info(f"Found {len(linked_chats)} linked Telegram chats in database")
+
+        # If no linked chats found, add the known WellWon supergroup for testing
+        if not linked_chats:
+            # The WellWon supergroup ID (fallback for development/testing)
+            WELLWON_SUPERGROUP_ID = 3327943931
+            logger.info(f"No linked chats found, adding default supergroup {WELLWON_SUPERGROUP_ID}")
+            mtproto_client.add_monitored_chat(WELLWON_SUPERGROUP_ID, last_message_id=0)
+        else:
+            # Add all linked chats to the polling monitor
+            for chat in linked_chats:
+                if chat.telegram_supergroup_id:
+                    mtproto_client.add_monitored_chat(
+                        chat.telegram_supergroup_id,
+                        last_message_id=chat.last_telegram_message_id
+                    )
+                    logger.info(
+                        f"Added chat '{chat.name}' (supergroup={chat.telegram_supergroup_id}, "
+                        f"topic={chat.telegram_topic_id}) to polling monitor"
+                    )
+            logger.info(f"Added {len(linked_chats)} linked chats to polling monitor")
+
+        # Start the polling task
+        await mtproto_client.start_polling()
+        logger.info("Telegram message polling started")
+
+    except Exception as e:
+        logger.error(f"Failed to setup Telegram polling: {e}", exc_info=True)
+
+    # Initialize Event Listener for incoming events
     try:
         from app.infra.telegram.listener import create_telegram_event_listener
 
@@ -136,12 +282,18 @@ async def initialize_wse_domain_publisher(app: FastAPI) -> None:
             "enable_chat_events": os.getenv("WSE_ENABLE_CHAT_EVENTS", "true").lower() == "true",
         }
 
+        # Get chat_read_repo from app.state (initialized earlier by initialize_read_repositories)
+        chat_read_repo = getattr(app.state, 'chat_read_repo', None)
+        if not chat_read_repo:
+            logger.warning("ChatReadRepo not available - message broadcast to participants will be disabled")
+
         wse_domain_publisher = WSEDomainPublisher(
             event_bus=app.state.event_bus,
             pubsub_bus=app.state.pubsub_bus,
             enable_user_events=wse_domain_config["enable_user_events"],
             enable_company_events=wse_domain_config["enable_company_events"],
-            enable_chat_events=wse_domain_config["enable_chat_events"]
+            enable_chat_events=wse_domain_config["enable_chat_events"],
+            chat_read_repo=chat_read_repo,
         )
 
         await wse_domain_publisher.start()
@@ -151,7 +303,8 @@ async def initialize_wse_domain_publisher(app: FastAPI) -> None:
             f"WSE Domain Publisher started - "
             f"Users: {wse_domain_config['enable_user_events']}, "
             f"Companies: {wse_domain_config['enable_company_events']}, "
-            f"Chats: {wse_domain_config['enable_chat_events']}"
+            f"Chats: {wse_domain_config['enable_chat_events']}, "
+            f"ChatReadRepo: {'enabled' if chat_read_repo else 'disabled'}"
         )
 
     except ImportError as import_error:
@@ -250,6 +403,21 @@ async def initialize_projection_rebuilder(app: FastAPI) -> None:
     except Exception as rebuilder_error:
         logger.error(f"Failed to create ProjectionRebuilderService: {rebuilder_error}", exc_info=True)
         logger.warning("Continuing without projection rebuild functionality")
+
+async def start_telegram_polling(app: FastAPI) -> None:
+    """
+    Start Telegram polling after CQRS handlers are registered.
+
+    This must be called AFTER initialize_cqrs_and_handlers() because
+    _setup_telegram_polling uses GetLinkedTelegramChatsQuery which requires
+    the query handler to be registered.
+    """
+    if not hasattr(app.state, 'telegram_adapter') or not app.state.telegram_adapter:
+        logger.debug("Telegram adapter not available, skipping polling setup")
+        return
+
+    await _setup_telegram_polling(app, app.state.telegram_adapter)
+
 
 # =============================================================================
 # EOF

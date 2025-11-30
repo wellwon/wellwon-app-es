@@ -9,7 +9,7 @@ export interface AutoResizeTextareaProps
 }
 
 const AutoResizeTextarea = React.forwardRef<HTMLTextAreaElement, AutoResizeTextareaProps>(
-  ({ className, minHeight = 24, maxHeight = 500, onHeightChange, ...props }, ref) => {
+  ({ className, minHeight = 24, maxHeight = 120, onHeightChange, ...props }, ref) => {
     const textareaRef = React.useRef<HTMLTextAreaElement>(null);
     const combinedRef = React.useCallback((node: HTMLTextAreaElement) => {
       textareaRef.current = node;
@@ -49,7 +49,7 @@ const AutoResizeTextarea = React.forwardRef<HTMLTextAreaElement, AutoResizeTexta
       <textarea
         ref={combinedRef}
         className={cn(
-          "flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 resize-none overflow-y-auto transition-all duration-200",
+          "flex w-full rounded-md border border-input bg-background px-2 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 resize-none overflow-y-auto transition-all duration-200",
           className
         )}
         style={{ minHeight: `${minHeight}px`, maxHeight: `${maxHeight}px` }}

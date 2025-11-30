@@ -18,6 +18,8 @@ class AdminUserUpdateRequest(BaseModel):
     """Request to update user admin status"""
     active: Optional[bool] = Field(None, description="User active status")
     developer: Optional[bool] = Field(None, description="User developer flag")
+    user_type: Optional[str] = Field(None, description="User type (ww_admin, client, etc.)")
+    role: Optional[str] = Field(None, description="User role (admin, user, etc.)")
 
 
 # =============================================================================

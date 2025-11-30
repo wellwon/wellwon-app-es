@@ -13,17 +13,19 @@ interface MessageBubbleMemoProps {
     avatar_url?: string;
   };
   onReply?: (message: Message) => void;
+  onDelete?: (messageId: string) => void;
   className?: string;
 }
 
 // Мемоизированный компонент MessageBubble для оптимизации производительности
-export const MessageBubbleMemo = React.memo<MessageBubbleMemoProps>(({ 
-  message, 
-  isOwn, 
+export const MessageBubbleMemo = React.memo<MessageBubbleMemoProps>(({
+  message,
+  isOwn,
   isSending,
   currentUser,
-  onReply, 
-  className 
+  onReply,
+  onDelete,
+  className
 }) => {
   return (
     <MessageBubble
@@ -32,11 +34,13 @@ export const MessageBubbleMemo = React.memo<MessageBubbleMemoProps>(({
       isSending={isSending}
       currentUser={currentUser}
       onReply={onReply}
+      onDelete={onDelete}
       className={className}
     />
   );
 }, (prevProps, nextProps) => {
   // Кастомная функция сравнения для оптимизации ре-рендеров
+  // IMPORTANT: Must check callback existence to ensure action buttons render
   return (
     prevProps.message.id === nextProps.message.id &&
     prevProps.message.content === nextProps.message.content &&
@@ -44,6 +48,11 @@ export const MessageBubbleMemo = React.memo<MessageBubbleMemoProps>(({
     prevProps.isOwn === nextProps.isOwn &&
     prevProps.isSending === nextProps.isSending &&
     JSON.stringify(prevProps.message.read_by) === JSON.stringify(nextProps.message.read_by) &&
-    prevProps.className === nextProps.className
+    prevProps.className === nextProps.className &&
+    // Check if callback availability changed (don't compare function refs, just existence)
+    !!prevProps.onReply === !!nextProps.onReply &&
+    !!prevProps.onDelete === !!nextProps.onDelete
   );
 });
+
+MessageBubbleMemo.displayName = 'MessageBubbleMemo';

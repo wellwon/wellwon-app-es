@@ -365,6 +365,8 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
         create_telegram_group: true,
         telegram_group_title: telegramGroupData.title || companyFormData.company_name,
         telegram_group_description: telegramGroupData.description || `Рабочая группа для ${companyFormData.company_name}`,
+        // Auto-create company chat theme
+        create_chat: true,
         // If we have an active chat, link it instead of creating new
         link_chat_id: activeChat?.id || undefined,
       };

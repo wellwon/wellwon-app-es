@@ -50,6 +50,30 @@ DO $$ BEGIN
     END IF;
 END $$;
 
+-- Implicit cast for DataGrip/IDE compatibility (varchar -> company_status)
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_cast WHERE castsource = 'character varying'::regtype AND casttarget = 'company_status'::regtype) THEN
+        CREATE CAST (character varying AS company_status) WITH INOUT AS IMPLICIT;
+    END IF;
+END $$;
+
+-- Equality operator for company_status = varchar (DataGrip compatibility)
+CREATE OR REPLACE FUNCTION company_status_eq_varchar(company_status, character varying)
+RETURNS boolean AS $$
+    SELECT $1::text = $2
+$$ LANGUAGE SQL IMMUTABLE;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_operator WHERE oprname = '=' AND oprleft = 'company_status'::regtype AND oprright = 'character varying'::regtype) THEN
+        CREATE OPERATOR = (
+            LEFTARG = company_status,
+            RIGHTARG = character varying,
+            FUNCTION = company_status_eq_varchar,
+            COMMUTATOR = =
+        );
+    END IF;
+END $$;
+
 -- Telegram group states
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'telegram_group_state') THEN
@@ -279,6 +303,12 @@ DECLARE
     v_changed_fields JSONB;
     v_priority INTEGER;
 BEGIN
+    -- Skip if change is from application (not external SQL)
+    -- Application sets: SET LOCAL wellwon.app_context = 'true'
+    IF current_setting('wellwon.app_context', true) = 'true' THEN
+        RETURN NEW;
+    END IF;
+
     -- Track which fields changed
     v_changed_fields := jsonb_build_object();
 
@@ -352,14 +382,23 @@ BEGIN
         );
 
         -- Build metadata (CES pattern with EventStore flags)
+        -- Enhanced audit trail for forensics
         v_metadata := jsonb_build_object(
             'source', 'ces_trigger',
             'trigger_name', TG_NAME,
             'table_name', TG_TABLE_NAME,
             'operation', TG_OP,
+            -- User identification
             'session_user', session_user,
+            'current_user', current_user,
             'application_name', current_setting('application_name', true),
+            -- Network forensics (IP address and port of DB client)
+            'client_addr', inet_client_addr()::text,
+            'client_port', inet_client_port(),
+            'backend_pid', pg_backend_pid(),
+            -- Timestamps
             'changed_at', to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"'),
+            -- EventStore flags
             'write_to_eventstore', true,
             'compensating_event', true,
             'severity', CASE WHEN v_priority <= 2 THEN 'CRITICAL' WHEN v_priority <= 5 THEN 'HIGH' ELSE 'MEDIUM' END
@@ -820,12 +859,18 @@ CREATE TABLE IF NOT EXISTS chats (
     company_id UUID,
     created_by UUID NOT NULL REFERENCES user_accounts(id),
     is_active BOOLEAN DEFAULT TRUE,
+    participant_count INTEGER DEFAULT 0,
     metadata JSONB,
 
     -- Telegram integration
     telegram_supergroup_id BIGINT,
     telegram_topic_id INTEGER,
     telegram_sync BOOLEAN DEFAULT FALSE,
+
+    -- Last message info (for chat list preview)
+    last_message_at TIMESTAMP WITH TIME ZONE,
+    last_message_content TEXT,
+    last_message_sender_id UUID,
 
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -942,7 +987,7 @@ CREATE INDEX IF NOT EXISTS idx_typing_indicators_expires_at ON typing_indicators
 -- ======================
 CREATE TABLE IF NOT EXISTS telegram_supergroups (
     id BIGINT PRIMARY KEY,
-    company_id UUID REFERENCES companies(id),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     username TEXT,
     description TEXT,
@@ -965,17 +1010,14 @@ CREATE TRIGGER set_telegram_supergroups_updated_at
     BEFORE UPDATE ON telegram_supergroups
     FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 
--- Add foreign key to chats after telegram_supergroups exists
-DO $$ BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.table_constraints
-        WHERE constraint_name = 'fk_chats_telegram_supergroup'
-    ) THEN
-        ALTER TABLE chats
-        ADD CONSTRAINT fk_chats_telegram_supergroup
-        FOREIGN KEY (telegram_supergroup_id) REFERENCES telegram_supergroups(id);
-    END IF;
-END $$;
+-- NOTE: No FK constraint from chats.telegram_supergroup_id to telegram_supergroups
+-- With Event Sourcing + eventual consistency, FK constraints between aggregate read models
+-- cause timing issues (Chat projector may run before TelegramSupergroup projector)
+-- Domain logic enforces consistency via Commands/Events, not DB constraints
+
+-- Drop FK constraint if it exists (cleanup from previous schema versions)
+-- Using IF EXISTS syntax for cleaner DDL
+ALTER TABLE IF EXISTS chats DROP CONSTRAINT IF EXISTS fk_chats_telegram_supergroup;
 
 -- ======================
 -- TELEGRAM_GROUP_MEMBERS
