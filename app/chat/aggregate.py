@@ -347,6 +347,12 @@ class ChatAggregate:
         self._ensure_active()
         self._ensure_participant(sender_id)
 
+        # Get all active participant IDs for real-time routing
+        participant_ids = [
+            uuid.UUID(uid) for uid, p in self.state.participants.items()
+            if p.is_active
+        ]
+
         event = MessageSent(
             message_id=message_id,
             chat_id=self.id,
@@ -360,6 +366,7 @@ class ChatAggregate:
             file_type=file_type,
             voice_duration=voice_duration,
             source=source,
+            participant_ids=participant_ids,
             telegram_message_id=telegram_message_id,
             telegram_user_id=telegram_user_id,
             telegram_user_data=telegram_user_data,
@@ -404,6 +411,12 @@ class ChatAggregate:
         self._ensure_active()
         # Note: telegram_linked check removed - message source proves linkage
 
+        # Get all active participant IDs for real-time routing
+        participant_ids = [
+            uuid.UUID(uid) for uid, p in self.state.participants.items()
+            if p.is_active
+        ]
+
         event = MessageSent(
             message_id=message_id,
             chat_id=self.id,
@@ -411,6 +424,7 @@ class ChatAggregate:
             content=content,
             message_type=message_type,
             source=source,
+            participant_ids=participant_ids,
             telegram_message_id=telegram_message_id,
             telegram_user_id=telegram_user_id,
             telegram_user_data=telegram_user_data,

@@ -181,7 +181,7 @@ class JWTConfig:
 
         elif self.environment == "development":
             # Development-specific settings
-            self.tokens.access_token_expire_minutes = 60  # Longer for development
+            self.tokens.access_token_expire_minutes = 480  # 8 hours for development
             self.monitoring.log_security_events = True
             self.security.max_concurrent_sessions = 10
 

@@ -231,12 +231,8 @@ export class EventHandlers {
       const company = message.p;
       logger.info('Company created:', company);
 
-      // Invalidate company list queries
-      queryClient.invalidateQueries({ queryKey: ['companies'] });
-      queryClient.invalidateQueries({ queryKey: ['my-companies'] });
-      // Also invalidate supergroups as new company may create a telegram group
-      queryClient.invalidateQueries({ queryKey: ['supergroups'] });
-      queryClient.invalidateQueries({ queryKey: ['telegram-supergroups'] });
+      // Do NOT invalidate here - useSupergroups hook handles its own cache via window events
+      // Invalidating here would cause refetch with stale data (projection not yet complete)
 
       window.dispatchEvent(new CustomEvent('companyCreated', { detail: company }));
     } catch (error) {
@@ -413,10 +409,11 @@ export class EventHandlers {
       const chat = message.p;
       logger.info('Chat created:', chat);
 
-      queryClient.invalidateQueries({ queryKey: ['chats'] });
-      // Invalidate supergroup chat counts if linked to a supergroup
+      // Do NOT invalidate chats list - it's updated via setQueryData in useChatList hook
+      // Invalidating would cause refetch that returns stale data (projection not yet complete)
+
+      // Only invalidate counts (these are separate queries)
       queryClient.invalidateQueries({ queryKey: ['supergroup-chat-counts'] });
-      queryClient.invalidateQueries({ queryKey: ['supergroups'] });
 
       window.dispatchEvent(new CustomEvent('chatCreated', { detail: chat }));
     } catch (error) {

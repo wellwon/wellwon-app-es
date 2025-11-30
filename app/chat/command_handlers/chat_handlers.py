@@ -257,6 +257,7 @@ class ArchiveChatHandler(BaseCommandHandler):
             event_store=deps.event_store
         )
         self.query_bus = deps.query_bus
+        self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: ArchiveChatCommand) -> uuid.UUID:
         log.info(f"Archiving chat {command.chat_id}")
@@ -302,10 +303,32 @@ class ArchiveChatHandler(BaseCommandHandler):
             command=command
         )
 
-        # Telegram sync handled by TelegramEventListener via EventBus (CQRS pattern)
-        # Archive → close_forum_topic() in Telegram (preserves messages)
+        # Bidirectional sync: Close topic in Telegram (preserves messages, prevents new ones)
+        if telegram_supergroup_id and telegram_topic_id and self.telegram_adapter:
+            await self._sync_archive_to_telegram(telegram_supergroup_id, telegram_topic_id)
+
         log.info(f"Chat archived: {command.chat_id}, telegram_topic_id={telegram_topic_id}")
         return command.chat_id
+
+    async def _sync_archive_to_telegram(self, group_id: int, topic_id: int) -> None:
+        """Sync chat archive to Telegram by closing the topic"""
+        try:
+            log.info(f"Closing Telegram topic: group_id={group_id}, topic_id={topic_id}")
+
+            success = await self.telegram_adapter.close_topic(
+                group_id=group_id,
+                topic_id=topic_id,
+                closed=True
+            )
+
+            if success:
+                log.info(f"Telegram topic {topic_id} closed successfully")
+            else:
+                log.warning(f"Failed to close Telegram topic {topic_id}")
+
+        except Exception as e:
+            # Don't fail the command if Telegram sync fails
+            log.error(f"Error closing Telegram topic: {e}", exc_info=True)
 
     async def _is_company_member(self, user_id: uuid.UUID, company_id: uuid.UUID) -> bool:
         """Check if user is a member of the company"""
@@ -324,7 +347,7 @@ class ArchiveChatHandler(BaseCommandHandler):
 
 @command_handler(RestoreChatCommand)
 class RestoreChatHandler(BaseCommandHandler):
-    """Handle RestoreChatCommand"""
+    """Handle RestoreChatCommand with bidirectional Telegram sync"""
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -332,9 +355,26 @@ class RestoreChatHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
+        self.query_bus = deps.query_bus
+        self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: RestoreChatCommand) -> uuid.UUID:
         log.info(f"Restoring chat {command.chat_id}")
+
+        # Lookup telegram IDs for syncing restore to Telegram
+        telegram_supergroup_id: Optional[int] = None
+        telegram_topic_id: Optional[int] = None
+
+        try:
+            from app.chat.queries import GetChatByIdQuery
+            chat = await self.query_bus.query(
+                GetChatByIdQuery(chat_id=command.chat_id)
+            )
+            if chat:
+                telegram_supergroup_id = getattr(chat, 'telegram_supergroup_id', None) or getattr(chat, 'telegram_chat_id', None)
+                telegram_topic_id = getattr(chat, 'telegram_topic_id', None)
+        except Exception as e:
+            log.warning(f"Failed to lookup telegram IDs for chat restore: {e}")
 
         events = await self.event_store.get_events(command.chat_id, "Chat")
         chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
@@ -347,8 +387,32 @@ class RestoreChatHandler(BaseCommandHandler):
             command=command
         )
 
-        log.info(f"Chat restored: {command.chat_id}")
+        # Bidirectional sync: Reopen topic in Telegram
+        if telegram_supergroup_id and telegram_topic_id and self.telegram_adapter:
+            await self._sync_restore_to_telegram(telegram_supergroup_id, telegram_topic_id)
+
+        log.info(f"Chat restored: {command.chat_id}, telegram_topic_id={telegram_topic_id}")
         return command.chat_id
+
+    async def _sync_restore_to_telegram(self, group_id: int, topic_id: int) -> None:
+        """Sync chat restore to Telegram by reopening the topic"""
+        try:
+            log.info(f"Reopening Telegram topic: group_id={group_id}, topic_id={topic_id}")
+
+            success = await self.telegram_adapter.close_topic(
+                group_id=group_id,
+                topic_id=topic_id,
+                closed=False  # Reopen
+            )
+
+            if success:
+                log.info(f"Telegram topic {topic_id} reopened successfully")
+            else:
+                log.warning(f"Failed to reopen Telegram topic {topic_id}")
+
+        except Exception as e:
+            # Don't fail the command if Telegram sync fails
+            log.error(f"Error reopening Telegram topic: {e}", exc_info=True)
 
 
 @command_handler(DeleteChatCommand)

@@ -41,7 +41,7 @@ try:
     )
     from telethon.tl.functions.contacts import ResolveUsernameRequest
     from telethon.tl.types import ChatAdminRights, ChatBannedRights
-    from telethon.errors import FloodWaitError
+    from telethon.errors import FloodWaitError, ChannelPrivateError, ChannelInvalidError
     TELETHON_AVAILABLE = True
 except ImportError as e:
     TELETHON_AVAILABLE = False
@@ -476,8 +476,18 @@ class TelegramMTProtoClient:
         except FloodWaitError as e:
             log.warning(f"[POLLING] Flood wait for chat {chat_id}: {e.seconds}s - will wait")
             await asyncio.sleep(e.seconds + 1)
+        except (ChannelPrivateError, ChannelInvalidError) as e:
+            # Channel was deleted, we were kicked, or don't have access anymore
+            log.warning(f"Channel {chat_id} is no longer accessible, removing from polling: {e}")
+            self.remove_monitored_chat(chat_id)
         except Exception as e:
-            log.error(f"Error polling chat {chat_id}: {e}", exc_info=True)
+            # Check for common access-related errors in the message
+            error_msg = str(e).lower()
+            if "private" in error_msg or "banned" in error_msg or "permission" in error_msg:
+                log.warning(f"Channel {chat_id} access denied, removing from polling: {e}")
+                self.remove_monitored_chat(chat_id)
+            else:
+                log.error(f"Error polling chat {chat_id}: {e}", exc_info=True)
 
     async def _process_polled_message(self, msg, sender, chat_id: int) -> None:
         """Process a message obtained via polling."""

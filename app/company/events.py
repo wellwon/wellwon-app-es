@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional, Dict, Any
+from typing import Literal, Optional, Dict, Any, List
 from pydantic import Field
 import uuid
 from datetime import datetime, timezone
@@ -114,6 +114,25 @@ class CompanyDeleted(BaseEvent):
     event_type: Literal["CompanyDeleted"] = "CompanyDeleted"
     company_id: uuid.UUID
     deleted_by: uuid.UUID
+
+
+@domain_event(category="domain")
+class CompanyDeleteRequested(BaseEvent):
+    """
+    Event requesting company deletion - ENRICHED with cascade data.
+
+    TRUE SAGA Pattern: Handler enriches this event with all data saga needs.
+    Saga uses ONLY this event data, NO queries.
+    """
+    event_type: Literal["CompanyDeleteRequested"] = "CompanyDeleteRequested"
+    company_id: uuid.UUID
+    company_name: str
+    deleted_by: uuid.UUID
+
+    # ENRICHED DATA (queried by handler, NOT saga):
+    telegram_group_id: Optional[int] = None
+    chat_ids: List[uuid.UUID] = Field(default_factory=list)
+    cascade: bool = True
 
 
 # =============================================================================
@@ -235,6 +254,7 @@ COMPANY_EVENT_TYPES = {
     "CompanyArchived": CompanyArchived,
     "CompanyRestored": CompanyRestored,
     "CompanyDeleted": CompanyDeleted,
+    "CompanyDeleteRequested": CompanyDeleteRequested,
     "UserAddedToCompany": UserAddedToCompany,
     "UserRemovedFromCompany": UserRemovedFromCompany,
     "UserCompanyRoleChanged": UserCompanyRoleChanged,

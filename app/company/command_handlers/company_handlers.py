@@ -16,9 +16,12 @@ from app.company.commands import (
     ArchiveCompanyCommand,
     RestoreCompanyCommand,
     DeleteCompanyCommand,
+    RequestCompanyDeletionCommand,
 )
-from app.company.queries import GetCompanyByIdQuery
+from app.company.queries import GetCompanyByIdQuery, GetCompanyTelegramSupergroupsQuery
 from app.company.aggregate import CompanyAggregate
+from app.company.events import CompanyDeleteRequested
+from app.chat.queries import GetChatsByCompanyQuery
 from app.infra.cqrs.decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
 
@@ -285,6 +288,92 @@ class DeleteCompanyHandler(BaseCommandHandler):
         )
 
         log.info(f"Company deleted: {command.company_id}")
+        return command.company_id
+
+
+# -----------------------------------------------------------------------------
+# RequestCompanyDeletionHandler - TRUE SAGA Pattern
+# -----------------------------------------------------------------------------
+@command_handler(RequestCompanyDeletionCommand)
+class RequestCompanyDeletionHandler(BaseCommandHandler):
+    """
+    Handles RequestCompanyDeletionCommand - TRUE SAGA Pattern.
+
+    This handler ENRICHES the CompanyDeleteRequested event with all data
+    the GroupDeletionSaga needs. The saga will use ONLY this event data,
+    NO queries, NO direct SQL.
+
+    Flow:
+    1. Query company info (name, telegram_group_id)
+    2. Query all chats for company (chat_ids)
+    3. Publish ENRICHED CompanyDeleteRequested event
+    4. SagaService triggers GroupDeletionSaga with enriched context
+    """
+
+    def __init__(self, deps: 'HandlerDependencies'):
+        super().__init__(
+            event_bus=deps.event_bus,
+            transport_topic="transport.company-events",
+            event_store=deps.event_store
+        )
+        self.query_bus = deps.query_bus
+
+    async def handle(self, command: RequestCompanyDeletionCommand) -> uuid.UUID:
+        log.info(f"Processing company deletion request: {command.company_id}")
+
+        # -----------------------------------------------------------------
+        # QUERY ALL DATA HERE (NOT in saga!)
+        # -----------------------------------------------------------------
+
+        # 1. Get company info
+        company = await self.query_bus.query(
+            GetCompanyByIdQuery(company_id=command.company_id)
+        )
+        if not company:
+            raise ValueError(f"Company {command.company_id} not found")
+
+        # 2. Get telegram supergroups for this company
+        telegram_supergroups = await self.query_bus.query(
+            GetCompanyTelegramSupergroupsQuery(company_id=command.company_id)
+        )
+        # Get first supergroup ID (company typically has one main supergroup)
+        telegram_group_id = None
+        if telegram_supergroups:
+            telegram_group_id = telegram_supergroups[0].telegram_group_id
+
+        # 3. Get all chats for this company
+        chats = await self.query_bus.query(
+            GetChatsByCompanyQuery(
+                company_id=command.company_id,
+                include_archived=True  # Include archived chats for deletion
+            )
+        )
+        chat_ids = [chat.id for chat in chats] if chats else []
+
+        log.info(
+            f"Company deletion request enriched: company={company.name}, "
+            f"telegram_group_id={telegram_group_id}, chat_count={len(chat_ids)}"
+        )
+
+        # -----------------------------------------------------------------
+        # PUBLISH ENRICHED EVENT
+        # -----------------------------------------------------------------
+        event = CompanyDeleteRequested(
+            company_id=command.company_id,
+            company_name=company.name,
+            deleted_by=command.deleted_by,
+            telegram_group_id=telegram_group_id,
+            chat_ids=chat_ids,  # ENRICHED!
+            cascade=command.cascade,
+        )
+
+        # Publish to transport topic for SagaService
+        await self.event_bus.publish(
+            topic="transport.company-events",
+            event=event.model_dump(mode='json')
+        )
+
+        log.info(f"CompanyDeleteRequested event published for: {command.company_id}")
         return command.company_id
 
 

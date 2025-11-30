@@ -236,9 +236,9 @@ class OrderFulfillmentCompleted(BaseEvent):
 
 
 @saga_event()
-class CompanyCreationSagaCompleted(BaseEvent):
-    """Raised when company creation saga completes successfully"""
-    event_type: Literal["CompanyCreationSagaCompleted"] = "CompanyCreationSagaCompleted"
+class GroupCreationSagaCompleted(BaseEvent):
+    """Raised when group creation saga completes successfully"""
+    event_type: Literal["GroupCreationSagaCompleted"] = "GroupCreationSagaCompleted"
     saga_id: str
     company_id: str
     company_name: str
@@ -250,10 +250,44 @@ class CompanyCreationSagaCompleted(BaseEvent):
     timestamp: str
 
 
+# Backward compatibility alias
+CompanyCreationSagaCompleted = GroupCreationSagaCompleted
+
+
 @saga_event()
-class CompanyCreationSagaFailed(BaseEvent):
-    """Raised when company creation saga fails"""
-    event_type: Literal["CompanyCreationSagaFailed"] = "CompanyCreationSagaFailed"
+class GroupCreationSagaFailed(BaseEvent):
+    """Raised when group creation saga fails"""
+    event_type: Literal["GroupCreationSagaFailed"] = "GroupCreationSagaFailed"
+    saga_id: str
+    company_id: str
+    failure_reason: str
+    failed_step: str
+    requires_manual_intervention: bool = False
+    timestamp: str
+
+
+# Backward compatibility alias
+CompanyCreationSagaFailed = GroupCreationSagaFailed
+
+
+@saga_event()
+class GroupDeletionSagaCompleted(BaseEvent):
+    """Raised when group deletion saga completes successfully"""
+    event_type: Literal["GroupDeletionSagaCompleted"] = "GroupDeletionSagaCompleted"
+    saga_id: str
+    company_id: str
+    company_name: str
+    messages_deleted: int = 0
+    chats_deleted: int = 0
+    telegram_group_deleted: bool = False
+    deleted_by: str
+    timestamp: str
+
+
+@saga_event()
+class GroupDeletionSagaFailed(BaseEvent):
+    """Raised when group deletion saga fails"""
+    event_type: Literal["GroupDeletionSagaFailed"] = "GroupDeletionSagaFailed"
     saga_id: str
     company_id: str
     failure_reason: str
@@ -595,7 +629,10 @@ __all__ = [
     # Specific saga completions
     "UserDeletionCompleted", "BrokerDisconnectionCompleted",
     "BrokerConnectionEstablishedSagaCompleted", "AccountRefreshCompleted",
-    "OrderFulfillmentCompleted", "CompanyCreationSagaCompleted", "CompanyCreationSagaFailed",
+    "OrderFulfillmentCompleted",
+    "GroupCreationSagaCompleted", "GroupCreationSagaFailed",
+    "CompanyCreationSagaCompleted", "CompanyCreationSagaFailed",  # Backward compatibility aliases
+    "GroupDeletionSagaCompleted", "GroupDeletionSagaFailed",
 
     # Compensation events
     "SagaCompensationStepStarted", "SagaCompensationStepCompleted",

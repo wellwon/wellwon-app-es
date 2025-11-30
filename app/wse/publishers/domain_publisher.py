@@ -402,7 +402,12 @@ class WSEDomainPublisher:
             # For message events, publish to ALL participant user topics
             # This enables real-time message delivery to all chat members
             if event_type in ("MessageSent", "TelegramMessageReceived", "MessageEdited", "MessageDeleted"):
-                await self._publish_to_chat_participants(chat_id, wse_event, event_type)
+                # Get participant_ids from event (MessageSent includes them to avoid read model race condition)
+                participant_ids = event.get("participant_ids")
+                # Convert UUID objects to strings if needed
+                if participant_ids:
+                    participant_ids = [str(pid) for pid in participant_ids]
+                await self._publish_to_chat_participants(chat_id, wse_event, event_type, participant_ids)
 
             # Also publish user-specific events for chat membership changes
             # This ensures users get notified when added/removed from chats
@@ -437,18 +442,37 @@ class WSEDomainPublisher:
         chat_id: str,
         wse_event: Dict[str, Any],
         event_type: str,
+        participant_ids: Optional[List[str]] = None,
     ) -> None:
         """
         Publish event to all chat participants' user topics.
 
         This enables real-time message delivery to all users who are
         members of the chat, regardless of which chat they're currently viewing.
-        """
-        if not self._chat_read_repo:
-            log.debug(f"ChatReadRepo not available, skipping participant broadcast for {event_type}")
-            return
 
+        Args:
+            chat_id: The chat ID
+            wse_event: The event to publish
+            event_type: Event type for logging
+            participant_ids: Pre-computed participant IDs from event (avoids read model query)
+        """
         try:
+            # Use participant_ids from event if available (solves eventual consistency issue)
+            if participant_ids:
+                for user_id in participant_ids:
+                    user_topic = f"user:{user_id}:events"
+                    await self._pubsub_bus.publish(
+                        topic=user_topic,
+                        event=wse_event,
+                    )
+                log.debug(f"Published {event_type} to {len(participant_ids)} participant user topics (from event)")
+                return
+
+            # Fallback: query read model (may have race condition for new chats)
+            if not self._chat_read_repo:
+                log.debug(f"ChatReadRepo not available, skipping participant broadcast for {event_type}")
+                return
+
             import uuid
             chat_uuid = uuid.UUID(str(chat_id))
             participants = await self._chat_read_repo.get_chat_participants(chat_uuid)
@@ -466,7 +490,7 @@ class WSEDomainPublisher:
                         event=wse_event,
                     )
 
-            log.debug(f"Published {event_type} to {len(participants)} participant user topics")
+            log.debug(f"Published {event_type} to {len(participants)} participant user topics (from read model)")
 
         except Exception as e:
             log.error(f"Error publishing to chat participants: {e}", exc_info=True)
@@ -556,6 +580,11 @@ class WSEDomainPublisher:
             username = telegram_user_data.get("username", "")
             sender_name = f"{first} {last}".strip() or (f"@{username}" if username else "Telegram User")
 
+        # Convert participant_ids to strings if present
+        participant_ids = event.get("participant_ids")
+        if participant_ids:
+            participant_ids = [str(pid) for pid in participant_ids]
+
         return {
             "chat_id": event.get("aggregate_id") or event.get("chat_id"),
             "name": event.get("name"),
@@ -577,6 +606,7 @@ class WSEDomainPublisher:
             # Participant fields
             "user_id": event.get("user_id"),
             "participant_role": event.get("role"),
+            "participant_ids": participant_ids,  # For real-time routing
             # Typing fields
             "typing_user_id": event.get("typing_user_id"),
             "typing_user_name": event.get("typing_user_name"),

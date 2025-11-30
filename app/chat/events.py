@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional, Dict, Any
+from typing import Literal, Optional, Dict, Any, List
 from pydantic import Field
 import uuid
 from datetime import datetime, timezone
@@ -160,6 +160,8 @@ class MessageSent(BaseEvent):
     metadata: Dict[str, Any] = Field(default_factory=dict)
     # Source tracking
     source: str = "web"  # web, telegram, api
+    # Participant IDs for real-time routing (avoids read model query race condition)
+    participant_ids: Optional[List[uuid.UUID]] = None
     # Telegram integration
     telegram_message_id: Optional[int] = None
     telegram_user_id: Optional[int] = None  # Telegram user ID (for unmapped users)

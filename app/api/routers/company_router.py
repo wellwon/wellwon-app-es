@@ -44,6 +44,7 @@ from app.company.commands import (
     ArchiveCompanyCommand,
     RestoreCompanyCommand,
     DeleteCompanyCommand,
+    RequestCompanyDeletionCommand,
     AddUserToCompanyCommand,
     RemoveUserFromCompanyCommand,
     ChangeUserCompanyRoleCommand,
@@ -416,19 +417,57 @@ async def delete_company(
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
+    cascade: bool = Query(True, description="If True, use saga to cascade delete messages/chats/telegram"),
 ):
-    """Permanently delete a company (hard delete)"""
+    """
+    Permanently delete a company (hard delete).
+
+    If cascade=True (default), sends RequestCompanyDeletionCommand which:
+    1. Handler enriches event with all chat_ids and telegram_group_id
+    2. Publishes CompanyDeleteRequested event
+    3. Triggers GroupDeletionSaga (TRUE SAGA pattern)
+    4. Saga cascades: Delete chats (with messages) -> Delete Telegram -> Delete Company
+
+    If cascade=False, only deletes the company record (chats/messages remain orphaned).
+
+    TRUE SAGA Pattern: Handler queries all data and enriches event. Saga uses ONLY
+    enriched event data (no queries, no direct SQL).
+    """
     try:
-        command = DeleteCompanyCommand(
-            company_id=company_id,
-            deleted_by=current_user["user_id"],
-        )
+        if cascade:
+            # TRUE SAGA Pattern: Send command, handler enriches event with all data
+            # Saga uses ONLY enriched event data (no queries in saga)
+            command = RequestCompanyDeletionCommand(
+                company_id=company_id,
+                deleted_by=current_user["user_id"],
+                cascade=True,
+            )
 
-        await command_bus.send(command)
-        return CompanyResponse(id=company_id, message="Company deleted")
+            await command_bus.send(command)
 
+            log.info(f"RequestCompanyDeletionCommand sent for company {company_id}")
+            return CompanyResponse(
+                id=company_id,
+                message="Company deletion requested (saga will cascade delete)"
+            )
+
+        else:
+            # Direct delete (no cascade)
+            command = DeleteCompanyCommand(
+                company_id=company_id,
+                deleted_by=current_user["user_id"],
+            )
+
+            await command_bus.send(command)
+            return CompanyResponse(id=company_id, message="Company deleted")
+
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        log.error(f"Failed to delete company: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete company")
 
 
 # =============================================================================

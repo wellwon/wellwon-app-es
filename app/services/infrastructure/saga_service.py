@@ -276,20 +276,16 @@ class SagaService:
 
     def _register_sagas(self) -> None:
         """Register all saga types with the saga manager"""
-        from app.infra.saga.company_creation_saga import CompanyCreationSaga
+        from app.infra.saga.group_creation_saga import GroupCreationSaga
+        from app.infra.saga.group_deletion_saga import GroupDeletionSaga
 
-        # Register Company Creation Saga
-        self.saga_manager.register_saga(CompanyCreationSaga)
+        # Register Group Creation Saga (creates Company + Telegram + Chat)
+        self.saga_manager.register_saga(GroupCreationSaga)
 
-        saga_types = [
-            # UserDeletionSaga,  # Not yet implemented for WellWon
-        ]
+        # Register Group Deletion Saga (cascading delete: messages → chats → telegram → company)
+        self.saga_manager.register_saga(GroupDeletionSaga)
 
-        for saga_type in saga_types:
-            self.saga_manager.register_saga(saga_type)
-            log.info(f"Registered saga type: {saga_type.__name__}")
-
-        log.info("No sagas registered yet - WellWon sagas to be implemented")
+        log.info("Registered WellWon sagas: GroupCreationSaga, GroupDeletionSaga")
 
     async def _should_trigger_connection_saga(self, event: Dict[str, Any]) -> bool:
         """
@@ -369,13 +365,15 @@ class SagaService:
 
     def _configure_triggers(self) -> None:
         """Configure saga triggers with enhanced race condition protection"""
-        from app.infra.saga.company_creation_saga import CompanyCreationSaga
+        from app.infra.saga.group_creation_saga import GroupCreationSaga
+        from app.infra.saga.group_deletion_saga import GroupDeletionSaga
 
         # Company domain triggers
         self._trigger_configs["transport.company-events"] = [
+            # Group Creation Saga - triggered by CompanyCreated
             SagaTriggerConfig(
                 event_types=["CompanyCreated"],
-                saga_class=CompanyCreationSaga,
+                saga_class=GroupCreationSaga,
                 context_builder=lambda event: {
                     # Core IDs
                     'company_id': event.get('aggregate_id') or event.get('company_id'),
@@ -395,11 +393,38 @@ class SagaService:
                     'original_event_type': event.get('event_type'),
                     'triggered_from': 'saga_service'
                 },
-                dedupe_key_builder=lambda event: f"company_creation:{event.get('aggregate_id') or event.get('company_id')}",
+                dedupe_key_builder=lambda event: f"group_creation:{event.get('aggregate_id') or event.get('company_id')}",
                 dedupe_window_seconds=300,
                 conflict_key_builder=lambda event: f"company:{event.get('aggregate_id') or event.get('company_id')}",
                 allow_concurrent=False,
-                description="Triggers company creation saga to create Telegram group and Chat"
+                description="Triggers group creation saga to create Company + Telegram Group + Chat"
+            ),
+            # Group Deletion Saga - triggered by CompanyDeleteRequested (ENRICHED event)
+            # TRUE SAGA Pattern: All data comes from enriched event, NO queries in saga
+            SagaTriggerConfig(
+                event_types=["CompanyDeleteRequested"],
+                saga_class=GroupDeletionSaga,
+                context_builder=lambda event: {
+                    # Core IDs (from ENRICHED event)
+                    'company_id': event.get('company_id'),
+                    'company_name': event.get('company_name', 'Unknown'),
+                    'deleted_by': event.get('deleted_by'),
+                    # ENRICHED DATA - populated by RequestCompanyDeletionHandler
+                    # TRUE SAGA: Saga uses ONLY this data, NO queries
+                    'telegram_group_id': event.get('telegram_group_id'),
+                    'chat_ids': event.get('chat_ids', []),  # CRITICAL: enriched list of chat IDs
+                    'cascade': event.get('cascade', True),
+                    # CQRS metadata
+                    'correlation_id': event.get('correlation_id', event.get('event_id')),
+                    'causation_id': event.get('event_id'),
+                    'original_event_type': event.get('event_type'),
+                    'triggered_from': 'saga_service'
+                },
+                dedupe_key_builder=lambda event: f"group_deletion:{event.get('company_id')}",
+                dedupe_window_seconds=300,
+                conflict_key_builder=lambda event: f"company:{event.get('company_id')}",
+                allow_concurrent=False,
+                description="Triggers group deletion saga (cascading delete: chats → telegram → company)"
             )
         ]
 

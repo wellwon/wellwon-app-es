@@ -41,6 +41,9 @@ export function useChatList(options: UseChatListOptions = {}) {
 
       logger.debug('WSE: Chat created', { chatId });
 
+      // Delay to allow projector to update read model (eventual consistency)
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       // Fetch full chat data and add to cache
       try {
         const fullChat = await chatApi.getChatById(chatId);
@@ -61,8 +64,10 @@ export function useChatList(options: UseChatListOptions = {}) {
         );
       } catch (error) {
         logger.error('Failed to fetch new chat details', { error, chatId });
-        // Fallback: invalidate to refetch
-        queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+        // Fallback: invalidate to refetch after another delay
+        setTimeout(() => {
+          queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+        }, 500);
       }
     };
 

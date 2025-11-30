@@ -60,26 +60,28 @@ export function useActiveSupergroups() {
       );
     };
 
-    // For create/restore - invalidate to refetch (need full data from server)
-    const handleNeedsRefetch = () => {
-      logger.debug('WSE: Supergroup needs refetch');
-      queryClient.invalidateQueries({ queryKey: supergroupKeys.active });
+    // For create/restore - delay refetch to allow projection (eventual consistency)
+    const handleNeedsRefetchDelayed = () => {
+      logger.debug('WSE: Supergroup needs refetch (delayed 500ms)');
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: supergroupKeys.active });
+      }, 500);
     };
 
     window.addEventListener('companyDeleted', handleDeleted as EventListener);
     window.addEventListener('companyArchived', handleArchived as EventListener);
-    window.addEventListener('companyCreated', handleNeedsRefetch);
-    window.addEventListener('companyTelegramCreated', handleNeedsRefetch);
-    window.addEventListener('companyRestored', handleNeedsRefetch);
-    window.addEventListener('supergroupUpdated', handleNeedsRefetch);
+    window.addEventListener('companyCreated', handleNeedsRefetchDelayed);
+    window.addEventListener('companyTelegramCreated', handleNeedsRefetchDelayed);
+    window.addEventListener('companyRestored', handleNeedsRefetchDelayed);
+    window.addEventListener('supergroupUpdated', handleNeedsRefetchDelayed);
 
     return () => {
       window.removeEventListener('companyDeleted', handleDeleted as EventListener);
       window.removeEventListener('companyArchived', handleArchived as EventListener);
-      window.removeEventListener('companyCreated', handleNeedsRefetch);
-      window.removeEventListener('companyTelegramCreated', handleNeedsRefetch);
-      window.removeEventListener('companyRestored', handleNeedsRefetch);
-      window.removeEventListener('supergroupUpdated', handleNeedsRefetch);
+      window.removeEventListener('companyCreated', handleNeedsRefetchDelayed);
+      window.removeEventListener('companyTelegramCreated', handleNeedsRefetchDelayed);
+      window.removeEventListener('companyRestored', handleNeedsRefetchDelayed);
+      window.removeEventListener('supergroupUpdated', handleNeedsRefetchDelayed);
     };
   }, [queryClient]);
 
@@ -127,22 +129,24 @@ export function useArchivedSupergroups() {
       );
     };
 
-    // For archive - invalidate to refetch (need full data from server)
-    const handleNeedsRefetch = () => {
-      logger.debug('WSE: Archived supergroups need refetch');
-      queryClient.invalidateQueries({ queryKey: supergroupKeys.archived });
+    // For archive - delay refetch to allow projection (eventual consistency)
+    const handleNeedsRefetchDelayed = () => {
+      logger.debug('WSE: Archived supergroups need refetch (delayed 500ms)');
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: supergroupKeys.archived });
+      }, 500);
     };
 
     window.addEventListener('companyDeleted', handleDeleted as EventListener);
     window.addEventListener('companyRestored', handleRestored as EventListener);
-    window.addEventListener('companyArchived', handleNeedsRefetch);
-    window.addEventListener('supergroupUpdated', handleNeedsRefetch);
+    window.addEventListener('companyArchived', handleNeedsRefetchDelayed);
+    window.addEventListener('supergroupUpdated', handleNeedsRefetchDelayed);
 
     return () => {
       window.removeEventListener('companyDeleted', handleDeleted as EventListener);
       window.removeEventListener('companyRestored', handleRestored as EventListener);
-      window.removeEventListener('companyArchived', handleNeedsRefetch);
-      window.removeEventListener('supergroupUpdated', handleNeedsRefetch);
+      window.removeEventListener('companyArchived', handleNeedsRefetchDelayed);
+      window.removeEventListener('supergroupUpdated', handleNeedsRefetchDelayed);
     };
   }, [queryClient]);
 
@@ -276,28 +280,31 @@ export function useSupergroups() {
       );
     };
 
-    // For create - just invalidate (need full data from server)
-    const handleNeedsRefetch = () => {
-      logger.debug('WSE: Supergroups need refetch');
-      queryClient.invalidateQueries({ queryKey: supergroupKeys.all });
+    // For create - delay refetch to allow read model to update (eventual consistency)
+    const handleNeedsRefetchDelayed = () => {
+      logger.debug('WSE: Supergroups need refetch (delayed 500ms for projection)');
+      // Delay to allow projector to update read model before we refetch
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: supergroupKeys.all });
+      }, 500);
     };
 
     window.addEventListener('companyDeleted', handleDeleted as EventListener);
     window.addEventListener('companyArchived', handleArchived as EventListener);
     window.addEventListener('companyRestored', handleRestored as EventListener);
     window.addEventListener('companyUpdated', handleUpdated as EventListener);
-    window.addEventListener('companyCreated', handleNeedsRefetch);
-    window.addEventListener('companyTelegramCreated', handleNeedsRefetch);
-    window.addEventListener('supergroupUpdated', handleNeedsRefetch);
+    window.addEventListener('companyCreated', handleNeedsRefetchDelayed);
+    window.addEventListener('companyTelegramCreated', handleNeedsRefetchDelayed);
+    window.addEventListener('supergroupUpdated', handleNeedsRefetchDelayed);
 
     return () => {
       window.removeEventListener('companyDeleted', handleDeleted as EventListener);
       window.removeEventListener('companyArchived', handleArchived as EventListener);
       window.removeEventListener('companyRestored', handleRestored as EventListener);
       window.removeEventListener('companyUpdated', handleUpdated as EventListener);
-      window.removeEventListener('companyCreated', handleNeedsRefetch);
-      window.removeEventListener('companyTelegramCreated', handleNeedsRefetch);
-      window.removeEventListener('supergroupUpdated', handleNeedsRefetch);
+      window.removeEventListener('companyCreated', handleNeedsRefetchDelayed);
+      window.removeEventListener('companyTelegramCreated', handleNeedsRefetchDelayed);
+      window.removeEventListener('supergroupUpdated', handleNeedsRefetchDelayed);
     };
   }, [queryClient]);
 

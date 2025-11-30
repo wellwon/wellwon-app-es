@@ -387,6 +387,28 @@ class TelegramAdapter:
 
         return await self._mtproto_client.delete_forum_topic(group_id, topic_id)
 
+    async def close_topic(self, group_id: int, topic_id: int, closed: bool = True) -> bool:
+        """
+        Close or reopen a forum topic.
+
+        Closing a topic prevents new messages from being sent to it.
+        The topic is hidden from the list but can still be found via search.
+        All existing messages are preserved.
+
+        Args:
+            group_id: Telegram supergroup ID
+            topic_id: Forum topic ID
+            closed: True to close, False to reopen
+
+        Returns:
+            True if successful
+        """
+        if not self._mtproto_client:
+            log.error("MTProto client not available for close_topic")
+            return False
+
+        return await self._mtproto_client.close_forum_topic(group_id, topic_id, closed)
+
     async def get_group_topics(self, group_id: int) -> List[TopicInfo]:
         """Get all topics in a group"""
         if not self._mtproto_client:

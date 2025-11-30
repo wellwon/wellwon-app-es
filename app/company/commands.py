@@ -123,6 +123,18 @@ class DeleteCompanyCommand(Command):
     deleted_by: uuid.UUID
 
 
+class RequestCompanyDeletionCommand(Command):
+    """
+    Request company deletion - triggers GroupDeletionSaga.
+
+    TRUE SAGA Pattern: Handler queries all needed data and enriches
+    CompanyDeleteRequested event. Saga uses ONLY enriched event data.
+    """
+    company_id: uuid.UUID
+    deleted_by: uuid.UUID
+    cascade: bool = Field(default=True, description="Cascade delete chats and messages")
+
+
 # =============================================================================
 # User-Company Relationship Commands
 # =============================================================================

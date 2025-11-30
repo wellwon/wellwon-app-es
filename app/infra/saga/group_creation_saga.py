@@ -1,6 +1,6 @@
 # =============================================================================
-# File: app/infra/saga/company_creation_saga.py
-# Description: Saga for orchestrating company creation with Telegram group and Chat
+# File: app/infra/saga/group_creation_saga.py
+# Description: Saga for orchestrating group creation (Company + Telegram + Chat)
 # TRUE SAGA: Uses enriched event data, orchestrates via CommandBus
 # =============================================================================
 
@@ -15,12 +15,12 @@ from datetime import datetime, timezone, timedelta
 from app.infra.saga.saga_manager import BaseSaga, SagaStep
 from app.config.saga_config import saga_config
 
-log = logging.getLogger("wellwon.saga.company_creation")
+log = logging.getLogger("wellwon.saga.group_creation")
 
 
-class CompanyCreationSaga(BaseSaga):
+class GroupCreationSaga(BaseSaga):
     """
-    TRUE SAGA: Orchestrates company creation with Telegram group and Chat.
+    TRUE SAGA: Orchestrates group creation (Company + Telegram Group + Chat).
 
     Trigger Event: CompanyCreated (enriched with company data and saga options)
 
@@ -51,7 +51,7 @@ class CompanyCreationSaga(BaseSaga):
         self._linked_existing_chat: bool = False
 
     def get_saga_type(self) -> str:
-        return "CompanyCreationSaga"
+        return "GroupCreationSaga"
 
     def get_timeout(self) -> timedelta:
         return saga_config.get_timeout_for_saga(self.get_saga_type())
@@ -326,12 +326,16 @@ class CompanyCreationSaga(BaseSaga):
 
             log.info(f"Saga {self.saga_id}: Company chat created with ID {chat_id}")
 
-            # Send welcome message
+            # Wait for Telegram to propagate the new topic to Bot API
+            # MTProto creates the topic, but Bot API needs time to see it
+            await asyncio.sleep(1.5)
+
+            # Send welcome message (use "text" type for Telegram sync compatibility)
             welcome_message = SendMessageCommand(
                 chat_id=chat_id,
                 sender_id=created_by,
                 content="Это общий чат компании в котором обсуждаются текущие организационные вопросы.",
-                message_type="system",
+                message_type="text",
                 source="api",
             )
 
@@ -373,7 +377,7 @@ class CompanyCreationSaga(BaseSaga):
                 command = UnlinkChatFromCompanyCommand(
                     chat_id=self._chat_id,
                     unlinked_by=created_by,
-                    reason="Saga compensation - company creation failed"
+                    reason="Saga compensation - group creation failed"
                 )
                 await command_bus.send(command)
                 log.info(f"Saga {self.saga_id}: Chat {self._chat_id} unlinked from company")
@@ -388,7 +392,7 @@ class CompanyCreationSaga(BaseSaga):
                 command = ArchiveChatCommand(
                     chat_id=self._chat_id,
                     archived_by=created_by,
-                    reason="Saga compensation - company creation failed"
+                    reason="Saga compensation - group creation failed"
                 )
                 await command_bus.send(command)
                 log.info(f"Saga {self.saga_id}: Chat {self._chat_id} archived")
@@ -402,7 +406,7 @@ class CompanyCreationSaga(BaseSaga):
         """
         Step 4: Publish saga completion event using proper event class from saga_events.py.
         """
-        from app.infra.saga.saga_events import CompanyCreationSagaCompleted
+        from app.infra.saga.saga_events import GroupCreationSagaCompleted
 
         company_id = context['company_id']
         company_name = context['company_name']
@@ -417,7 +421,7 @@ class CompanyCreationSaga(BaseSaga):
         log.info(f"Saga {self.saga_id}: Publishing completion event")
 
         # Create typed event from saga_events.py
-        completion_event = CompanyCreationSagaCompleted(
+        completion_event = GroupCreationSagaCompleted(
             saga_id=str(self.saga_id),
             company_id=str(company_id),
             company_name=company_name,
@@ -433,7 +437,7 @@ class CompanyCreationSaga(BaseSaga):
         await event_bus.publish("saga.events", completion_event.model_dump(mode='json'))
 
         log.info(
-            f"Saga {self.saga_id}: CompanyCreationSaga completed successfully - "
+            f"Saga {self.saga_id}: GroupCreationSaga completed successfully - "
             f"Company: {company_id}, Telegram: {telegram_group_id}, Chat: {chat_id}"
         )
 
@@ -448,6 +452,10 @@ class CompanyCreationSaga(BaseSaga):
     async def _noop_compensate(self, **context) -> None:
         """No compensation needed for this step"""
         pass
+
+
+# Backward compatibility alias
+CompanyCreationSaga = GroupCreationSaga
 
 
 # =============================================================================

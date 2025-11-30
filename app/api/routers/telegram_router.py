@@ -616,32 +616,55 @@ async def delete_supergroup(
     supergroup_id: int,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
+    cascade: bool = Query(True, description="If True, trigger GroupDeletionSaga to cascade delete chats/messages/company"),
 ) -> dict:
     """
-    Delete a Telegram supergroup from the database via Event Sourcing.
+    Delete a Telegram supergroup via GroupDeletionSaga (cascade delete).
 
-    This removes the supergroup record from WellWon database through the
-    DeleteTelegramSupergroupCommand, creating proper audit trail.
-    It does NOT delete the actual Telegram group.
+    If cascade=True (default), triggers GroupDeletionSaga which:
+    1. Deletes all chats linked to the company (with messages)
+    2. Deletes the Telegram supergroup record
+    3. Deletes the company record
+
+    If cascade=False, only deletes the supergroup record (orphans chats/company).
+
+    TRUE SAGA Pattern: RequestCompanyDeletionCommand enriches event with all data,
+    saga uses ONLY enriched event data (no queries in saga).
     """
-    from app.company.commands import DeleteTelegramSupergroupCommand
+    from app.company.commands import RequestCompanyDeletionCommand, DeleteTelegramSupergroupCommand
 
     try:
-        # Check if supergroup exists
+        # Check if supergroup exists and get company_id
         supergroup = await CompanyReadRepo.get_telegram_supergroup(supergroup_id)
         if not supergroup:
             raise HTTPException(status_code=404, detail="Supergroup not found")
 
-        # Send command through Event Sourcing
-        command = DeleteTelegramSupergroupCommand(
-            telegram_group_id=supergroup_id,
-            deleted_by=current_user["user_id"],
-            reason="Deleted via admin interface",
-        )
-        await command_bus.send(command)
+        company_id = supergroup.get("company_id")
 
-        log.info(f"Supergroup {supergroup_id} deleted via Event Sourcing by user {current_user['user_id']}")
-        return {"success": True, "message": "Supergroup deleted"}
+        if cascade and company_id:
+            # TRUE SAGA: Trigger GroupDeletionSaga via company deletion
+            # This cascades: chats (with messages) -> telegram -> company
+            command = RequestCompanyDeletionCommand(
+                company_id=company_id,
+                deleted_by=current_user["user_id"],
+                cascade=True,
+            )
+            await command_bus.send(command)
+
+            log.info(f"GroupDeletionSaga triggered for supergroup {supergroup_id} (company {company_id})")
+            return {"success": True, "message": "Group deletion saga triggered (cascade delete)"}
+
+        else:
+            # No cascade or no company - just delete supergroup record
+            command = DeleteTelegramSupergroupCommand(
+                telegram_group_id=supergroup_id,
+                deleted_by=current_user["user_id"],
+                reason="Deleted via admin interface (no cascade)",
+            )
+            await command_bus.send(command)
+
+            log.info(f"Supergroup {supergroup_id} deleted (no cascade)")
+            return {"success": True, "message": "Supergroup deleted (no cascade)"}
 
     except HTTPException:
         raise

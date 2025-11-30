@@ -79,8 +79,8 @@ class SendMessageHandler(BaseCommandHandler):
             command=command
         )
 
-        # Bidirectional sync: Send to Telegram if message is from web (not already from Telegram)
-        if command.source == "web" and self.telegram_adapter:
+        # Bidirectional sync: Send to Telegram if message is from WellWon (web or api), not from Telegram
+        if command.source in ("web", "api") and self.telegram_adapter:
             await self._sync_to_telegram(command, chat_aggregate)
 
         log.info(f"Message sent: {command.message_id} to chat {command.chat_id}")

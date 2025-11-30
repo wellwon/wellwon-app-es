@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 import logging
 import secrets
@@ -93,7 +94,8 @@ security = HTTPBearer()
 # Configuration
 FINGERPRINT_COOKIE_NAME = "ww_fp"
 FINGERPRINT_EXPIRE_DAYS = 30
-SECURE_COOKIES = True
+SECURE_COOKIES = os.getenv("SECURE_COOKIES", "false").lower() == "true"
+FINGERPRINT_VALIDATION_ENABLED = os.getenv("JWT_FINGERPRINT_ENABLED", "true").lower() == "true"
 SESSION_COOKIE_NAME = "ww_sid"
 MAX_CONCURRENT_SESSIONS = 5
 REFRESH_ROTATE_AFTER_DAYS = 7
@@ -167,6 +169,10 @@ def _generate_fingerprint() -> tuple[str, str]:
 
 def _validate_fingerprint(request: Request, token_fingerprint: Optional[str]) -> bool:
     """Validate token fingerprint against cookie."""
+    # Skip validation in dev mode
+    if not FINGERPRINT_VALIDATION_ENABLED:
+        return True
+
     if not token_fingerprint:
         log.debug("Fingerprint validation failed: no token fingerprint")
         return False
