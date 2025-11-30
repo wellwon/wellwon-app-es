@@ -35,40 +35,63 @@ export function useChatList(options: UseChatListOptions = {}) {
 
   // WSE event handlers
   useEffect(() => {
-    const handleChatCreated = async (event: CustomEvent) => {
+    // OPTIMISTIC CREATE: Immediately add chat to cache from WSE event data
+    const handleChatCreated = (event: CustomEvent) => {
       const newChatData = event.detail;
       const chatId = newChatData.chat_id || newChatData.id;
 
-      logger.debug('WSE: Chat created', { chatId });
+      logger.info('WSE: Chat created, adding optimistically', { chatId, newChatData });
 
-      // Delay to allow projector to update read model (eventual consistency)
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Create optimistic chat entry from WSE event data
+      const optimisticChat: ChatListItem = {
+        id: chatId,
+        name: newChatData.name || newChatData.chat_name || 'New Chat',
+        chat_type: newChatData.chat_type || 'company',
+        is_active: true,
+        created_at: newChatData.created_at || new Date().toISOString(),
+        company_id: newChatData.company_id || null,
+        telegram_chat_id: newChatData.telegram_chat_id || newChatData.telegram_supergroup_id || null,
+        telegram_topic_id: newChatData.telegram_topic_id || null,
+        last_message_at: newChatData.created_at || new Date().toISOString(),
+        last_message_content: null,
+        last_message_sender_id: null,
+        unread_count: 0,
+        participant_count: 1,
+      };
 
-      // Fetch full chat data and add to cache
-      try {
-        const fullChat = await chatApi.getChatById(chatId);
+      // Add to cache IMMEDIATELY (optimistic)
+      queryClient.setQueryData(
+        chatKeys.list({ includeArchived, limit }),
+        (oldData: ChatListItem[] | undefined) => {
+          if (!oldData) return [optimisticChat];
 
-        queryClient.setQueryData(
-          chatKeys.list({ includeArchived, limit }),
-          (oldData: ChatListItem[] | undefined) => {
-            if (!oldData) return [fullChat];
-
-            // Check if already exists
-            if (oldData.some((c) => c.id === chatId)) {
-              return oldData;
-            }
-
-            // Add at beginning (newest first)
-            return [fullChat, ...oldData];
+          // Check if already exists
+          if (oldData.some((c) => c.id === chatId)) {
+            return oldData;
           }
-        );
-      } catch (error) {
-        logger.error('Failed to fetch new chat details', { error, chatId });
-        // Fallback: invalidate to refetch after another delay
-        setTimeout(() => {
-          queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
-        }, 500);
-      }
+
+          // Add at beginning (newest first)
+          return [optimisticChat, ...oldData];
+        }
+      );
+
+      // After delay, refetch to get full data from projection
+      setTimeout(async () => {
+        try {
+          const fullChat = await chatApi.getChatById(chatId);
+          if (fullChat) {
+            queryClient.setQueryData(
+              chatKeys.list({ includeArchived, limit }),
+              (oldData: ChatListItem[] | undefined) => {
+                if (!oldData) return [fullChat];
+                return oldData.map((c) => (c.id === chatId ? fullChat : c));
+              }
+            );
+          }
+        } catch (error) {
+          logger.warn('Failed to fetch full chat data, keeping optimistic', { chatId });
+        }
+      }, 1000);
     };
 
     const handleChatUpdated = (event: CustomEvent) => {

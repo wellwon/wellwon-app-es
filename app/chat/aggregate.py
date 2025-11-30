@@ -152,11 +152,15 @@ class ChatAggregate:
         created_by: uuid.UUID,
         company_id: Optional[uuid.UUID] = None,
         telegram_chat_id: Optional[int] = None,
+        telegram_supergroup_id: Optional[int] = None,
         telegram_topic_id: Optional[int] = None,
     ) -> None:
         """Create a new chat"""
         if self.version > 0:
             raise ChatAlreadyExistsError(str(self.id))
+
+        # Use telegram_supergroup_id as primary, fallback to telegram_chat_id for compat
+        supergroup_id = telegram_supergroup_id or telegram_chat_id
 
         event = ChatCreated(
             chat_id=self.id,
@@ -164,7 +168,8 @@ class ChatAggregate:
             chat_type=chat_type,
             created_by=created_by,
             company_id=company_id,
-            telegram_chat_id=telegram_chat_id,
+            telegram_chat_id=supergroup_id,  # Legacy field
+            telegram_supergroup_id=supergroup_id,  # New field
             telegram_topic_id=telegram_topic_id,
         )
         self._apply_and_record(event)

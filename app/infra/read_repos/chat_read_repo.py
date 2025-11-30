@@ -324,7 +324,13 @@ class ChatReadRepo:
 
         rows = await pg_client.fetch(
             f"""
-            SELECT * FROM chats
+            SELECT
+                id, name, type as chat_type, company_id, created_by, created_at,
+                updated_at, is_active, participant_count, last_message_at,
+                last_message_content, last_message_sender_id,
+                telegram_supergroup_id as telegram_chat_id, telegram_topic_id,
+                metadata, version
+            FROM chats
             WHERE company_id = $1 {active_filter}
             ORDER BY last_message_at DESC NULLS LAST
             LIMIT $2 OFFSET $3
@@ -343,7 +349,13 @@ class ChatReadRepo:
         """Search chats by name"""
         rows = await pg_client.fetch(
             """
-            SELECT c.* FROM chats c
+            SELECT
+                c.id, c.name, c.type as chat_type, c.company_id, c.created_by, c.created_at,
+                c.updated_at, c.is_active, c.participant_count, c.last_message_at,
+                c.last_message_content, c.last_message_sender_id,
+                c.telegram_supergroup_id as telegram_chat_id, c.telegram_topic_id,
+                c.metadata, c.version
+            FROM chats c
             INNER JOIN chat_participants cp ON c.id = cp.chat_id
               AND cp.user_id = $1 AND cp.is_active = true
             WHERE c.name ILIKE $2 AND c.is_active = true

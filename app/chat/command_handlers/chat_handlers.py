@@ -83,7 +83,7 @@ class CreateChatHandler(BaseCommandHandler):
             chat_type=command.chat_type,
             created_by=command.created_by,
             company_id=company_id,  # Use resolved company_id (could be from command or from supergroup lookup)
-            telegram_chat_id=telegram_supergroup_id,  # Map to aggregate's telegram_chat_id
+            telegram_supergroup_id=telegram_supergroup_id,  # Primary field
             telegram_topic_id=telegram_topic_id,
         )
 

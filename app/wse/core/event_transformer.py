@@ -291,14 +291,21 @@ class EventTransformer:
 
     @staticmethod
     def _transform_company_event(event: Dict[str, Any]) -> Dict[str, Any]:
-        """Transform company domain event"""
+        """Transform company domain event for WSE/frontend optimistic updates"""
         return {
             'company_id': str(event.get('company_id', event.get('aggregate_id', ''))),
+            'id': str(event.get('company_id', event.get('aggregate_id', ''))),  # alias for frontend
             'name': event.get('name'),
+            'company_name': event.get('name'),  # alias for frontend
+            'company_type': event.get('company_type', 'company'),
             'description': event.get('description'),
             'owner_id': str(event.get('owner_id', '')) if event.get('owner_id') else None,
+            'created_by': str(event.get('created_by', '')) if event.get('created_by') else None,
             'telegram_chat_id': event.get('telegram_chat_id'),
+            'telegram_group_id': event.get('telegram_group_id'),
             'telegram_topic_id': event.get('telegram_topic_id'),
+            'telegram_invite_link': event.get('telegram_invite_link'),
+            'logo_url': event.get('logo_url'),
             'is_active': event.get('is_active', True),
             'balance': event.get('balance'),
             'currency': event.get('currency'),
@@ -310,17 +317,20 @@ class EventTransformer:
 
     @staticmethod
     def _transform_chat_event(event: Dict[str, Any]) -> Dict[str, Any]:
-        """Transform chat domain event"""
+        """Transform chat domain event for WSE/frontend optimistic updates"""
         # telegram_supergroup_id may be in event or legacy telegram_chat_id
         telegram_supergroup_id = event.get('telegram_supergroup_id') or event.get('telegram_chat_id')
+        chat_id = str(event.get('chat_id', event.get('aggregate_id', '')))
 
         return {
-            'chat_id': str(event.get('chat_id', event.get('aggregate_id', ''))),
+            'chat_id': chat_id,
+            'id': chat_id,  # alias for frontend
             'name': event.get('name'),
+            'chat_name': event.get('name'),  # alias for frontend
             'chat_type': event.get('chat_type'),
             'company_id': str(event.get('company_id', '')) if event.get('company_id') else None,
             'created_by': str(event.get('created_by', '')) if event.get('created_by') else None,
-            'participant_count': event.get('participant_count'),
+            'participant_count': event.get('participant_count', 1),
             'is_active': event.get('is_active', True),
             # Include both fields for compatibility
             'telegram_chat_id': event.get('telegram_chat_id'),

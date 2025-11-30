@@ -27,7 +27,8 @@ class ChatCreated(BaseEvent):
     chat_type: str  # direct, group, company
     created_by: uuid.UUID
     company_id: Optional[uuid.UUID] = None
-    telegram_chat_id: Optional[int] = None  # For Telegram integration
+    telegram_chat_id: Optional[int] = None  # Legacy - for backward compat
+    telegram_supergroup_id: Optional[int] = None  # Telegram supergroup ID
     telegram_topic_id: Optional[int] = None  # For Telegram forum topics
 
 

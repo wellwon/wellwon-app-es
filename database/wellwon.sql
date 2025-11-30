@@ -872,6 +872,9 @@ CREATE TABLE IF NOT EXISTS chats (
     last_message_content TEXT,
     last_message_sender_id UUID,
 
+    -- Event sourcing version for optimistic concurrency
+    version INT DEFAULT 0,
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

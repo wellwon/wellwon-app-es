@@ -60,26 +60,87 @@ export function useActiveSupergroups() {
       );
     };
 
-    // For create/restore - delay refetch to allow projection (eventual consistency)
+    // OPTIMISTIC CREATE: Immediately add new company to cache
+    const handleCreated = (event: CustomEvent) => {
+      const data = event.detail;
+      logger.info('WSE: Company created, adding to cache optimistically', { data });
+
+      // Create optimistic supergroup entry from event data
+      const newSupergroup: TelegramSupergroup = {
+        telegram_group_id: data.telegram_group_id || 0,
+        title: data.name || data.company_name || 'New Company',
+        username: null,
+        description: data.description || null,
+        invite_link: data.telegram_invite_link || null,
+        is_forum: true,
+        created_at: data.created_at || new Date().toISOString(),
+        company_id: data.company_id || data.id,
+        company_logo: data.logo_url || null,
+        group_type: data.company_type || 'company',
+        member_count: 1,
+        is_active: true,
+        bot_is_admin: false,
+      };
+
+      // Add to active cache immediately
+      queryClient.setQueryData(
+        supergroupKeys.active,
+        (oldData: TelegramSupergroup[] | undefined) => {
+          if (!oldData) return [newSupergroup];
+          // Avoid duplicates
+          const exists = oldData.some((g) => g.company_id === newSupergroup.company_id);
+          if (exists) return oldData;
+          return [newSupergroup, ...oldData];
+        }
+      );
+    };
+
+    // OPTIMISTIC TELEGRAM LINKED: Update with real telegram data
+    const handleTelegramCreated = (event: CustomEvent) => {
+      const data = event.detail;
+      logger.info('WSE: Telegram supergroup created, updating cache', { data });
+
+      const companyId = data.company_id;
+      const telegramGroupId = data.telegram_group_id;
+
+      queryClient.setQueryData(
+        supergroupKeys.active,
+        (oldData: TelegramSupergroup[] | undefined) => {
+          if (!oldData) return oldData;
+          return oldData.map((group) =>
+            group.company_id === companyId
+              ? {
+                  ...group,
+                  telegram_group_id: telegramGroupId,
+                  invite_link: data.invite_link || group.invite_link,
+                  bot_is_admin: true,
+                }
+              : group
+          );
+        }
+      );
+    };
+
+    // For restore/update - delay refetch to allow projection
     const handleNeedsRefetchDelayed = () => {
-      logger.debug('WSE: Supergroup needs refetch (delayed 500ms)');
+      logger.debug('WSE: Supergroup needs refetch (delayed 300ms)');
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: supergroupKeys.active });
-      }, 500);
+      }, 300);
     };
 
     window.addEventListener('companyDeleted', handleDeleted as EventListener);
     window.addEventListener('companyArchived', handleArchived as EventListener);
-    window.addEventListener('companyCreated', handleNeedsRefetchDelayed);
-    window.addEventListener('companyTelegramCreated', handleNeedsRefetchDelayed);
+    window.addEventListener('companyCreated', handleCreated as EventListener);
+    window.addEventListener('companyTelegramCreated', handleTelegramCreated as EventListener);
     window.addEventListener('companyRestored', handleNeedsRefetchDelayed);
     window.addEventListener('supergroupUpdated', handleNeedsRefetchDelayed);
 
     return () => {
       window.removeEventListener('companyDeleted', handleDeleted as EventListener);
       window.removeEventListener('companyArchived', handleArchived as EventListener);
-      window.removeEventListener('companyCreated', handleNeedsRefetchDelayed);
-      window.removeEventListener('companyTelegramCreated', handleNeedsRefetchDelayed);
+      window.removeEventListener('companyCreated', handleCreated as EventListener);
+      window.removeEventListener('companyTelegramCreated', handleTelegramCreated as EventListener);
       window.removeEventListener('companyRestored', handleNeedsRefetchDelayed);
       window.removeEventListener('supergroupUpdated', handleNeedsRefetchDelayed);
     };
@@ -280,21 +341,78 @@ export function useSupergroups() {
       );
     };
 
-    // For create - delay refetch to allow read model to update (eventual consistency)
+    // OPTIMISTIC CREATE: Immediately add new company to cache
+    const handleCreated = (event: CustomEvent) => {
+      const data = event.detail;
+      logger.info('WSE: Company created, adding to active cache optimistically', { data });
+
+      const newSupergroup: TelegramSupergroup = {
+        telegram_group_id: data.telegram_group_id || 0,
+        title: data.name || data.company_name || 'New Company',
+        username: null,
+        description: data.description || null,
+        invite_link: data.telegram_invite_link || null,
+        is_forum: true,
+        created_at: data.created_at || new Date().toISOString(),
+        company_id: data.company_id || data.id,
+        company_logo: data.logo_url || null,
+        group_type: data.company_type || 'company',
+        member_count: 1,
+        is_active: true,
+        bot_is_admin: false,
+      };
+
+      queryClient.setQueryData(
+        supergroupKeys.active,
+        (oldData: TelegramSupergroup[] | undefined) => {
+          if (!oldData) return [newSupergroup];
+          const exists = oldData.some((g) => g.company_id === newSupergroup.company_id);
+          if (exists) return oldData;
+          return [newSupergroup, ...oldData];
+        }
+      );
+    };
+
+    // OPTIMISTIC TELEGRAM LINKED: Update with real telegram data
+    const handleTelegramCreated = (event: CustomEvent) => {
+      const data = event.detail;
+      logger.info('WSE: Telegram supergroup created, updating active cache', { data });
+
+      const companyId = data.company_id;
+      const telegramGroupId = data.telegram_group_id;
+
+      queryClient.setQueryData(
+        supergroupKeys.active,
+        (oldData: TelegramSupergroup[] | undefined) => {
+          if (!oldData) return oldData;
+          return oldData.map((group) =>
+            group.company_id === companyId
+              ? {
+                  ...group,
+                  telegram_group_id: telegramGroupId,
+                  invite_link: data.invite_link || group.invite_link,
+                  bot_is_admin: true,
+                }
+              : group
+          );
+        }
+      );
+    };
+
+    // For restore/update - delay refetch
     const handleNeedsRefetchDelayed = () => {
-      logger.debug('WSE: Supergroups need refetch (delayed 500ms for projection)');
-      // Delay to allow projector to update read model before we refetch
+      logger.debug('WSE: Supergroups need refetch (delayed 300ms)');
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: supergroupKeys.all });
-      }, 500);
+      }, 300);
     };
 
     window.addEventListener('companyDeleted', handleDeleted as EventListener);
     window.addEventListener('companyArchived', handleArchived as EventListener);
     window.addEventListener('companyRestored', handleRestored as EventListener);
     window.addEventListener('companyUpdated', handleUpdated as EventListener);
-    window.addEventListener('companyCreated', handleNeedsRefetchDelayed);
-    window.addEventListener('companyTelegramCreated', handleNeedsRefetchDelayed);
+    window.addEventListener('companyCreated', handleCreated as EventListener);
+    window.addEventListener('companyTelegramCreated', handleTelegramCreated as EventListener);
     window.addEventListener('supergroupUpdated', handleNeedsRefetchDelayed);
 
     return () => {
@@ -302,8 +420,8 @@ export function useSupergroups() {
       window.removeEventListener('companyArchived', handleArchived as EventListener);
       window.removeEventListener('companyRestored', handleRestored as EventListener);
       window.removeEventListener('companyUpdated', handleUpdated as EventListener);
-      window.removeEventListener('companyCreated', handleNeedsRefetchDelayed);
-      window.removeEventListener('companyTelegramCreated', handleNeedsRefetchDelayed);
+      window.removeEventListener('companyCreated', handleCreated as EventListener);
+      window.removeEventListener('companyTelegramCreated', handleTelegramCreated as EventListener);
       window.removeEventListener('supergroupUpdated', handleNeedsRefetchDelayed);
     };
   }, [queryClient]);

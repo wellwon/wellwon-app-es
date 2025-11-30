@@ -9,7 +9,7 @@ import logging
 import hmac
 from typing import Optional
 
-from fastapi import APIRouter, Request, HTTPException, Depends, Header
+from fastapi import APIRouter, Request, HTTPException, Depends, Header, Query
 
 from app.infra.telegram.config import get_telegram_config
 from app.infra.telegram.adapter import get_telegram_adapter, TelegramAdapter
