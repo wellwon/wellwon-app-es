@@ -110,6 +110,26 @@ const AppContent = () => {
             }
           />
 
+          {/* Platform Pro - Declarant package page */}
+          <Route
+            path="/platform-pro/declarant/package/:packageId"
+            element={
+              <DeveloperRoute>
+                <PlatformProPage />
+              </DeveloperRoute>
+            }
+          />
+
+          {/* Platform Pro - Declaration page */}
+          <Route
+            path="/platform-pro/declaration/:declarationId?"
+            element={
+              <DeveloperRoute>
+                <PlatformProPage />
+              </DeveloperRoute>
+            }
+          />
+
           {/* Declarant module - standalone isolated application */}
           <Route
             path="/declarant"

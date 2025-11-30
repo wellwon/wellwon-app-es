@@ -45,15 +45,6 @@ export const platformProSections: ProSectionConfig[] = [
     description: 'Управление пакетной обработкой деклараций ФТС 3.0',
     group: 'tools',
   },
-  // Будущие Pro-модули добавлять здесь
-  // {
-  //   id: 'analytics-pro',
-  //   label: 'Advanced Analytics',
-  //   icon: LineChart,
-  //   component: AnalyticsProContent,
-  //   description: 'Продвинутая аналитика и отчеты',
-  //   group: 'analytics',
-  // },
 ];
 
 // =============================================================================

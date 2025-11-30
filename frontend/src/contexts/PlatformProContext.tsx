@@ -5,7 +5,7 @@
 // Аналог PlatformContext для основной платформы
 
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import {
   type PlatformProSection,
@@ -19,10 +19,21 @@ import {
 // Types
 // =============================================================================
 
+// View mode for declarant section
+export type DeclarantViewMode = 'list' | 'package' | 'declaration';
+
 interface PlatformProContextType {
   // Active section
   activeSection: PlatformProSection;
   setActiveSection: (section: PlatformProSection) => void;
+
+  // Declarant-specific navigation
+  declarantViewMode: DeclarantViewMode;
+  packageId: string | null;
+  declarationId: string | null;
+  navigateToPackage: (packageId: string) => void;
+  navigateToDeclaration: (declarationId?: string) => void;
+  navigateToDeclarantList: () => void;
 
   // Sidebar state
   sidebarCollapsed: boolean;
@@ -52,8 +63,13 @@ interface PlatformProProviderProps {
 }
 
 export const PlatformProProvider: React.FC<PlatformProProviderProps> = ({ children }) => {
-  const { section } = useParams<{ section?: string }>();
+  const { section, packageId: urlPackageId, declarationId: urlDeclarationId } = useParams<{
+    section?: string;
+    packageId?: string;
+    declarationId?: string;
+  }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { profile } = useAuth();
 
   // State
@@ -71,6 +87,21 @@ export const PlatformProProvider: React.FC<PlatformProProviderProps> = ({ childr
   // Available sections (все секции для developers)
   const availableSections = platformProSections;
 
+  // Determine declarant view mode based on URL
+  const declarantViewMode: DeclarantViewMode = (() => {
+    const path = location.pathname;
+    if (path.includes('/platform-pro/declaration')) {
+      return 'declaration';
+    }
+    if (path.includes('/platform-pro/declarant/package/')) {
+      return 'package';
+    }
+    return 'list';
+  })();
+
+  const packageId = urlPackageId || null;
+  const declarationId = urlDeclarationId || null;
+
   // Redirect если не developer (дополнительная проверка на уровне Context)
   useEffect(() => {
     if (profile && !profile.is_developer) {
@@ -80,6 +111,21 @@ export const PlatformProProvider: React.FC<PlatformProProviderProps> = ({ childr
 
   // Синхронизация с URL
   useEffect(() => {
+    const path = location.pathname;
+
+    // Handle declaration page
+    if (path.includes('/platform-pro/declaration')) {
+      setActiveSectionState('declarant');
+      return;
+    }
+
+    // Handle package page
+    if (path.includes('/platform-pro/declarant/package/')) {
+      setActiveSectionState('declarant');
+      return;
+    }
+
+    // Handle normal section routing
     if (section) {
       if (isValidProSection(section)) {
         setActiveSectionState(section);
@@ -93,7 +139,7 @@ export const PlatformProProvider: React.FC<PlatformProProviderProps> = ({ childr
       const defaultSection = getDefaultProSection();
       navigate(`/platform-pro/${defaultSection}`, { replace: true });
     }
-  }, [section, navigate]);
+  }, [section, location.pathname, navigate]);
 
   // Persist sidebar state
   useEffect(() => {
@@ -118,10 +164,33 @@ export const PlatformProProvider: React.FC<PlatformProProviderProps> = ({ childr
     setIsDark((prev) => !prev);
   }, []);
 
+  // Declarant-specific navigation
+  const navigateToPackage = useCallback((pkgId: string) => {
+    navigate(`/platform-pro/declarant/package/${pkgId}`);
+  }, [navigate]);
+
+  const navigateToDeclaration = useCallback((declId?: string) => {
+    if (declId) {
+      navigate(`/platform-pro/declaration/${declId}`);
+    } else {
+      navigate('/platform-pro/declaration');
+    }
+  }, [navigate]);
+
+  const navigateToDeclarantList = useCallback(() => {
+    navigate('/platform-pro/declarant');
+  }, [navigate]);
+
   // Context value
   const value: PlatformProContextType = {
     activeSection,
     setActiveSection,
+    declarantViewMode,
+    packageId,
+    declarationId,
+    navigateToPackage,
+    navigateToDeclaration,
+    navigateToDeclarantList,
     sidebarCollapsed,
     setSidebarCollapsed,
     toggleSidebar,

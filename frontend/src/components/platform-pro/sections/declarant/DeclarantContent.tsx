@@ -5,6 +5,7 @@
 // Включает собственный sidebar, header и переключатель темы
 
 import React, { useState } from 'react';
+import { usePlatformPro } from '@/contexts/PlatformProContext';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
   Select,
@@ -40,7 +41,12 @@ import {
   ScanText,
   Search,
   SlidersHorizontal,
-  X
+  X,
+  Route,
+  ArrowUpFromLine,
+  ArrowDownToLine,
+  Pencil,
+  Database
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
@@ -48,6 +54,9 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import { CreateDeclarationPage } from './CreateDeclarationPage';
+import { DeclarationFormPage } from './DeclarationFormPage';
+import ReferencesContent from '../references/ReferencesContent';
 
 // =============================================================================
 // Mock Data
@@ -64,6 +73,8 @@ const mockBatches = [
   {
     id: '1',
     number: 'FTS-00104',
+    type: 'IM' as const,
+    typeCode: '40',
     status: 'completed',
     docs: '3/3',
     extracts: 3,
@@ -75,6 +86,8 @@ const mockBatches = [
   {
     id: '2',
     number: 'FTS-00103',
+    type: 'EK' as const,
+    typeCode: '10',
     status: 'completed',
     docs: '4/4',
     extracts: 4,
@@ -86,6 +99,8 @@ const mockBatches = [
   {
     id: '3',
     number: 'FTS-00102',
+    type: 'TT' as const,
+    typeCode: '80',
     status: 'error',
     docs: '0/3',
     extracts: 0,
@@ -97,6 +112,8 @@ const mockBatches = [
   {
     id: '4',
     number: 'FTS-00101',
+    type: 'IM' as const,
+    typeCode: '42',
     status: 'completed',
     docs: '3/3',
     extracts: 3,
@@ -108,6 +125,8 @@ const mockBatches = [
   {
     id: '5',
     number: 'FTS-00100',
+    type: 'EK' as const,
+    typeCode: '21',
     status: 'completed',
     docs: '3/3',
     extracts: 3,
@@ -119,6 +138,8 @@ const mockBatches = [
   {
     id: '6',
     number: 'FTS-00099',
+    type: 'IM' as const,
+    typeCode: '40',
     status: 'completed',
     docs: '3/3',
     extracts: 3,
@@ -130,6 +151,8 @@ const mockBatches = [
   {
     id: '7',
     number: 'FTS-00098',
+    type: 'TT' as const,
+    typeCode: '81',
     status: 'processing',
     docs: '2/5',
     extracts: 2,
@@ -141,6 +164,8 @@ const mockBatches = [
   {
     id: '8',
     number: 'FTS-00097',
+    type: 'IM' as const,
+    typeCode: '53',
     status: 'completed',
     docs: '6/6',
     extracts: 6,
@@ -152,6 +177,8 @@ const mockBatches = [
   {
     id: '9',
     number: 'FTS-00096',
+    type: 'EK' as const,
+    typeCode: '10',
     status: 'error',
     docs: '1/4',
     extracts: 1,
@@ -163,6 +190,8 @@ const mockBatches = [
   {
     id: '10',
     number: 'FTS-00095',
+    type: 'TT' as const,
+    typeCode: '80',
     status: 'completed',
     docs: '2/2',
     extracts: 2,
@@ -174,6 +203,8 @@ const mockBatches = [
   {
     id: '11',
     number: 'FTS-00094',
+    type: 'IM' as const,
+    typeCode: '40',
     status: 'processing',
     docs: '0/3',
     extracts: 0,
@@ -410,10 +441,16 @@ const SidebarMock = ({
 
 const HeaderBarMock = ({
   isDark,
-  activeSection
+  activeSection,
+  viewMode = 'list',
+  onBack,
+  setActiveSection
 }: {
   isDark: boolean;
   activeSection: string;
+  viewMode?: 'list' | 'package' | 'declaration';
+  onBack?: () => void;
+  setActiveSection: (section: string) => void;
 }) => {
   const sectionLabels: Record<string, string> = {
     dashboard: 'Декларации AI',
@@ -421,7 +458,8 @@ const HeaderBarMock = ({
     finance: 'Финансы',
     analytics: 'Аналитика',
     settings: 'Настройки',
-    team: 'Команда'
+    team: 'Команда',
+    references: 'Справочники'
   };
 
   const theme = isDark ? {
@@ -450,6 +488,7 @@ const HeaderBarMock = ({
     <div className={`h-16 border-b flex items-center justify-between ${theme.header}`}>
       <div className="flex items-center px-6">
         <button
+          onClick={onBack}
           className={`mr-4 h-8 px-3 flex items-center gap-2 rounded-xl border ${
             isDark
               ? 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10 hover:text-white hover:border-white/20'
@@ -465,6 +504,18 @@ const HeaderBarMock = ({
           <span className={theme.text.secondary}>Платформа</span>
           <span className={theme.text.secondary}>/</span>
           <span className={`font-semibold ${theme.text.primary}`}>{sectionLabels[activeSection]}</span>
+          {viewMode === 'package' && (
+            <>
+              <span className={theme.text.secondary}>/</span>
+              <span className={`font-semibold ${theme.text.primary}`}>Пакет декларации</span>
+            </>
+          )}
+          {viewMode === 'declaration' && (
+            <>
+              <span className={theme.text.secondary}>/</span>
+              <span className={`font-semibold ${theme.text.primary}`}>Декларация на товары</span>
+            </>
+          )}
         </div>
       </div>
 
@@ -477,6 +528,13 @@ const HeaderBarMock = ({
           <FileJson className="w-4 h-4" />
           Шаблоны
         </button>
+        <button
+          onClick={() => setActiveSection('references')}
+          className={`px-4 h-10 rounded-xl flex items-center gap-2 text-sm font-medium ${theme.button.default}`}
+        >
+          <Database className="w-4 h-4" />
+          Справочники
+        </button>
       </div>
     </div>
   );
@@ -486,11 +544,47 @@ const HeaderBarMock = ({
 // Main DeclarantContent Component
 // =============================================================================
 
+// Типы для создания декларации
+interface CreateDeclarationState {
+  direction: '' | 'IM' | 'EK' | 'TT';
+  customsProcedure: string;
+  feature: string;
+  customsOffice: string;
+  organization: string;
+  declarant: string;
+  transitType: string;
+  transitFeature: string;
+  selectedGoodsDocs: string[];
+  selectedRegDocs: string[];
+  rightPanelMode: 'upload' | 'journal';
+}
+
+const initialCreateState: CreateDeclarationState = {
+  direction: '',
+  customsProcedure: '',
+  feature: '',
+  customsOffice: '',
+  organization: '',
+  declarant: '',
+  transitType: '',
+  transitFeature: '',
+  selectedGoodsDocs: [],
+  selectedRegDocs: [],
+  rightPanelMode: 'upload',
+};
+
 const DeclarantContent: React.FC = () => {
-  const [isDark, setIsDark] = useState(() => {
-    const saved = localStorage.getItem('declarant_theme');
-    return saved === 'dark';
-  });
+  // Get navigation functions and view mode from context
+  const {
+    isDark,
+    toggleTheme: contextToggleTheme,
+    declarantViewMode,
+    packageId,
+    navigateToPackage,
+    navigateToDeclaration,
+    navigateToDeclarantList,
+  } = usePlatformPro();
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     const saved = localStorage.getItem('declarant_sidebarCollapsed');
     return saved ? JSON.parse(saved) : false;
@@ -506,6 +600,12 @@ const DeclarantContent: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
 
+  // State for package creation form
+  const [createState, setCreateState] = useState<CreateDeclarationState>(initialCreateState);
+
+  // Быстрый фильтр по типу декларации
+  const [quickFilter, setQuickFilter] = useState<'all' | 'TT' | 'EK' | 'IM'>('all');
+
   // Новые фильтры
   const [mainDocumentFilter, setMainDocumentFilter] = useState('all');
   const [procedureCodeFilter, setProcedureCodeFilter] = useState('all');
@@ -517,11 +617,7 @@ const DeclarantContent: React.FC = () => {
   const [documentFilter, setDocumentFilter] = useState('all');
   const [documentDateFilter, setDocumentDateFilter] = useState('all');
 
-  const toggleTheme = () => {
-    const newValue = !isDark;
-    setIsDark(newValue);
-    localStorage.setItem('declarant_theme', newValue ? 'dark' : 'light');
-  };
+  const toggleTheme = contextToggleTheme;
 
   const toggleSidebar = () => {
     const newValue = !sidebarCollapsed;
@@ -529,12 +625,25 @@ const DeclarantContent: React.FC = () => {
     localStorage.setItem('declarant_sidebarCollapsed', JSON.stringify(newValue));
   };
 
+  // Фильтрация данных
+  const filteredBatches = mockBatches.filter(batch => {
+    // Фильтр по типу декларации (быстрые фильтры)
+    if (quickFilter !== 'all' && batch.type !== quickFilter) {
+      return false;
+    }
+    // Фильтр по поиску
+    if (searchQuery && !batch.number.toLowerCase().includes(searchQuery.toLowerCase())) {
+      return false;
+    }
+    return true;
+  });
+
   // Пагинация
-  const totalItems = mockBatches.length;
+  const totalItems = filteredBatches.length;
   const totalPages = Math.ceil(totalItems / rowsPerPage);
   const startIndex = (currentPage - 1) * rowsPerPage;
   const endIndex = Math.min(startIndex + rowsPerPage, totalItems);
-  const paginatedBatches = mockBatches.slice(startIndex, endIndex);
+  const paginatedBatches = filteredBatches.slice(startIndex, endIndex);
 
   const handleRowsPerPageChange = (value: string) => {
     const newValue = Number(value);
@@ -590,6 +699,68 @@ const DeclarantContent: React.FC = () => {
   };
 
   const renderContent = (section: string) => {
+    // Если режим формы декларации (открыта DeclarationFormPage)
+    if (section === 'dashboard' && declarantViewMode === 'declaration') {
+      return (
+        <DeclarationFormPage
+          isDark={isDark}
+          onBack={() => {
+            // Возвращаемся к пакету
+            if (packageId) {
+              navigateToPackage(packageId);
+            } else {
+              navigateToDeclarantList();
+            }
+          }}
+          onSave={() => {
+            console.log('Сохранение декларации на товары');
+            // Возвращаемся к пакету после сохранения
+            if (packageId) {
+              navigateToPackage(packageId);
+            } else {
+              navigateToDeclarantList();
+            }
+          }}
+        />
+      );
+    }
+
+    // Если режим просмотра/создания пакета
+    if (section === 'dashboard' && declarantViewMode === 'package') {
+      // Определяем тип декларации из packageId
+      const direction = packageId?.includes('tt') ? 'TT' :
+                       packageId?.includes('ek') ? 'EK' :
+                       packageId?.includes('im') ? 'IM' : createState.direction;
+
+      // Обновляем createState если direction изменился
+      const effectiveState = direction !== createState.direction
+        ? { ...createState, direction: direction as '' | 'IM' | 'EK' | 'TT' }
+        : createState;
+
+      return (
+        <CreateDeclarationPage
+          state={effectiveState}
+          onStateChange={setCreateState}
+          isDark={isDark}
+          theme={theme}
+          onCancel={() => {
+            navigateToDeclarantList();
+            setCreateState(initialCreateState);
+          }}
+          onSave={() => {
+            // Здесь будет логика сохранения
+            console.log('Сохранение декларации:', effectiveState);
+            navigateToDeclarantList();
+            setCreateState(initialCreateState);
+          }}
+          onOpenDeclarationForm={() => {
+            // Открываем форму декларации
+            navigateToDeclaration();
+          }}
+        />
+      );
+    }
+
     if (section === 'dashboard') {
       return (
         <>
@@ -605,21 +776,49 @@ const DeclarantContent: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-3">
-              <button className={`px-4 h-10 rounded-xl flex items-center gap-2 text-sm font-medium ${theme.button.danger}`}>
-                <Trash2 className="w-4 h-4" />
-                Удалить
-              </button>
+              {/* Кнопки режима */}
               <button className={`px-4 h-10 rounded-xl flex items-center gap-2 text-sm font-medium ${theme.button.default}`}>
-                <Download className="w-4 h-4" />
-                Экспорт
+                <Pencil className="w-4 h-4" />
+                Редактировать
               </button>
               <button className={`px-4 h-10 rounded-xl flex items-center gap-2 text-sm font-medium ${theme.button.default}`}>
                 <Eye className="w-4 h-4" />
                 Просмотр
               </button>
-              <button className={`px-4 h-10 bg-accent-red text-white rounded-xl hover:bg-accent-red/90 flex items-center gap-2 text-sm font-medium ${isDark ? '' : 'shadow-sm'}`}>
-                <Plus className="w-4 h-4" />
-                Создать пакет
+
+              {/* Разделитель */}
+              <div className={`w-px h-6 ${isDark ? 'bg-white/20' : 'bg-gray-300'}`} />
+
+              {/* Кнопки создания деклараций */}
+              <button
+                onClick={() => {
+                  setCreateState(s => ({ ...s, direction: 'TT' }));
+                  navigateToPackage('new-tt');
+                }}
+                className="px-4 h-10 rounded-xl bg-orange-500 hover:bg-orange-500/90 text-white text-sm font-medium flex items-center gap-2"
+              >
+                <Route className="w-4 h-4" />
+                ТТ - Транзит
+              </button>
+              <button
+                onClick={() => {
+                  setCreateState(s => ({ ...s, direction: 'EK' }));
+                  navigateToPackage('new-ek');
+                }}
+                className="px-4 h-10 rounded-xl bg-blue-600 hover:bg-blue-600/90 text-white text-sm font-medium flex items-center gap-2"
+              >
+                <ArrowUpFromLine className="w-4 h-4" />
+                ЭК - Вывоз
+              </button>
+              <button
+                onClick={() => {
+                  setCreateState(s => ({ ...s, direction: 'IM' }));
+                  navigateToPackage('new-im');
+                }}
+                className="px-4 h-10 rounded-xl bg-accent-green hover:bg-accent-green/90 text-white text-sm font-medium flex items-center gap-2"
+              >
+                <ArrowDownToLine className="w-4 h-4" />
+                ИМ - Ввоз
               </button>
             </div>
           </div>
@@ -702,50 +901,104 @@ const DeclarantContent: React.FC = () => {
                   />
                 </div>
 
-                {/* Кнопка фильтров */}
-                <button
-                  onClick={() => setFiltersOpen(!filtersOpen)}
-                  className={`flex items-center gap-2 px-4 h-10 rounded-xl border text-sm font-medium ${
-                    isDark
-                      ? 'bg-[#1e1e22] hover:bg-[#252529] text-gray-300 hover:text-white border-white/10'
-                      : 'bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-900 border-gray-300'
-                  }`}
-                >
-                  <SlidersHorizontal size={16} />
-                  <span>Фильтры</span>
-                  <ChevronDown size={16} className={`transition-transform ${filtersOpen ? 'rotate-180' : ''}`} />
-                </button>
-
-                {/* Кнопка сброса фильтров - показывается только при активных фильтрах */}
-                {(searchQuery !== '' ||
-                  mainDocumentFilter !== 'all' ||
-                  procedureCodeFilter !== 'all' ||
-                  featureFilter !== 'all' ||
-                  recipientFilter !== 'all' ||
-                  senderFilter !== 'all' ||
-                  registrationDateFilter !== 'all' ||
-                  documentTypeFilter !== 'all' ||
-                  documentFilter !== 'all' ||
-                  documentDateFilter !== 'all') && (
+                {/* Быстрые фильтры по типу декларации */}
+                <div className="flex items-center gap-2">
                   <button
-                    onClick={() => {
-                      setMainDocumentFilter('all');
-                      setProcedureCodeFilter('all');
-                      setFeatureFilter('all');
-                      setRecipientFilter('all');
-                      setSenderFilter('all');
-                      setRegistrationDateFilter('all');
-                      setDocumentTypeFilter('all');
-                      setDocumentFilter('all');
-                      setDocumentDateFilter('all');
-                      setSearchQuery('');
-                    }}
-                    className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent-red/10 text-accent-red border border-accent-red/20 hover:bg-accent-red/20 hover:border-accent-red/30"
-                    title="Сбросить фильтры"
+                    onClick={() => setQuickFilter(quickFilter === 'TT' ? 'all' : 'TT')}
+                    className={`flex items-center gap-2 px-4 h-10 rounded-xl border text-sm font-medium ${
+                      quickFilter === 'TT'
+                        ? 'bg-orange-500/20 text-orange-500 border-orange-500/30'
+                        : isDark
+                          ? 'bg-[#1e1e22] hover:bg-[#252529] text-gray-300 hover:text-white border-white/10'
+                          : 'bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-900 border-gray-300'
+                    }`}
                   >
-                    <X size={16} />
+                    <Route size={16} />
+                    ТТ
                   </button>
-                )}
+                  <button
+                    onClick={() => setQuickFilter(quickFilter === 'EK' ? 'all' : 'EK')}
+                    className={`flex items-center gap-2 px-4 h-10 rounded-xl border text-sm font-medium ${
+                      quickFilter === 'EK'
+                        ? 'bg-blue-600/20 text-blue-500 border-blue-600/30'
+                        : isDark
+                          ? 'bg-[#1e1e22] hover:bg-[#252529] text-gray-300 hover:text-white border-white/10'
+                          : 'bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-900 border-gray-300'
+                    }`}
+                  >
+                    <ArrowUpFromLine size={16} />
+                    ЭК
+                  </button>
+                  <button
+                    onClick={() => setQuickFilter(quickFilter === 'IM' ? 'all' : 'IM')}
+                    className={`flex items-center gap-2 px-4 h-10 rounded-xl border text-sm font-medium ${
+                      quickFilter === 'IM'
+                        ? 'bg-accent-green/20 text-accent-green border-accent-green/30'
+                        : isDark
+                          ? 'bg-[#1e1e22] hover:bg-[#252529] text-gray-300 hover:text-white border-white/10'
+                          : 'bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-900 border-gray-300'
+                    }`}
+                  >
+                    <ArrowDownToLine size={16} />
+                    ИМ
+                  </button>
+                </div>
+
+                {/* Кнопка фильтров + кнопка сброса в одном контейнере */}
+                {(() => {
+                  const hasActiveFilters = searchQuery !== '' ||
+                    quickFilter !== 'all' ||
+                    mainDocumentFilter !== 'all' ||
+                    procedureCodeFilter !== 'all' ||
+                    featureFilter !== 'all' ||
+                    recipientFilter !== 'all' ||
+                    senderFilter !== 'all' ||
+                    registrationDateFilter !== 'all' ||
+                    documentTypeFilter !== 'all' ||
+                    documentFilter !== 'all' ||
+                    documentDateFilter !== 'all';
+
+                  return (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setFiltersOpen(!filtersOpen)}
+                        className={`flex items-center gap-2 h-10 rounded-xl border text-sm font-medium ${
+                          hasActiveFilters ? 'pl-4 pr-2' : 'px-4'
+                        } ${
+                          isDark
+                            ? 'bg-[#1e1e22] hover:bg-[#252529] text-gray-300 hover:text-white border-white/10'
+                            : 'bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-900 border-gray-300'
+                        }`}
+                      >
+                        <SlidersHorizontal size={16} />
+                        <span>Фильтры</span>
+                        <ChevronDown size={16} className={`transition-transform ${filtersOpen ? 'rotate-180' : ''}`} />
+                      </button>
+
+                      {hasActiveFilters && (
+                        <button
+                          onClick={() => {
+                            setQuickFilter('all');
+                            setMainDocumentFilter('all');
+                            setProcedureCodeFilter('all');
+                            setFeatureFilter('all');
+                            setRecipientFilter('all');
+                            setSenderFilter('all');
+                            setRegistrationDateFilter('all');
+                            setDocumentTypeFilter('all');
+                            setDocumentFilter('all');
+                            setDocumentDateFilter('all');
+                            setSearchQuery('');
+                          }}
+                          className="flex items-center justify-center w-10 h-10 rounded-xl border bg-accent-red/10 text-accent-red border-accent-red/20 hover:bg-accent-red/20 hover:border-accent-red/30 cursor-pointer"
+                          title="Сбросить фильтры"
+                        >
+                          <X size={16} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Раскрывающиеся фильтры */}
@@ -956,25 +1209,28 @@ const DeclarantContent: React.FC = () => {
                 <thead>
                   <tr className={`border-b ${theme.table.border}`}>
                     <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
-                        Номер пакета
-                      </th>
-                      <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
-                        Статус
-                      </th>
-                      <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
-                        Документы
-                      </th>
-                      <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
-                        Извлечения
-                      </th>
-                      <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
-                        Создан
-                      </th>
-                      <th className={`text-right py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
-                        Действия
-                      </th>
-                    </tr>
-                  </thead>
+                      Номер
+                    </th>
+                    <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
+                      Тип
+                    </th>
+                    <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
+                      Статус
+                    </th>
+                    <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
+                      Документы
+                    </th>
+                    <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
+                      Извлечения
+                    </th>
+                    <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
+                      Создан
+                    </th>
+                    <th className={`text-right py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
+                      Действия
+                    </th>
+                  </tr>
+                </thead>
                   <tbody className={`divide-y ${theme.table.row.split(' ')[0]}`}>
                     {paginatedBatches.map((batch) => {
                       const Icon = batch.icon;
@@ -986,6 +1242,17 @@ const DeclarantContent: React.FC = () => {
                           <td className="py-3 px-4">
                             <span className={`font-mono text-sm ${theme.text.primary}`}>
                               {batch.number}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                              batch.type === 'IM'
+                                ? 'bg-accent-green/20 text-accent-green'
+                                : batch.type === 'EK'
+                                  ? 'bg-blue-600/20 text-blue-500'
+                                  : 'bg-orange-500/20 text-orange-500'
+                            }`}>
+                              {batch.type} {batch.typeCode}
                             </span>
                           </td>
                           <td className="py-3 px-4">
@@ -1155,6 +1422,16 @@ const DeclarantContent: React.FC = () => {
       );
     }
 
+    // Справочники
+    if (section === 'references') {
+      return (
+        <ReferencesContent
+          isDark={isDark}
+          onBack={() => setActiveSection('dashboard')}
+        />
+      );
+    }
+
     // Заглушки для остальных разделов
     const placeholders: Record<string, { icon: typeof Truck; title: string }> = {
       logistics: { icon: Truck, title: 'Логистика' },
@@ -1198,6 +1475,16 @@ const DeclarantContent: React.FC = () => {
         <HeaderBarMock
           isDark={isDark}
           activeSection={activeSection}
+          viewMode={declarantViewMode}
+          onBack={() => {
+            if (activeSection === 'references') {
+              setActiveSection('dashboard');
+            } else if (declarantViewMode === 'package' || declarantViewMode === 'declaration') {
+              navigateToDeclarantList();
+              setCreateState(initialCreateState);
+            }
+          }}
+          setActiveSection={setActiveSection}
         />
 
         {/* Content */}

@@ -14,6 +14,9 @@ from app.api.routers.company_router import router as company_router
 from app.api.routers.chat_router import router as chat_router
 from app.api.routers.telegram_router import router as telegram_router
 
+# Declarant module
+from app.declarant.routes import router as declarant_router
+
 # Import health endpoints
 from app.core.health import register_health_endpoints
 
@@ -41,6 +44,7 @@ def register_core_routers(app: FastAPI) -> None:
     app.include_router(company_router, tags=["Companies"])
     app.include_router(chat_router, tags=["Chat"])
     app.include_router(telegram_router, tags=["Telegram"])
+    app.include_router(declarant_router, tags=["Declarant"])
 
     logger.info("Core routers registered")
 
