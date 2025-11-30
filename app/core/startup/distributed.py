@@ -105,6 +105,27 @@ async def initialize_outbox_service(app: FastAPI) -> None:
         "UserAccountCreated": "transport.user-account-events",
         "UserDeleted": "transport.user-account-events",
         "UserProfileUpdated": "transport.user-account-events",
+        "UserAccountDeleted": "transport.user-account-events",
+        "UserHardDeleted": "transport.user-account-events",
+        "UserAdminStatusUpdated": "transport.user-account-events",
+        "UserRoleChangedExternally": "transport.user-account-events",
+        "UserStatusChangedExternally": "transport.user-account-events",
+        # Company domain events
+        "CompanyCreated": "transport.company-events",
+        "CompanyUpdated": "transport.company-events",
+        "CompanyArchived": "transport.company-events",
+        "CompanyRestored": "transport.company-events",
+        "CompanyDeleted": "transport.company-events",
+        "CompanyDeleteRequested": "transport.company-events",
+        "UserAddedToCompany": "transport.company-events",
+        "UserRemovedFromCompany": "transport.company-events",
+        "UserCompanyRoleChanged": "transport.company-events",
+        "TelegramSupergroupCreated": "transport.company-events",
+        "TelegramSupergroupLinked": "transport.company-events",
+        "TelegramSupergroupUnlinked": "transport.company-events",
+        "TelegramSupergroupUpdated": "transport.company-events",
+        "TelegramSupergroupDeleted": "transport.company-events",
+        "CompanyBalanceUpdated": "transport.company-events",
         # Saga events
         "SagaStarted": "saga.events",
         "SagaCompleted": "saga.events",
@@ -114,6 +135,9 @@ async def initialize_outbox_service(app: FastAPI) -> None:
         "ChatUpdated": "transport.chat-events",
         "ChatArchived": "transport.chat-events",
         "ChatRestored": "transport.chat-events",
+        "ChatHardDeleted": "transport.chat-events",
+        "ChatLinkedToCompany": "transport.chat-events",
+        "ChatUnlinkedFromCompany": "transport.chat-events",
         "MessageSent": "transport.chat-events",
         "MessageEdited": "transport.chat-events",
         "MessageDeleted": "transport.chat-events",
@@ -122,8 +146,10 @@ async def initialize_outbox_service(app: FastAPI) -> None:
         "ParticipantLeft": "transport.chat-events",
         "ParticipantRoleChanged": "transport.chat-events",
         "MessagesMarkedAsRead": "transport.chat-events",
+        "MessageReadStatusUpdated": "transport.chat-events",
         "TelegramChatLinked": "transport.chat-events",
         "TelegramChatUnlinked": "transport.chat-events",
+        "TelegramMessageReceived": "transport.chat-events",
     }
 
     # Create outbox service with DLQ support
@@ -263,10 +289,12 @@ async def register_sync_projections_phase(app: FastAPI) -> None:
 
     logger.info("Registering synchronous projections...")
 
-    # Import all projector modules to trigger decorator registration
+    # Import ONLY UserAccount projector for SYNC projections
+    # Company and Chat projections run ASYNC through Worker (cleaner architecture)
     modules_to_import = [
         "app.user_account.projectors",
-        "app.chat.projectors",
+        # NOTE: Company and Chat removed - they use Worker async projections only
+        # This prevents duplicate projections and simplifies the system
     ]
 
     for module in modules_to_import:
@@ -276,29 +304,19 @@ async def register_sync_projections_phase(app: FastAPI) -> None:
         except ImportError as e:
             logger.warning(f"Could not import {module}: {e}")
 
-    # Create projector instances
+    # Create projector instances - ONLY for domains that need SYNC projections
     projector_instances = {}
 
-    # User Account Projector
+    # User Account Projector - SYNC (needed for immediate login after registration)
     if hasattr(app.state, 'user_account_read_repo'):
         from app.user_account.projectors import UserAccountProjector
         projector_instances["user_account"] = UserAccountProjector(
             app.state.user_account_read_repo
         )
 
-    # Chat Projector
-    if hasattr(app.state, 'chat_read_repo'):
-        from app.chat.projectors import ChatProjector
-        projector_instances["chat"] = ChatProjector(
-            app.state.chat_read_repo
-        )
-
-    # Company Projector
-    if hasattr(app.state, 'company_read_repo'):
-        from app.company.projectors import CompanyProjector
-        projector_instances["company"] = CompanyProjector(
-            app.state.company_read_repo
-        )
+    # NOTE: Chat and Company projectors removed from sync registration
+    # They will be processed ASYNC by Event Processor Worker
+    # This is the correct Event Sourcing pattern - eventual consistency
 
     # Store projector instances in app state for debugging
     app.state.projector_instances = projector_instances

@@ -235,6 +235,15 @@ async def execute_sync_projections(
             _PROJECTION_ERRORS[event_type] += 1
 
         except Exception as e:
+            # Check for RetriableProjectionError - must be re-raised for Worker to handle
+            from app.common.exceptions.projection_exceptions import RetriableProjectionError
+            if isinstance(e, RetriableProjectionError):
+                log.warning(
+                    f"Retriable error in sync projection {handler.method_name} "
+                    f"for {event_type}: {e}"
+                )
+                raise  # Re-raise for event_processor to queue for retry
+
             error_msg = (
                 f"Error in sync projection {handler.method_name} "
                 f"for {event_type}: {e}"
@@ -346,7 +355,10 @@ async def auto_register_sync_projections(
         projector_instances: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    Register all decorated sync projections with the event store.
+    Register sync projections with the event store.
+
+    IMPORTANT: Only registers events for domains that have projector instances.
+    This prevents unnecessary sync processing for domains using async Worker projections.
 
     Args:
         event_store: The RedPandaEventStore instance
@@ -367,16 +379,40 @@ async def auto_register_sync_projections(
             "validation": validate_sync_projections()
         }
 
-    # Enable sync projections in event store
-    event_store.enable_synchronous_projections(all_sync_events)
+    # FILTER: Only include events for domains that have projector instances
+    # This allows Company/Chat to use @sync_projection for Worker, but not in-process
+    filtered_sync_events = set()
+    for event_type in all_sync_events:
+        handlers = _SYNC_PROJECTION_HANDLERS.get(event_type, [])
+        for handler in handlers:
+            if handler.domain in projector_instances:
+                filtered_sync_events.add(event_type)
+                break
+
+    log.info(
+        f"Filtered sync events: {len(filtered_sync_events)} of {len(all_sync_events)} "
+        f"(domains with projectors: {list(projector_instances.keys())})"
+    )
+
+    if not filtered_sync_events:
+        log.info("No sync events for registered projector domains")
+        return {
+            "sync_events": 0,
+            "handlers_registered": 0,
+            "domains": list(projector_instances.keys()),
+            "validation": validate_sync_projections()
+        }
+
+    # Enable ONLY filtered sync projections in event store
+    event_store.enable_synchronous_projections(filtered_sync_events)
 
     # Create wrapper function for event store
     async def projection_handler(envelope: EventEnvelope) -> None:
         await execute_sync_projections(envelope, projector_instances)
 
-    # Register single handler for each event type
+    # Register handler for filtered event types only
     registered = 0
-    for event_type in all_sync_events:
+    for event_type in filtered_sync_events:
         if _SYNC_PROJECTION_HANDLERS.get(event_type):
             event_store.register_sync_projection(event_type, projection_handler)
             registered += 1

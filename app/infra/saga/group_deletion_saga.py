@@ -36,12 +36,17 @@ class GroupDeletionSaga(BaseSaga):
     - telegram_group_id: Optional[int] - enriched from handler query
     - chat_ids: List[UUID] - enriched from handler query (CRITICAL!)
     - cascade: bool
+    - preserve_company: bool - if True, keep company record for re-linking (default: False)
 
     Steps (Cascading Delete):
     1. Delete all chats via DeleteChatCommand (each chat deletes its own messages)
     2. Delete Telegram supergroup via DeleteTelegramSupergroupCommand
-    3. Delete company via DeleteCompanyCommand
+    3. Delete company via DeleteCompanyCommand (skipped if preserve_company=True)
     4. Publish completion event
+
+    FUTURE FLEXIBILITY:
+    - preserve_company=True: Keeps company record for re-linking to new Telegram group
+    - Useful when company has other linked entities (ERP, invoices, etc.)
 
     Note: This is a destructive saga. Compensation only logs failures
     since we can't restore deleted data. Manual intervention required on failure.
@@ -211,14 +216,28 @@ class GroupDeletionSaga(BaseSaga):
             }
 
     # =========================================================================
-    # Step 3: Delete Company - TRUE SAGA
+    # Step 3: Delete Company - TRUE SAGA (with preserve_company option)
     # =========================================================================
     async def _delete_company(self, **context) -> Dict[str, Any]:
         """
         Hard delete company via DeleteCompanyCommand.
 
         TRUE SAGA: company_id comes from ENRICHED event context.
+
+        FUTURE FLEXIBILITY:
+        - preserve_company=True: Skip company deletion, keep for re-linking
+        - Default: preserve_company=False (delete everything)
         """
+        # DEBUG: Log all context to trace preserve_company value
+        log.error(
+            f"Saga {self.saga_id}: _delete_company STEP STARTED - "
+            f"preserve_company={context.get('preserve_company')}, "
+            f"company_id={context.get('company_id')}, "
+            f"context_keys={list(context.keys())}"
+        )
+
+        # Check preserve_company flag (default: False = delete company)
+        preserve_company = context.get('preserve_company', False)
         company_id = context['company_id']
         deleted_by = context.get('deleted_by')
 
@@ -227,17 +246,30 @@ class GroupDeletionSaga(BaseSaga):
         if isinstance(deleted_by, str):
             deleted_by = uuid.UUID(deleted_by)
 
+        # FUTURE FLEXIBILITY: Skip company deletion if preserve_company=True
+        if preserve_company:
+            log.error(
+                f"Saga {self.saga_id}: SKIPPING company deletion - preserve_company=True! "
+                f"Company {company_id} will be PRESERVED for re-linking"
+            )
+            return {
+                'company_deleted': False,
+                'company_preserved': True,
+                'company_id': str(company_id),
+            }
+
         # Get command_bus from context (TRUE SAGA: only CommandBus allowed)
         command_bus = context['command_bus']
 
-        log.info(f"Saga {self.saga_id}: Deleting company {company_id} via command")
+        log.error(f"Saga {self.saga_id}: DELETING company {company_id} via DeleteCompanyCommand")
 
         try:
             from app.company.commands import DeleteCompanyCommand
 
             command = DeleteCompanyCommand(
                 company_id=company_id,
-                deleted_by=deleted_by
+                deleted_by=deleted_by,
+                force=True  # Bypass permission checks for saga-initiated deletion
             )
 
             await command_bus.send(command)

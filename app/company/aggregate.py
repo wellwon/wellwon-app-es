@@ -301,9 +301,15 @@ class CompanyAggregate:
         )
         self._apply_and_record(event)
 
-    def delete_company(self, deleted_by: uuid.UUID) -> None:
-        """Permanently delete a company"""
-        self._ensure_owner(deleted_by)
+    def delete_company(self, deleted_by: uuid.UUID, force: bool = False) -> None:
+        """Permanently delete a company
+
+        Args:
+            deleted_by: User ID performing deletion
+            force: If True, bypass permission checks (for saga-initiated deletions)
+        """
+        if not force:
+            self._ensure_owner(deleted_by)
 
         event = CompanyDeleted(
             company_id=self.id,

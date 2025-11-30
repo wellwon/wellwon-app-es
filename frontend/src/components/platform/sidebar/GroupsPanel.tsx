@@ -15,6 +15,7 @@ import { logger } from '@/utils/logger';
 import { AdminFormsModal } from '@/components/chat/components/AdminFormsModal';
 import { EditCompanyGroupModal } from '@/components/chat/components/EditCompanyGroupModal';
 import AppConfirmDialog from '@/components/shared/AppConfirmDialog';
+import DeleteGroupDialog from './DeleteGroupDialog';
 import type { TelegramSupergroup } from '@/types/chat';
 import type { CompanyFormData, SupergroupFormData } from '@/types/company-form';
 import { useSupergroups, useInvalidateSupergroups } from '@/hooks/useSupergroups';
@@ -71,7 +72,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
   const [preloadedCompanyData, setPreloadedCompanyData] = useState<CompanyFormData | null>(null);
   const [preloadedSupergroupData, setPreloadedSupergroupData] = useState<SupergroupFormData | null>(null);
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState<number | null>(null);
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState<number | null>(null);
+  const [deleteConfirmGroup, setDeleteConfirmGroup] = useState<TelegramSupergroup | null>(null);
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string | null>(null);
 
   const handleCreateCompanySuccess = () => {
@@ -219,33 +220,84 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
     }
   };
 
-  // Функция удаления супергруппы
-  const handleDeleteSupergroup = async (supergroupId: number) => {
-    try {
-      const success = await telegramApi.deleteSupergroup(supergroupId);
+  // Функция удаления супергруппы (только группа, без компании)
+  const handleDeleteSupergroupOnly = async (supergroupId: number) => {
+    const success = await telegramApi.deleteSupergroup(supergroupId);
 
-      if (success) {
-        // Clear selection if deleted group was selected
-        if (selectedSupergroupId === supergroupId) {
-          onSelectGroup(null);
-        }
-
-        // Invalidate React Query cache
-        invalidateSupergroups();
-
-        logger.info('Supergroup deleted', {
-          supergroupId,
-          component: 'GroupsPanel'
-        });
-      } else {
-        logger.error('Failed to delete supergroup', { supergroupId });
+    if (success) {
+      // Clear selection if deleted group was selected
+      if (selectedSupergroupId === supergroupId) {
+        onSelectGroup(null);
       }
-    } catch (error) {
-      logger.error('Failed to delete supergroup', error, {
+
+      // Invalidate React Query cache
+      invalidateSupergroups();
+
+      logger.info('Supergroup deleted (group only)', {
         supergroupId,
         component: 'GroupsPanel'
       });
+    } else {
+      throw new Error('Failed to delete supergroup');
     }
+  };
+
+  // Функция удаления всего (компания + чаты + telegram группа)
+  const handleDeleteAll = async (group: TelegramSupergroup) => {
+    if (!group.company_id) {
+      // No company - just delete the group
+      await handleDeleteSupergroupOnly(group.id);
+      return;
+    }
+
+    // Delete company with cascade (this triggers GroupDeletionSaga)
+    await companyApi.deleteCompany(String(group.company_id), {
+      cascade: true,
+      preserveCompany: false,
+    });
+
+    // Clear selection if deleted group was selected
+    if (selectedSupergroupId === group.id) {
+      onSelectGroup(null);
+    }
+
+    // Invalidate React Query cache
+    invalidateSupergroups();
+
+    logger.info('Company and supergroup deleted', {
+      supergroupId: group.id,
+      companyId: group.company_id,
+      component: 'GroupsPanel'
+    });
+  };
+
+  // Функция удаления с сохранением компании (для будущей привязки)
+  const handleDeletePreserveCompany = async (group: TelegramSupergroup) => {
+    if (!group.company_id) {
+      // No company - just delete the group
+      await handleDeleteSupergroupOnly(group.id);
+      return;
+    }
+
+    // Delete with preserve_company=true (keeps company record)
+    await companyApi.deleteCompany(String(group.company_id), {
+      cascade: true,
+      preserveCompany: true,
+    });
+
+    // Clear selection if deleted group was selected
+    if (selectedSupergroupId === group.id) {
+      onSelectGroup(null);
+    }
+
+    // Invalidate React Query cache
+    invalidateSupergroups();
+
+    logger.info('Supergroup deleted, company preserved', {
+      supergroupId: group.id,
+      companyId: group.company_id,
+      component: 'GroupsPanel'
+    });
   };
 
   if (loading) {
@@ -777,7 +829,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                                 variant="ghost"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setDeleteConfirmOpen(group.id);
+                                  setDeleteConfirmGroup(group);
                                 }}
                                 className="h-6 w-6 p-0 text-gray-400 hover:text-red-400 hover:bg-red-500/10"
                                 title="Удалить группу"
@@ -837,23 +889,26 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
         />
       )}
 
-      {/* Диалог подтверждения удаления */}
-      {deleteConfirmOpen && (
-        <AppConfirmDialog
-          open={!!deleteConfirmOpen}
-          onOpenChange={(open) => !open && setDeleteConfirmOpen(null)}
-          onConfirm={() => {
-            handleDeleteSupergroup(deleteConfirmOpen);
-            setDeleteConfirmOpen(null);
+      {/* Диалог подтверждения удаления - с опциями */}
+      {deleteConfirmGroup && (
+        <DeleteGroupDialog
+          open={!!deleteConfirmGroup}
+          onOpenChange={(open) => !open && setDeleteConfirmGroup(null)}
+          groupTitle={deleteConfirmGroup.title}
+          companyId={deleteConfirmGroup.company_id}
+          companyName={deleteConfirmGroup.title}
+          onDeleteAll={async () => {
+            await handleDeleteAll(deleteConfirmGroup);
+            setDeleteConfirmGroup(null);
           }}
-          title="Удалить группу?"
-          description={(() => {
-            const group = filteredSupergroups.find(g => g.id === deleteConfirmOpen);
-            return `Группа "${group?.title || ''}" будет удалена. Это действие нельзя отменить.`;
-          })()}
-          confirmText="Удалить"
-          variant="destructive"
-          icon={Trash2}
+          onPreserveCompany={async () => {
+            await handleDeletePreserveCompany(deleteConfirmGroup);
+            setDeleteConfirmGroup(null);
+          }}
+          onDeleteGroupOnly={async () => {
+            await handleDeleteSupergroupOnly(deleteConfirmGroup.id);
+            setDeleteConfirmGroup(null);
+          }}
         />
       )}
 

@@ -284,8 +284,9 @@ class EventTransformer:
             'user_type': event.get('user_type'),
             'admin_user_id': str(event.get('admin_user_id')) if event.get('admin_user_id') else None,
             'email_verified': event.get('email_verified'),
-            'created_at': event.get('created_at'),
-            'updated_at': event.get('updated_at'),
+            # BaseEvent uses 'timestamp', not 'created_at'
+            'created_at': event.get('created_at') or event.get('timestamp'),
+            'updated_at': event.get('updated_at') or event.get('timestamp'),
             'metadata': event.get('metadata'),
         }
 
@@ -311,8 +312,9 @@ class EventTransformer:
             'currency': event.get('currency'),
             'user_id': str(event.get('user_id', '')) if event.get('user_id') else None,
             'role': event.get('role'),
-            'created_at': event.get('created_at'),
-            'updated_at': event.get('updated_at'),
+            # BaseEvent uses 'timestamp', not 'created_at'
+            'created_at': event.get('created_at') or event.get('timestamp'),
+            'updated_at': event.get('updated_at') or event.get('timestamp'),
         }
 
     @staticmethod
@@ -337,8 +339,9 @@ class EventTransformer:
             'telegram_supergroup_id': telegram_supergroup_id,
             'telegram_topic_id': event.get('telegram_topic_id'),
             'last_message_at': event.get('last_message_at'),
-            'created_at': event.get('created_at'),
-            'updated_at': event.get('updated_at'),
+            # BaseEvent uses 'timestamp', not 'created_at'
+            'created_at': event.get('created_at') or event.get('timestamp'),
+            'updated_at': event.get('updated_at') or event.get('timestamp'),
         }
 
     @staticmethod
@@ -379,8 +382,9 @@ class EventTransformer:
             'telegram_user_data': telegram_user_data if telegram_user_data else None,
             'is_edited': event.get('is_edited', False),
             'is_deleted': event.get('is_deleted', False),
-            'created_at': event.get('created_at'),
-            'updated_at': event.get('updated_at'),
+            # BaseEvent uses 'timestamp', not 'created_at'
+            'created_at': event.get('created_at') or event.get('timestamp'),
+            'updated_at': event.get('updated_at') or event.get('timestamp'),
         }
 
     @staticmethod
@@ -392,7 +396,8 @@ class EventTransformer:
             'user_name': event.get('user_name'),
             'role': event.get('role', 'member'),
             'is_active': event.get('is_active', True),
-            'joined_at': event.get('joined_at'),
+            # BaseEvent uses 'timestamp', not 'joined_at'
+            'joined_at': event.get('joined_at') or event.get('timestamp'),
             'left_at': event.get('left_at'),
         }
 

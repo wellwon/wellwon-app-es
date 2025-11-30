@@ -57,12 +57,30 @@ class GroupCreationSaga(BaseSaga):
         return saga_config.get_timeout_for_saga(self.get_saga_type())
 
     def define_steps(self) -> List[SagaStep]:
+        """
+        OPTIMISTIC ORDER: Create chat FIRST so UI shows immediately.
+        Telegram group creation may be slow due to rate limiting.
+
+        1. Create chat (immediate - UI shows right away)
+        2. Create Telegram group (may take 30+ seconds due to flood wait)
+        3. Link Telegram to company
+        4. Update chat with Telegram topic
+        5. Send welcome message
+        6. Publish completion
+        """
         return [
+            SagaStep(
+                name="create_chat_first",
+                execute=self._create_chat_first,
+                compensate=self._compensate_chat,
+                timeout_seconds=30,
+                retry_count=2
+            ),
             SagaStep(
                 name="create_telegram_group",
                 execute=self._create_telegram_group,
                 compensate=self._compensate_telegram_group,
-                timeout_seconds=60,
+                timeout_seconds=120,  # Extended for flood wait
                 retry_count=2,
                 retry_delay_base=1.0
             ),
@@ -74,9 +92,16 @@ class GroupCreationSaga(BaseSaga):
                 retry_count=2
             ),
             SagaStep(
-                name="create_or_link_chat",
-                execute=self._create_or_link_chat,
-                compensate=self._compensate_chat,
+                name="link_chat_to_telegram",
+                execute=self._link_chat_to_telegram,
+                compensate=self._noop_compensate,
+                timeout_seconds=30,
+                retry_count=2
+            ),
+            SagaStep(
+                name="send_welcome_message",
+                execute=self._send_welcome_message,
+                compensate=self._noop_compensate,
                 timeout_seconds=30,
                 retry_count=2
             ),
@@ -90,12 +115,85 @@ class GroupCreationSaga(BaseSaga):
         ]
 
     # =========================================================================
-    # Step 1: Create Telegram Group (conditional)
+    # Step 1: Create Chat FIRST (optimistic - UI shows immediately)
+    # =========================================================================
+    async def _create_chat_first(self, **context) -> Dict[str, Any]:
+        """
+        Step 1: Create company chat IMMEDIATELY (before Telegram).
+        This ensures the chat appears in UI right away, even if Telegram is slow.
+
+        The chat is created WITHOUT telegram_supergroup_id - it will be linked later.
+        """
+        # Check if chat creation is explicitly disabled
+        create_chat = context.get('create_chat', True)
+        if not create_chat:
+            log.info(f"Saga {self.saga_id}: Skipping chat creation (not requested)")
+            return {
+                'chat_created': False,
+                'chat_skipped': True,
+            }
+
+        # Check if we should link existing chat instead
+        link_chat_id = context.get('link_chat_id')
+        if link_chat_id:
+            log.info(f"Saga {self.saga_id}: Will link existing chat {link_chat_id} later")
+            if isinstance(link_chat_id, str):
+                link_chat_id = uuid.UUID(link_chat_id)
+            self._chat_id = link_chat_id
+            self._linked_existing_chat = True
+            return {
+                'chat_created': False,
+                'chat_linked': True,
+                'chat_id': str(link_chat_id),
+            }
+
+        company_id = uuid.UUID(context['company_id']) if isinstance(context['company_id'], str) else context['company_id']
+        created_by = uuid.UUID(context['created_by']) if isinstance(context['created_by'], str) else context['created_by']
+        company_name = context['company_name']
+
+        command_bus = context['command_bus']
+
+        log.info(f"Saga {self.saga_id}: Creating company chat IMMEDIATELY for {company_name}")
+
+        try:
+            from app.chat.commands import CreateChatCommand
+
+            chat_id = uuid.uuid4()
+            self._chat_id = chat_id
+            self._linked_existing_chat = False
+
+            # Create chat WITHOUT telegram_supergroup_id (will be linked later)
+            command = CreateChatCommand(
+                chat_id=chat_id,
+                name="Чат компании",
+                chat_type='company',
+                created_by=created_by,
+                company_id=company_id,
+                telegram_supergroup_id=None,  # Will be set later
+                participant_ids=[created_by],
+            )
+
+            await command_bus.send(command)
+
+            log.info(f"Saga {self.saga_id}: Company chat created IMMEDIATELY: {chat_id}")
+
+            return {
+                'chat_created': True,
+                'chat_id': str(chat_id),
+            }
+
+        except Exception as e:
+            log.error(f"Saga {self.saga_id}: Failed to create company chat: {e}")
+            raise
+
+    # =========================================================================
+    # Step 2: Create Telegram Group (conditional, may be slow)
     # =========================================================================
     async def _create_telegram_group(self, **context) -> Dict[str, Any]:
         """
-        Step 1: Create Telegram supergroup via MTProto adapter.
+        Step 2: Create Telegram supergroup via MTProto adapter.
         Only executes if create_telegram_group=True in enriched event.
+        May be SLOW due to Telegram rate limiting (flood wait).
         TRUE SAGA: Company data from enriched CompanyCreated event.
         """
         # Check if we should create telegram group
@@ -183,12 +281,12 @@ class GroupCreationSaga(BaseSaga):
                 })
 
     # =========================================================================
-    # Step 2: Link Telegram Supergroup to Company (conditional)
+    # Step 3: Link Telegram Supergroup to Company (conditional)
     # =========================================================================
     async def _link_telegram_supergroup(self, **context) -> Dict[str, Any]:
         """
-        Step 2: Link Telegram supergroup to company via CreateTelegramSupergroupCommand.
-        Only executes if telegram group was created in step 1.
+        Step 3: Link Telegram supergroup to company via CreateTelegramSupergroupCommand.
+        Only executes if telegram group was created in step 2.
         TRUE SAGA: Uses CommandBus orchestration.
         """
         # Check if telegram group was created
@@ -238,120 +336,107 @@ class GroupCreationSaga(BaseSaga):
             raise
 
     # =========================================================================
-    # Step 3: Create or Link Company Chat
+    # Step 4: Link Chat to Telegram (update chat with topic)
     # =========================================================================
-    async def _create_or_link_chat(self, **context) -> Dict[str, Any]:
+    async def _link_chat_to_telegram(self, **context) -> Dict[str, Any]:
         """
-        Step 3: Create company chat or link existing chat.
-        - If create_chat=False: Skip chat creation entirely
-        - If link_chat_id is provided: Link existing chat to company
-        - Otherwise: Create new company chat
-
-        TRUE SAGA: Cross-domain orchestration (Company → Chat domain).
+        Step 4: Link existing chat to Telegram supergroup/topic.
+        Creates Telegram topic and updates chat with telegram_topic_id.
+        Only executes if Telegram group was created.
         """
-        # Check if chat creation is explicitly disabled
-        create_chat = context.get('create_chat', True)
-        if not create_chat:
-            log.info(f"Saga {self.saga_id}: Skipping chat creation (not requested)")
-            return {
-                'chat_created': False,
-                'chat_linked': False,
-                'chat_skipped': True,
-            }
-
-        company_id = uuid.UUID(context['company_id']) if isinstance(context['company_id'], str) else context['company_id']
-        created_by = uuid.UUID(context['created_by']) if isinstance(context['created_by'], str) else context['created_by']
-        company_name = context['company_name']
+        chat_id = context.get('chat_id')
         telegram_group_id = context.get('telegram_group_id')
-        link_chat_id = context.get('link_chat_id')
+        telegram_group_skipped = context.get('telegram_group_skipped', False)
+        chat_skipped = context.get('chat_skipped', False)
+
+        if chat_skipped or not chat_id:
+            log.info(f"Saga {self.saga_id}: Skipping Telegram link (no chat)")
+            return {'telegram_linked': False, 'telegram_link_skipped': True}
+
+        if telegram_group_skipped or not telegram_group_id:
+            log.info(f"Saga {self.saga_id}: Skipping Telegram link (no Telegram group)")
+            return {'telegram_linked': False, 'telegram_link_skipped': True}
+
+        chat_uuid = uuid.UUID(chat_id) if isinstance(chat_id, str) else chat_id
+        created_by = uuid.UUID(context['created_by']) if isinstance(context['created_by'], str) else context['created_by']
 
         command_bus = context['command_bus']
 
-        # Convert link_chat_id to UUID if string
-        if link_chat_id and isinstance(link_chat_id, str):
-            link_chat_id = uuid.UUID(link_chat_id)
-
-        # Case 1: Link existing chat to company
-        if link_chat_id:
-            log.info(f"Saga {self.saga_id}: Linking existing chat {link_chat_id} to company {company_name}")
-
-            try:
-                from app.chat.commands import LinkChatToCompanyCommand
-
-                command = LinkChatToCompanyCommand(
-                    chat_id=link_chat_id,
-                    company_id=company_id,
-                    telegram_supergroup_id=telegram_group_id,
-                    linked_by=created_by,
-                )
-
-                await command_bus.send(command)
-
-                self._chat_id = link_chat_id
-                self._linked_existing_chat = True
-
-                log.info(f"Saga {self.saga_id}: Existing chat {link_chat_id} linked to company")
-
-                return {
-                    'chat_linked': True,
-                    'chat_created': False,
-                    'chat_id': str(link_chat_id),
-                }
-
-            except Exception as e:
-                log.error(f"Saga {self.saga_id}: Failed to link existing chat: {e}")
-                raise
-
-        # Case 2: Create new company chat
-        log.info(f"Saga {self.saga_id}: Creating new company chat for {company_name}")
+        log.info(f"Saga {self.saga_id}: Linking chat {chat_uuid} to Telegram group {telegram_group_id}")
 
         try:
-            from app.chat.commands import CreateChatCommand, SendMessageCommand
+            from app.chat.commands import LinkChatToTelegramCommand
 
-            chat_id = uuid.uuid4()
-            self._chat_id = chat_id
-            self._linked_existing_chat = False
-
-            command = CreateChatCommand(
-                chat_id=chat_id,
-                name="Чат компании",
-                chat_type='company',
-                created_by=created_by,
-                company_id=company_id,
+            command = LinkChatToTelegramCommand(
+                chat_id=chat_uuid,
                 telegram_supergroup_id=telegram_group_id,
-                participant_ids=[created_by],  # Creator is first participant
+                linked_by=created_by,
             )
 
             await command_bus.send(command)
 
-            log.info(f"Saga {self.saga_id}: Company chat created with ID {chat_id}")
+            log.info(f"Saga {self.saga_id}: Chat linked to Telegram")
 
-            # Wait for Telegram to propagate the new topic to Bot API
-            # MTProto creates the topic, but Bot API needs time to see it
-            await asyncio.sleep(1.5)
+            return {'telegram_linked': True}
 
-            # Send welcome message (use "text" type for Telegram sync compatibility)
-            welcome_message = SendMessageCommand(
-                chat_id=chat_id,
+        except Exception as e:
+            log.warning(f"Saga {self.saga_id}: Failed to link chat to Telegram: {e}")
+            # Don't fail saga - chat works without Telegram
+            return {'telegram_linked': False, 'telegram_link_error': str(e)}
+
+    # =========================================================================
+    # Step 5: Send Welcome Message
+    # =========================================================================
+    async def _send_welcome_message(self, **context) -> Dict[str, Any]:
+        """
+        Step 5: Send welcome message to company chat.
+        Only executes if chat was created (not linked).
+        """
+        chat_id = context.get('chat_id')
+        chat_created = context.get('chat_created', False)
+        chat_skipped = context.get('chat_skipped', False)
+
+        if chat_skipped or not chat_id:
+            log.info(f"Saga {self.saga_id}: Skipping welcome message (no chat)")
+            return {'welcome_sent': False}
+
+        if not chat_created:
+            log.info(f"Saga {self.saga_id}: Skipping welcome message (chat was linked, not created)")
+            return {'welcome_sent': False}
+
+        chat_uuid = uuid.UUID(chat_id) if isinstance(chat_id, str) else chat_id
+        created_by = uuid.UUID(context['created_by']) if isinstance(context['created_by'], str) else context['created_by']
+
+        command_bus = context['command_bus']
+
+        log.info(f"Saga {self.saga_id}: Sending welcome message to chat {chat_uuid}")
+
+        try:
+            from app.chat.commands import SendMessageCommand
+
+            # Wait for Telegram to propagate the topic (if linked)
+            telegram_linked = context.get('telegram_linked', False)
+            if telegram_linked:
+                await asyncio.sleep(1.5)
+
+            command = SendMessageCommand(
+                chat_id=chat_uuid,
                 sender_id=created_by,
                 content="Это общий чат компании в котором обсуждаются текущие организационные вопросы.",
                 message_type="text",
                 source="api",
             )
 
-            await command_bus.send(welcome_message)
+            await command_bus.send(command)
 
-            log.info(f"Saga {self.saga_id}: Welcome message sent to chat {chat_id}")
+            log.info(f"Saga {self.saga_id}: Welcome message sent")
 
-            return {
-                'chat_created': True,
-                'chat_linked': False,
-                'chat_id': str(chat_id),
-            }
+            return {'welcome_sent': True}
 
         except Exception as e:
-            log.error(f"Saga {self.saga_id}: Failed to create company chat: {e}")
-            raise
+            log.warning(f"Saga {self.saga_id}: Failed to send welcome message: {e}")
+            # Don't fail saga for welcome message
+            return {'welcome_sent': False, 'welcome_error': str(e)}
 
     async def _compensate_chat(self, **context) -> None:
         """Compensation: Archive/unlink chat if created/linked"""

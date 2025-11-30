@@ -908,6 +908,24 @@ class EventProcessor:
                     break  # Stop after first successful processing
 
                 except Exception as exc:
+                    # Check for retriable errors (FK violations, dependencies not ready)
+                    from app.common.exceptions.projection_exceptions import RetriableProjectionError
+
+                    if isinstance(exc, RetriableProjectionError):
+                        log.warning(
+                            f"Retriable error for {event_type} in domain '{domain.name}': {exc}. "
+                            f"Queueing for retry."
+                        )
+                        # Queue for later processing instead of failing
+                        event_dict["topic"] = topic
+                        event_dict["consumer_id"] = consumer_id
+                        event_dict["from_event_store"] = from_event_store
+                        await self._queue_pending_event(event_dict, domain.name)
+                        self.metrics.record_event_reordered()
+                        # Mark as processed - event was handled, just deferred
+                        processed_successfully = True
+                        break  # Event queued for retry, don't try other domains
+
                     error_msg = f"Failed to process event {event_uuid} for domain '{domain.name}': {exc}"
                     log.error(error_msg, exc_info=True)
                     processing_errors.append(error_msg)

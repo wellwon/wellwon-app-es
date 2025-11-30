@@ -71,8 +71,15 @@ export async function getCompanySupergroups(companyId: string): Promise<Telegram
   return data;
 }
 
-export async function createTelegramGroup(companyId: string): Promise<{ id: string }> {
-  const { data } = await API.post<{ id: string }>(`/companies/${companyId}/telegram`);
+export async function createTelegramGroup(
+  companyId: string,
+  title: string,
+  description?: string
+): Promise<{ id: string }> {
+  const { data } = await API.post<{ id: string }>(`/companies/${companyId}/telegram`, {
+    title,
+    description,
+  });
   return data;
 }
 

@@ -168,6 +168,8 @@ class WorkerConsumerGroups:
         description="Processes all domain events and updates read models",
         topics=[
             "transport.user-account-events",
+            "transport.company-events",
+            "transport.chat-events",
         ],
         max_poll_records=1000,  # High throughput
         auto_offset_reset="earliest",  # Don't miss events

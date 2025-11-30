@@ -148,7 +148,27 @@ export function useActiveSupergroups() {
 
   return useQuery({
     queryKey: supergroupKeys.active,
-    queryFn: () => telegramApi.getAllSupergroups(true),
+    queryFn: async () => {
+      const apiData = await telegramApi.getAllSupergroups(true);
+
+      // CRITICAL: Preserve optimistic entries that were added via WSE events
+      // Optimistic entries have telegram_group_id === 0 (not yet linked to Telegram)
+      const existingData = queryClient.getQueryData<TelegramSupergroup[]>(supergroupKeys.active);
+      if (existingData && Array.isArray(existingData)) {
+        const optimisticEntries = existingData.filter(e => e.telegram_group_id === 0);
+        if (optimisticEntries.length > 0) {
+          logger.info('Preserving optimistic entries during fetch', {
+            optimisticCount: optimisticEntries.length,
+            apiCount: apiData.length
+          });
+          // Merge: optimistic entries first, then API data (excluding duplicates)
+          const apiCompanyIds = new Set(apiData.map(a => a.company_id));
+          const uniqueOptimistic = optimisticEntries.filter(o => !apiCompanyIds.has(o.company_id));
+          return [...uniqueOptimistic, ...apiData];
+        }
+      }
+      return apiData;
+    },
     staleTime: Infinity, // WSE handles updates
   });
 }
@@ -429,7 +449,25 @@ export function useSupergroups() {
   // Fetch active supergroups
   const activeQuery = useQuery({
     queryKey: supergroupKeys.active,
-    queryFn: () => telegramApi.getAllSupergroups(true),
+    queryFn: async () => {
+      const apiData = await telegramApi.getAllSupergroups(true);
+
+      // CRITICAL: Preserve optimistic entries that were added via WSE events
+      const existingData = queryClient.getQueryData<TelegramSupergroup[]>(supergroupKeys.active);
+      if (existingData && Array.isArray(existingData)) {
+        const optimisticEntries = existingData.filter(e => e.telegram_group_id === 0);
+        if (optimisticEntries.length > 0) {
+          logger.info('useSupergroups: Preserving optimistic entries', {
+            optimisticCount: optimisticEntries.length,
+            apiCount: apiData.length
+          });
+          const apiCompanyIds = new Set(apiData.map(a => a.company_id));
+          const uniqueOptimistic = optimisticEntries.filter(o => !apiCompanyIds.has(o.company_id));
+          return [...uniqueOptimistic, ...apiData];
+        }
+      }
+      return apiData;
+    },
     staleTime: Infinity,
   });
 

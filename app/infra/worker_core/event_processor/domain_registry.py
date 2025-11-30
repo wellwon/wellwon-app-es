@@ -93,10 +93,8 @@ def create_user_account_domain() -> DomainRegistration:
 
         return UserAccountProjector(read_repo)
 
-    # SYNC events are auto-discovered from @sync_projection decorators
-    # Single source of truth: decorator registry, no manual configuration needed
-    sync_events = get_all_sync_events()
-    sync_event_config = {}
+    # NOTE: sync_events removed - now auto-discovered from @sync_projection decorators
+    # Single source of truth: sync_decorators.get_all_sync_events()
 
     return DomainRegistration(
         name="user_account",
@@ -124,7 +122,6 @@ def create_user_account_domain() -> DomainRegistration:
             "aggregate_type": "UserAccount",
             "transport_topic": USER_ACCOUNT_EVENTS_TOPIC
         },
-        sync_events=sync_events,
         enable_sequence_tracking=True
     )
 
@@ -145,6 +142,7 @@ def create_company_domain() -> DomainRegistration:
         CompanyArchived,
         CompanyRestored,
         CompanyDeleted,
+        CompanyDeleteRequested,
         UserAddedToCompany,
         UserRemovedFromCompany,
         UserCompanyRoleChanged,
@@ -152,20 +150,16 @@ def create_company_domain() -> DomainRegistration:
         TelegramSupergroupLinked,
         TelegramSupergroupUnlinked,
         TelegramSupergroupUpdated,
+        TelegramSupergroupDeleted,
         CompanyBalanceUpdated,
     )
 
     def company_projector_factory():
         from app.company.projectors import CompanyProjector
         from app.infra.read_repos.company_read_repo import CompanyReadRepo
-        from app.infra.persistence.cache_manager import get_cache_manager
 
-        try:
-            cache_manager = get_cache_manager()
-            read_repo = CompanyReadRepo(cache_manager=cache_manager)
-        except Exception:
-            read_repo = CompanyReadRepo()
-
+        # CompanyReadRepo uses static methods - no instance initialization needed
+        read_repo = CompanyReadRepo()
         return CompanyProjector(read_repo)
 
     return DomainRegistration(
@@ -178,6 +172,7 @@ def create_company_domain() -> DomainRegistration:
             "CompanyArchived": CompanyArchived,
             "CompanyRestored": CompanyRestored,
             "CompanyDeleted": CompanyDeleted,
+            "CompanyDeleteRequested": CompanyDeleteRequested,
             "UserAddedToCompany": UserAddedToCompany,
             "UserRemovedFromCompany": UserRemovedFromCompany,
             "UserCompanyRoleChanged": UserCompanyRoleChanged,
@@ -185,6 +180,7 @@ def create_company_domain() -> DomainRegistration:
             "TelegramSupergroupLinked": TelegramSupergroupLinked,
             "TelegramSupergroupUnlinked": TelegramSupergroupUnlinked,
             "TelegramSupergroupUpdated": TelegramSupergroupUpdated,
+            "TelegramSupergroupDeleted": TelegramSupergroupDeleted,
             "CompanyBalanceUpdated": CompanyBalanceUpdated,
         },
         projection_config={
@@ -210,6 +206,9 @@ def create_chat_domain() -> DomainRegistration:
         ChatUpdated,
         ChatArchived,
         ChatRestored,
+        ChatHardDeleted,
+        ChatLinkedToCompany,
+        ChatUnlinkedFromCompany,
         ParticipantAdded,
         ParticipantRemoved,
         ParticipantRoleChanged,
@@ -229,14 +228,9 @@ def create_chat_domain() -> DomainRegistration:
     def chat_projector_factory():
         from app.chat.projectors import ChatProjector
         from app.infra.read_repos.chat_read_repo import ChatReadRepo
-        from app.infra.persistence.cache_manager import get_cache_manager
 
-        try:
-            cache_manager = get_cache_manager()
-            read_repo = ChatReadRepo(cache_manager=cache_manager)
-        except Exception:
-            read_repo = ChatReadRepo()
-
+        # ChatReadRepo uses static methods - no instance initialization needed
+        read_repo = ChatReadRepo()
         return ChatProjector(read_repo)
 
     return DomainRegistration(
@@ -248,6 +242,9 @@ def create_chat_domain() -> DomainRegistration:
             "ChatUpdated": ChatUpdated,
             "ChatArchived": ChatArchived,
             "ChatRestored": ChatRestored,
+            "ChatHardDeleted": ChatHardDeleted,
+            "ChatLinkedToCompany": ChatLinkedToCompany,
+            "ChatUnlinkedFromCompany": ChatUnlinkedFromCompany,
             "ParticipantAdded": ParticipantAdded,
             "ParticipantRemoved": ParticipantRemoved,
             "ParticipantRoleChanged": ParticipantRoleChanged,
@@ -283,7 +280,7 @@ class DomainRegistry:
         self._topic_to_domains: Dict[str, List[DomainRegistration]] = {}
         self._initialized = False
         self.projectors: Dict[str, Any] = {}
-        self.sync_events: List[str] = []
+        # NOTE: sync_events tracking removed - now uses sync_decorators.get_all_sync_events()
 
     def register(self, domain: DomainRegistration) -> None:
         """Register a domain configuration"""
@@ -298,8 +295,7 @@ class DomainRegistry:
                 self._topic_to_domains[topic] = []
             self._topic_to_domains[topic].append(domain)
 
-        # Track sync events
-        self.sync_events.extend(domain.sync_events)
+        # NOTE: sync_events tracking removed - single source of truth is @sync_projection decorator
 
         log.info(f"Registered domain: {domain.name} for topics: {domain.topics}")
 
@@ -314,17 +310,17 @@ class DomainRegistry:
         """Get all registered projectors"""
         return [d.projector_instance for d in self._domains.values() if d.has_projector()]
 
-    def get_sync_events(self) -> List[str]:
-        """Get list of all sync event types"""
-        return self.sync_events
+    def get_sync_events(self) -> Set[str]:
+        """Get list of all sync event types from @sync_projection decorators"""
+        return get_all_sync_events()
 
-    def get_all_sync_events(self) -> List[str]:
-        """Get list of all sync event types"""
-        return self.sync_events
+    def get_all_sync_events(self) -> Set[str]:
+        """Get list of all sync event types from @sync_projection decorators"""
+        return get_all_sync_events()
 
     def is_sync_event(self, event_type: str) -> bool:
         """Check if an event type is configured for synchronous projection"""
-        return event_type in self.sync_events
+        return event_type in get_all_sync_events()
 
     def get_enabled_domains(self) -> List[DomainRegistration]:
         """Get list of enabled domains"""

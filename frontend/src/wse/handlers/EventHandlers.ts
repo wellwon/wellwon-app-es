@@ -349,10 +349,10 @@ export class EventHandlers {
       const data = message.p;
       logger.info('Company Telegram group created:', data);
 
-      // Invalidate all supergroup-related queries
+      // Only invalidate company-specific telegram cache
+      // Do NOT invalidate supergroups lists - they are updated optimistically via setQueryData in useSupergroups hook
+      // Invalidating would cause refetch that overwrites optimistic data with stale API response
       queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'telegram'] });
-      queryClient.invalidateQueries({ queryKey: ['supergroups'] });
-      queryClient.invalidateQueries({ queryKey: ['telegram-supergroups'] });
 
       window.dispatchEvent(new CustomEvent('companyTelegramCreated', { detail: data }));
     } catch (error) {
@@ -489,9 +489,14 @@ export class EventHandlers {
       // Invalidating would cause a full refetch, leading to duplicate messages.
       // This follows TkDodo's best practice: for frequent updates, directly update state.
 
-      // Update chat list (for last message preview) - this is OK, it's metadata not messages
-      queryClient.invalidateQueries({ queryKey: ['chats'] });
-      // Update unread count
+      // Do NOT invalidate chat list here! This causes race condition:
+      // - New chat added optimistically
+      // - Message created triggers invalidation
+      // - API returns stale data (projection not complete)
+      // - Optimistic chat disappears
+      // Instead, useChatList listens to messageCreated and updates last_message optimistically
+
+      // Update unread count (this is a separate query, safe to invalidate)
       queryClient.invalidateQueries({ queryKey: ['unread-count'] });
 
       // Dispatch event with full Telegram data
@@ -627,7 +632,13 @@ export class EventHandlers {
       const data = message.p;
       logger.info('Chat Telegram linked:', data);
 
+      // Invalidate chat detail cache
       queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id] });
+      // CRITICAL: Also invalidate chat list so it re-fetches with telegram_supergroup_id
+      // This fixes the bug where chat disappears when clicking on supergroup
+      // because the filter doesn't find chats with outdated (null) telegram_supergroup_id
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+      queryClient.invalidateQueries({ queryKey: ['supergroup-chat-counts'] });
 
       window.dispatchEvent(new CustomEvent('chatTelegramLinked', { detail: data }));
     } catch (error) {

@@ -113,6 +113,30 @@ class TelegramBotClient:
         """Get bot instance"""
         return self._bot
 
+    @staticmethod
+    def _normalize_chat_id(chat_id: int) -> int:
+        """
+        Normalize chat ID to Bot API format.
+
+        Telegram Bot API uses:
+        - Supergroups/Channels: -100{id} (e.g., -1002381938572)
+        - Groups: negative numbers (e.g., -123456789)
+        - Users: positive numbers (e.g., 123456789)
+
+        MTProto/Telethon returns raw IDs without the -100 prefix.
+        This method ensures IDs are in the correct Bot API format.
+        """
+        # If already negative, assume it's already in the correct format
+        if chat_id < 0:
+            return chat_id
+
+        # Large positive IDs are supergroup IDs - add -100 prefix
+        if chat_id > 1000000000:
+            return -int(f"100{chat_id}")
+
+        # For smaller positive IDs, return as-is (user IDs)
+        return chat_id
+
     # =========================================================================
     # Webhook Management
     # =========================================================================
@@ -294,13 +318,16 @@ class TelegramBotClient:
         if not self._initialized:
             return SendMessageResult(success=False, error="Bot not initialized")
 
+        # Normalize chat_id to Bot API format (MTProto returns positive IDs)
+        normalized_chat_id = self._normalize_chat_id(chat_id)
+
         # Rate limiting check
-        if not await self._check_rate_limit(chat_id):
+        if not await self._check_rate_limit(normalized_chat_id):
             return SendMessageResult(success=False, error="Rate limit exceeded")
 
         try:
             msg = await self._bot.send_message(
-                chat_id=chat_id,
+                chat_id=normalized_chat_id,
                 text=text,
                 message_thread_id=topic_id,
                 reply_to_message_id=reply_to_message_id,
@@ -308,7 +335,7 @@ class TelegramBotClient:
                 disable_notification=disable_notification,
             )
 
-            self._record_message(chat_id)
+            self._record_message(normalized_chat_id)
             return SendMessageResult(success=True, message_id=msg.message_id)
 
         except RetryAfter as e:
@@ -323,14 +350,14 @@ class TelegramBotClient:
                 log.warning(f"Topic {topic_id} not found, retrying without topic (General)")
                 try:
                     msg = await self._bot.send_message(
-                        chat_id=chat_id,
+                        chat_id=normalized_chat_id,
                         text=text,
                         message_thread_id=None,  # Send to General
                         reply_to_message_id=None,  # Remove reply when switching to General
                         parse_mode=parse_mode,
                         disable_notification=disable_notification,
                     )
-                    self._record_message(chat_id)
+                    self._record_message(normalized_chat_id)
                     return SendMessageResult(success=True, message_id=msg.message_id)
                 except Exception as retry_e:
                     log.error(f"Retry to General also failed: {retry_e}")
@@ -341,14 +368,14 @@ class TelegramBotClient:
                 log.warning("HTML parse error, retrying without parse_mode")
                 try:
                     msg = await self._bot.send_message(
-                        chat_id=chat_id,
+                        chat_id=normalized_chat_id,
                         text=text,
                         message_thread_id=topic_id,
                         reply_to_message_id=reply_to_message_id,
                         parse_mode=None,  # No parse mode
                         disable_notification=disable_notification,
                     )
-                    self._record_message(chat_id)
+                    self._record_message(normalized_chat_id)
                     return SendMessageResult(success=True, message_id=msg.message_id)
                 except Exception as retry_e:
                     log.error(f"Retry without parse_mode also failed: {retry_e}")
@@ -373,7 +400,10 @@ class TelegramBotClient:
         if not self._initialized:
             return SendMessageResult(success=False, error="Bot not initialized")
 
-        if not await self._check_rate_limit(chat_id):
+        # Normalize chat_id to Bot API format (MTProto returns positive IDs)
+        normalized_chat_id = self._normalize_chat_id(chat_id)
+
+        if not await self._check_rate_limit(normalized_chat_id):
             return SendMessageResult(success=False, error="Rate limit exceeded")
 
         try:
@@ -382,21 +412,21 @@ class TelegramBotClient:
 
             if file_ext in ("jpg", "jpeg", "png", "gif", "webp"):
                 msg = await self._bot.send_photo(
-                    chat_id=chat_id,
+                    chat_id=normalized_chat_id,
                     photo=file_url,
                     caption=caption,
                     message_thread_id=topic_id,
                 )
             else:
                 msg = await self._bot.send_document(
-                    chat_id=chat_id,
+                    chat_id=normalized_chat_id,
                     document=file_url,
                     caption=caption,
                     message_thread_id=topic_id,
                     filename=file_name,
                 )
 
-            self._record_message(chat_id)
+            self._record_message(normalized_chat_id)
             return SendMessageResult(success=True, message_id=msg.message_id)
 
         except Exception as e:
@@ -415,19 +445,22 @@ class TelegramBotClient:
         if not self._initialized:
             return SendMessageResult(success=False, error="Bot not initialized")
 
-        if not await self._check_rate_limit(chat_id):
+        # Normalize chat_id to Bot API format (MTProto returns positive IDs)
+        normalized_chat_id = self._normalize_chat_id(chat_id)
+
+        if not await self._check_rate_limit(normalized_chat_id):
             return SendMessageResult(success=False, error="Rate limit exceeded")
 
         try:
             msg = await self._bot.send_voice(
-                chat_id=chat_id,
+                chat_id=normalized_chat_id,
                 voice=voice_url,
                 duration=duration,
                 caption=caption,
                 message_thread_id=topic_id,
             )
 
-            self._record_message(chat_id)
+            self._record_message(normalized_chat_id)
             return SendMessageResult(success=True, message_id=msg.message_id)
 
         except Exception as e:
@@ -449,9 +482,12 @@ class TelegramBotClient:
         if not self._initialized:
             return SendMessageResult(success=False, error="Bot not initialized")
 
+        # Normalize chat_id to Bot API format
+        normalized_chat_id = self._normalize_chat_id(chat_id)
+
         try:
             await self._bot.edit_message_text(
-                chat_id=chat_id,
+                chat_id=normalized_chat_id,
                 message_id=message_id,
                 text=text,
                 parse_mode=parse_mode,
@@ -471,8 +507,11 @@ class TelegramBotClient:
         if not self._initialized:
             return False
 
+        # Normalize chat_id to Bot API format
+        normalized_chat_id = self._normalize_chat_id(chat_id)
+
         try:
-            await self._bot.delete_message(chat_id=chat_id, message_id=message_id)
+            await self._bot.delete_message(chat_id=normalized_chat_id, message_id=message_id)
             return True
 
         except Exception as e:
@@ -490,10 +529,14 @@ class TelegramBotClient:
         if not self._initialized:
             return SendMessageResult(success=False, error="Bot not initialized")
 
+        # Normalize chat IDs to Bot API format
+        normalized_chat_id = self._normalize_chat_id(chat_id)
+        normalized_from_chat_id = self._normalize_chat_id(from_chat_id)
+
         try:
             msg = await self._bot.forward_message(
-                chat_id=chat_id,
-                from_chat_id=from_chat_id,
+                chat_id=normalized_chat_id,
+                from_chat_id=normalized_from_chat_id,
                 message_id=message_id,
                 message_thread_id=topic_id,
             )

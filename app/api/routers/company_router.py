@@ -418,6 +418,7 @@ async def delete_company(
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
     cascade: bool = Query(True, description="If True, use saga to cascade delete messages/chats/telegram"),
+    preserve_company: bool = Query(False, description="If True, preserve company record for future re-linking"),
 ):
     """
     Permanently delete a company (hard delete).
@@ -427,6 +428,9 @@ async def delete_company(
     2. Publishes CompanyDeleteRequested event
     3. Triggers GroupDeletionSaga (TRUE SAGA pattern)
     4. Saga cascades: Delete chats (with messages) -> Delete Telegram -> Delete Company
+
+    If preserve_company=True, the company record is kept for future re-linking
+    to a new Telegram group. Useful when company has other linked entities.
 
     If cascade=False, only deletes the company record (chats/messages remain orphaned).
 
@@ -441,14 +445,18 @@ async def delete_company(
                 company_id=company_id,
                 deleted_by=current_user["user_id"],
                 cascade=True,
+                preserve_company=preserve_company,
             )
 
             await command_bus.send(command)
 
-            log.info(f"RequestCompanyDeletionCommand sent for company {company_id}")
+            log.info(f"RequestCompanyDeletionCommand sent for company {company_id}, preserve_company={preserve_company}")
+            message = "Company deletion requested (saga will cascade delete)"
+            if preserve_company:
+                message = "Telegram group deletion requested (company preserved for re-linking)"
             return CompanyResponse(
                 id=company_id,
-                message="Company deletion requested (saga will cascade delete)"
+                message=message
             )
 
         else:

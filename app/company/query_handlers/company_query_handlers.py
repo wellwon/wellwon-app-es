@@ -18,6 +18,7 @@ from app.company.queries import (
     GetCompaniesByUserQuery,
     SearchCompaniesQuery,
     GetCompanyByVatQuery,
+    GetCompanyByNameQuery,
     # User-company queries
     GetCompanyUsersQuery,
     GetUserCompanyRelationshipQuery,

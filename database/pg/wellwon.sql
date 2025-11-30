@@ -2,8 +2,8 @@
 -- WellWon Platform - Complete PostgreSQL Schema
 -- Event Sourcing + CQRS Infrastructure + Business Domain
 -- =============================================================================
--- Version: 1.0.0
--- Date: 2025-11-24
+-- Version: 1.2.0
+-- Date: 2025-11-30
 --
 -- Features:
 -- - Event Sourcing infrastructure (Outbox, DLQ, Projections)
@@ -11,6 +11,36 @@
 -- - WellWon business domains (Companies, Chats, Telegram, etc.)
 -- - Comprehensive audit and system logging
 -- - CDC trigger for is_developer field changes
+--
+-- =============================================================================
+-- STORAGE ARCHITECTURE (Multi-Database Pattern)
+-- =============================================================================
+-- PostgreSQL (this file):
+--   - Chat metadata (chats, chat_participants)
+--   - Message metadata for recent/searchable messages
+--   - Unread tracking (via chat_participants.last_read_at)
+--   - Telegram integration tables
+--   - Event Sourcing infrastructure (outbox, projections, DLQ)
+--   - User accounts and companies
+--
+-- ScyllaDB (database/scylla/wellwon_scylla.cql):
+--   - High-volume message content storage (Discord-style partitioning)
+--   - Message reactions (message_reactions, message_reaction_counts)
+--   - Pinned messages (pinned_messages)
+--   - Telegram sync state (telegram_sync_state)
+--   - Telegram message mapping (telegram_message_mapping) - O(1) dedup lookup
+--   - Channel metadata denormalized (channel_metadata)
+--   - User read positions (message_read_positions)
+--   - See: database/scylla/wellwon_scylla.cql, docs/SCYLLADB_IMPLEMENTATION_QUALITY_REPORT.md
+--
+-- Redis:
+--   - Typing indicators (10s TTL, ephemeral)
+--   - User presence (online/offline)
+--   - Real-time counters and pub/sub
+--
+-- KurrentDB (EventStore):
+--   - Domain events (10-year retention)
+--   - Event streams per aggregate
 -- =============================================================================
 
 -- ======================
@@ -908,46 +938,63 @@ CREATE INDEX IF NOT EXISTS idx_chat_participants_chat_id ON chat_participants(ch
 CREATE INDEX IF NOT EXISTS idx_chat_participants_user_id ON chat_participants(user_id);
 
 -- ======================
--- MESSAGES
+-- MESSAGES (PostgreSQL - Search Index & Recent Message Cache)
+-- ======================
+-- IMPORTANT: ScyllaDB is the PRIMARY store for message content!
+-- This table is a SECONDARY index for:
+--   1. Full-text search (PostgreSQL FTS capabilities)
+--   2. Complex joins with users/companies
+--   3. Last message preview in chat list (cached)
+--
+-- Data Flow:
+--   1. Message written to ScyllaDB (primary, Snowflake ID)
+--   2. Metadata synced to PostgreSQL (search index, joins)
+--
+-- ScyllaDB (PRIMARY): Full message content, reactions, read positions
+-- PostgreSQL (INDEX): Search, user joins, chat list preview
 -- ======================
 CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     sender_id UUID REFERENCES user_accounts(id) ON DELETE CASCADE,
-    content TEXT,
+
+    -- ScyllaDB reference (Snowflake ID is the source of truth)
+    scylla_message_id BIGINT NOT NULL,  -- Snowflake ID in ScyllaDB
+    scylla_bucket INT,                   -- ScyllaDB partition bucket
+
+    -- Content for search (synced from ScyllaDB)
+    content TEXT,                        -- For full-text search
     message_type TEXT DEFAULT 'text' CHECK (message_type IN ('text', 'file', 'voice', 'image', 'system')),
-    reply_to_id UUID REFERENCES messages(id),
 
-    -- File fields
-    file_url TEXT,
-    file_name TEXT,
-    file_size BIGINT,
-    file_type TEXT,
-    voice_duration INTEGER,
-
-    -- Telegram integration
+    -- Telegram reference (for cross-db dedup check)
     telegram_message_id BIGINT,
-    telegram_user_id BIGINT,
-    telegram_user_data JSONB,
-    telegram_topic_id INTEGER,
-    telegram_forward_data JSONB,
-    sync_direction TEXT,
-    source TEXT DEFAULT 'web',  -- web, telegram, api
+    telegram_chat_id BIGINT,
+    source TEXT DEFAULT 'web',           -- web, telegram, api
 
-    -- Status
-    is_edited BOOLEAN DEFAULT FALSE,
+    -- Status flags
     is_deleted BOOLEAN DEFAULT FALSE,
-    metadata JSONB,
 
+    -- Timestamps (derived from Snowflake ID)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Primary lookup: ScyllaDB reference
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_scylla_id ON messages(scylla_message_id);
+
+-- Chat message list
 CREATE INDEX IF NOT EXISTS idx_messages_chat_id_created_at ON messages(chat_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages(sender_id);
-CREATE INDEX IF NOT EXISTS idx_messages_reply_to_id ON messages(reply_to_id);
-CREATE INDEX IF NOT EXISTS idx_messages_telegram_message_id ON messages(telegram_message_id);
-CREATE INDEX IF NOT EXISTS idx_messages_telegram_user_id ON messages(telegram_user_id);
+
+-- User's messages (for moderation, history)
+CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages(sender_id) WHERE sender_id IS NOT NULL;
+
+-- Telegram deduplication check
+CREATE INDEX IF NOT EXISTS idx_messages_telegram ON messages(telegram_message_id, telegram_chat_id)
+    WHERE telegram_message_id IS NOT NULL;
+
+-- Full-text search (GIN index for fast text search)
+CREATE INDEX IF NOT EXISTS idx_messages_content_search ON messages USING gin(to_tsvector('english', content))
+    WHERE content IS NOT NULL AND NOT is_deleted;
 
 DROP TRIGGER IF EXISTS set_messages_updated_at ON messages;
 CREATE TRIGGER set_messages_updated_at
@@ -955,35 +1002,37 @@ CREATE TRIGGER set_messages_updated_at
     FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 
 -- ======================
--- MESSAGE_READS
+-- MESSAGE_READS - REMOVED (Now in ScyllaDB)
 -- ======================
-CREATE TABLE IF NOT EXISTS message_reads (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES user_accounts(id) ON DELETE CASCADE,
-    read_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT message_reads_unique UNIQUE(message_id, user_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_message_reads_message_id ON message_reads(message_id);
-CREATE INDEX IF NOT EXISTS idx_message_reads_user_id ON message_reads(user_id);
+-- Read tracking is now handled by ScyllaDB table: message_read_positions
+-- ScyllaDB provides:
+--   - O(1) lookup per (channel_id, user_id)
+--   - last_read_message_id (Snowflake ID)
+--   - Cached unread_count
+--
+-- For unread badge counts, use:
+--   SELECT unread_count FROM message_read_positions
+--   WHERE channel_id = ? AND user_id = ?
+--
+-- Legacy per-message read tracking removed (was too granular for high-volume)
+-- ======================
 
 -- ======================
--- TYPING_INDICATORS
+-- TYPING_INDICATORS - REMOVED (Redis Only)
 -- ======================
-CREATE TABLE IF NOT EXISTS typing_indicators (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES user_accounts(id) ON DELETE CASCADE,
-    started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP + INTERVAL '10 seconds'),
-
-    CONSTRAINT typing_indicators_unique UNIQUE(chat_id, user_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_typing_indicators_chat_id ON typing_indicators(chat_id);
-CREATE INDEX IF NOT EXISTS idx_typing_indicators_expires_at ON typing_indicators(expires_at);
+-- Typing indicators are ephemeral (10s TTL) and belong in Redis ONLY.
+-- PostgreSQL fallback removed - adds complexity without benefit.
+--
+-- Redis implementation:
+--   Key pattern: typing:{chat_id}:{user_id}
+--   Value: JSON {user_id, username, started_at}
+--   TTL: 10 seconds (auto-expire)
+--
+-- Usage:
+--   SET typing:{chat_id}:{user_id} '{"user_id":"...","username":"..."}' EX 10
+--   KEYS typing:{chat_id}:*  -- Get all typing users in chat
+--   DEL typing:{chat_id}:{user_id}  -- Stop typing
+-- ======================
 
 -- ======================
 -- TELEGRAM_SUPERGROUPS
@@ -1358,6 +1407,14 @@ ALTER FUNCTION get_company_users(UUID, user_company_relationship) OWNER TO wellw
 -- Insert initial schema migration record
 INSERT INTO schema_migrations (version, description, applied_by)
 VALUES ('1.0.0', 'Initial WellWon schema with ES infrastructure', 'system')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO schema_migrations (version, description, applied_by)
+VALUES ('1.1.0', 'ScyllaDB integration for high-volume messages', 'system')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO schema_migrations (version, description, applied_by)
+VALUES ('1.2.0', 'Simplified messages table (ScyllaDB primary), removed message_reads (use ScyllaDB message_read_positions)', 'system')
 ON CONFLICT (version) DO NOTHING;
 
 -- =============================================================================

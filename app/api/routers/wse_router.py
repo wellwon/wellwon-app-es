@@ -130,7 +130,14 @@ async def websocket_endpoint(
     _ensure_cleanup_task()
 
     # Accept the connection first to send proper error messages
-    await websocket.accept()
+    # Handle race condition when connection is already upgraded (rapid reconnections)
+    try:
+        await websocket.accept()
+    except RuntimeError as e:
+        if "already upgraded" in str(e).lower():
+            log.debug(f"WebSocket connection already upgraded (race condition), ignoring: {e}")
+            return
+        raise
 
     # Enhanced logging for debugging
     client_ip = websocket.client.host if websocket.client else "unknown"

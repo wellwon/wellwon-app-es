@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from app.chat.commands import (
     LinkTelegramChatCommand,
+    LinkChatToTelegramCommand,
     UnlinkTelegramChatCommand,
     ProcessTelegramMessageCommand,
 )
@@ -237,3 +238,81 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
 
         log.info(f"Telegram message processed: {command.message_id}")
         return command.message_id
+
+
+@command_handler(LinkChatToTelegramCommand)
+class LinkChatToTelegramHandler(BaseCommandHandler):
+    """
+    Handle LinkChatToTelegramCommand.
+
+    Used by GroupCreationSaga to link an existing chat to Telegram.
+    Creates a Telegram topic in the supergroup and updates the chat.
+    """
+
+    def __init__(self, deps: 'HandlerDependencies'):
+        super().__init__(
+            event_bus=deps.event_bus,
+            transport_topic="transport.chat-events",
+            event_store=deps.event_store
+        )
+        self.telegram_adapter = deps.telegram_adapter
+
+    async def handle(self, command: LinkChatToTelegramCommand) -> uuid.UUID:
+        log.info(
+            f"Linking chat {command.chat_id} to Telegram supergroup {command.telegram_supergroup_id}"
+        )
+
+        # Load chat aggregate
+        events = await self.event_store.get_events(command.chat_id, "Chat")
+        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+
+        if not chat_aggregate.state.is_active:
+            raise ValueError(f"Chat {command.chat_id} is not active")
+
+        # Create Telegram topic for this chat
+        chat_name = chat_aggregate.state.name or "Чат компании"
+        telegram_topic_id = None
+
+        log.info(f"Creating Telegram topic '{chat_name}' in supergroup {command.telegram_supergroup_id}")
+
+        try:
+            if not self.telegram_adapter:
+                log.warning("TelegramAdapter not available, skipping topic creation")
+            else:
+                # Use TelegramAdapter.create_chat_topic() which returns TopicInfo
+                topic_info = await self.telegram_adapter.create_chat_topic(
+                    group_id=command.telegram_supergroup_id,
+                    topic_name=chat_name,
+                    emoji="📝",  # Default emoji for chat topics
+                )
+
+                if topic_info:
+                    telegram_topic_id = topic_info.topic_id
+                    log.info(f"Telegram topic created: id={telegram_topic_id}, name={chat_name}")
+                else:
+                    log.warning("Topic creation returned no info, continuing without topic")
+
+        except Exception as e:
+            # IMPORTANT: Don't fail the command - still link the chat to supergroup
+            # This allows chats to be associated with the group even if topic creation fails
+            # (e.g., when Telegram Premium is required for topic creation)
+            log.warning(f"Failed to create Telegram topic, continuing without topic: {e}")
+
+        # Update chat aggregate with Telegram info (supergroup_id is always set)
+        chat_aggregate.link_telegram_chat(
+            telegram_chat_id=command.telegram_supergroup_id,
+            telegram_topic_id=telegram_topic_id,  # May be None if topic creation failed
+            linked_by=command.linked_by,
+        )
+
+        await self.publish_events(
+            aggregate=chat_aggregate,
+            aggregate_id=command.chat_id,
+            command=command
+        )
+
+        log.info(
+            f"Chat {command.chat_id} linked to Telegram: "
+            f"supergroup={command.telegram_supergroup_id}, topic={telegram_topic_id}"
+        )
+        return command.chat_id

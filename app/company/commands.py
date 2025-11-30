@@ -121,6 +121,7 @@ class DeleteCompanyCommand(Command):
     """Permanently delete a company (hard delete)"""
     company_id: uuid.UUID
     deleted_by: uuid.UUID
+    force: bool = Field(default=False, description="Bypass permission checks (for saga-initiated deletions)")
 
 
 class RequestCompanyDeletionCommand(Command):
@@ -129,10 +130,13 @@ class RequestCompanyDeletionCommand(Command):
 
     TRUE SAGA Pattern: Handler queries all needed data and enriches
     CompanyDeleteRequested event. Saga uses ONLY enriched event data.
+
+    preserve_company: If True, keep company record for future re-linking.
     """
     company_id: uuid.UUID
     deleted_by: uuid.UUID
     cascade: bool = Field(default=True, description="Cascade delete chats and messages")
+    preserve_company: bool = Field(default=False, description="Keep company for re-linking to new Telegram group")
 
 
 # =============================================================================

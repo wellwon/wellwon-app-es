@@ -25,6 +25,8 @@ interface SendMessageParams {
   fileSize?: number;
   fileType?: string;
   voiceDuration?: number;
+  // Generated ONCE before mutation to prevent duplicates
+  _messageId?: string;
 }
 
 interface EditMessageParams {
@@ -46,9 +48,10 @@ export function useSendMessage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
 
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: async (params: SendMessageParams) => {
-      const messageId = crypto.randomUUID();
+      // Use the pre-generated messageId from params (set by wrapper below)
+      const messageId = params._messageId!;
 
       const request: SendMessageRequest = {
         message_id: messageId,
@@ -74,8 +77,8 @@ export function useSendMessage() {
       // Snapshot previous value
       const previousMessages = queryClient.getQueryData(chatKeys.messages(params.chatId));
 
-      // Create optimistic message with client-generated UUID
-      const messageId = crypto.randomUUID();
+      // Use the SAME pre-generated messageId from params (prevents duplicates!)
+      const messageId = params._messageId!;
       const optimisticMessage: Message = {
         id: messageId,
         chat_id: params.chatId,
@@ -133,6 +136,20 @@ export function useSendMessage() {
       // No invalidation needed - WSE handles real-time updates
     },
   });
+
+  // Wrapper that generates messageId ONCE before mutation
+  // This ensures both onMutate and mutationFn use the SAME ID (prevents duplicates)
+  return {
+    ...mutation,
+    mutate: (params: Omit<SendMessageParams, '_messageId'>) => {
+      const messageId = crypto.randomUUID();
+      mutation.mutate({ ...params, _messageId: messageId });
+    },
+    mutateAsync: async (params: Omit<SendMessageParams, '_messageId'>) => {
+      const messageId = crypto.randomUUID();
+      return mutation.mutateAsync({ ...params, _messageId: messageId });
+    },
+  };
 }
 
 // -----------------------------------------------------------------------------

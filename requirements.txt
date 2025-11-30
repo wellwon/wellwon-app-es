@@ -28,6 +28,12 @@ redis>=7.1.0                      # Redis client (Python 3.14 compatible)
 hiredis>=3.0.0                    # C parser for Redis protocol
 
 # =============================================================================
+# Database - ScyllaDB/Cassandra
+# =============================================================================
+cassandra-driver>=3.29.0          # ScyllaDB/Cassandra Python driver
+scylla-driver>=3.26.0             # ScyllaDB optimized driver (optional)
+
+# =============================================================================
 # Event Bus - Kafka/RedPanda
 # =============================================================================
 aiokafka>=0.12.0                  # Async Kafka client

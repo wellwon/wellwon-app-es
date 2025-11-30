@@ -278,7 +278,8 @@ class DeleteCompanyHandler(BaseCommandHandler):
         company_aggregate = CompanyAggregate(company_id=command.company_id)
 
         # Call aggregate command method
-        company_aggregate.delete_company(deleted_by=command.deleted_by)
+        # force=True bypasses permission checks for saga-initiated deletions
+        company_aggregate.delete_company(deleted_by=command.deleted_by, force=command.force)
 
         # Publish events
         await self.publish_and_commit_events(
@@ -365,15 +366,19 @@ class RequestCompanyDeletionHandler(BaseCommandHandler):
             telegram_group_id=telegram_group_id,
             chat_ids=chat_ids,  # ENRICHED!
             cascade=command.cascade,
+            preserve_company=command.preserve_company,  # Keep company for re-linking
         )
 
         # Publish to transport topic for SagaService
         await self.event_bus.publish(
-            topic="transport.company-events",
-            event=event.model_dump(mode='json')
+            "transport.company-events",
+            event.model_dump(mode='json')
         )
 
-        log.info(f"CompanyDeleteRequested event published for: {command.company_id}")
+        log.info(
+            f"CompanyDeleteRequested event published for: {command.company_id}, "
+            f"preserve_company={command.preserve_company}"
+        )
         return command.company_id
 
 

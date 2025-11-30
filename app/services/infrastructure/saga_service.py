@@ -404,22 +404,7 @@ class SagaService:
             SagaTriggerConfig(
                 event_types=["CompanyDeleteRequested"],
                 saga_class=GroupDeletionSaga,
-                context_builder=lambda event: {
-                    # Core IDs (from ENRICHED event)
-                    'company_id': event.get('company_id'),
-                    'company_name': event.get('company_name', 'Unknown'),
-                    'deleted_by': event.get('deleted_by'),
-                    # ENRICHED DATA - populated by RequestCompanyDeletionHandler
-                    # TRUE SAGA: Saga uses ONLY this data, NO queries
-                    'telegram_group_id': event.get('telegram_group_id'),
-                    'chat_ids': event.get('chat_ids', []),  # CRITICAL: enriched list of chat IDs
-                    'cascade': event.get('cascade', True),
-                    # CQRS metadata
-                    'correlation_id': event.get('correlation_id', event.get('event_id')),
-                    'causation_id': event.get('event_id'),
-                    'original_event_type': event.get('event_type'),
-                    'triggered_from': 'saga_service'
-                },
+                context_builder=lambda event: self._build_deletion_saga_context(event),
                 dedupe_key_builder=lambda event: f"group_deletion:{event.get('company_id')}",
                 dedupe_window_seconds=300,
                 conflict_key_builder=lambda event: f"company:{event.get('company_id')}",
@@ -430,6 +415,34 @@ class SagaService:
 
         log.info(f"Configured {len(self._trigger_configs)} saga trigger topics")
 
+    def _build_deletion_saga_context(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Build context for GroupDeletionSaga"""
+        preserve_company = event.get('preserve_company', False)
+
+        log.debug(
+            f"Building GroupDeletionSaga context: company_id={event.get('company_id')}, "
+            f"preserve_company={preserve_company}, chat_ids_count={len(event.get('chat_ids', []))}"
+        )
+
+        context = {
+            # Core IDs (from ENRICHED event)
+            'company_id': event.get('company_id'),
+            'company_name': event.get('company_name', 'Unknown'),
+            'deleted_by': event.get('deleted_by'),
+            # ENRICHED DATA - populated by RequestCompanyDeletionHandler
+            # TRUE SAGA: Saga uses ONLY this data, NO queries
+            'telegram_group_id': event.get('telegram_group_id'),
+            'chat_ids': event.get('chat_ids', []),  # CRITICAL: enriched list of chat IDs
+            'cascade': event.get('cascade', True),
+            'preserve_company': preserve_company,  # Keep company for re-linking
+            # CQRS metadata
+            'correlation_id': event.get('correlation_id', event.get('event_id')),
+            'causation_id': event.get('event_id'),
+            'original_event_type': event.get('event_type'),
+            'triggered_from': 'saga_service'
+        }
+
+        return context
 
     async def _setup_event_consumers(self) -> None:
         """
@@ -549,14 +562,13 @@ class SagaService:
 
         async def handle_event(event_dict: Dict[str, Any]) -> None:
             """Handle events and trigger appropriate sagas"""
-            # DEBUG: Log ALL received events
             event_type = event_dict.get("event_type")
             event_id = event_dict.get("event_id")
-            log.info(f"[SAGA_CONSUMER_DEBUG] Received event on topic '{topic}': type={event_type}, id={event_id}")
+            log.debug(f"Received event on topic '{topic}': type={event_type}, id={event_id}")
 
             # Skip events that should not trigger sagas
             if await self._should_skip_event(event_dict):
-                log.info(f"[SAGA_CONSUMER_DEBUG] Skipped event {event_id} ({event_type})")
+                log.debug(f"Skipped event {event_id} ({event_type})")
                 return
 
             # NEW: Enhanced event ordering check with version awareness

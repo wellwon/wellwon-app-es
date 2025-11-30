@@ -255,6 +255,62 @@ class CompanyReadRepo:
         return CompanyReadModel(**dict(row))
 
     @staticmethod
+    async def get_company_by_name(
+        name: str,
+        company_type: Optional[str] = None,
+        exact_match: bool = True,
+    ) -> Optional[CompanyReadModel]:
+        """
+        Get company by name.
+
+        Args:
+            name: Company name to search
+            company_type: Optional type filter ('company', 'project', 'individual')
+            exact_match: If True, use exact match (case-insensitive). If False, use ILIKE.
+
+        Returns:
+            CompanyReadModel if found, None otherwise
+        """
+        if exact_match:
+            if company_type:
+                row = await pg_client.fetchrow(
+                    """
+                    SELECT * FROM companies
+                    WHERE LOWER(name) = LOWER($1) AND company_type = $2 AND is_deleted = false
+                    """,
+                    name, company_type
+                )
+            else:
+                row = await pg_client.fetchrow(
+                    """
+                    SELECT * FROM companies
+                    WHERE LOWER(name) = LOWER($1) AND is_deleted = false
+                    """,
+                    name
+                )
+        else:
+            if company_type:
+                row = await pg_client.fetchrow(
+                    """
+                    SELECT * FROM companies
+                    WHERE name ILIKE $1 AND company_type = $2 AND is_deleted = false
+                    """,
+                    f"%{name}%", company_type
+                )
+            else:
+                row = await pg_client.fetchrow(
+                    """
+                    SELECT * FROM companies
+                    WHERE name ILIKE $1 AND is_deleted = false
+                    """,
+                    f"%{name}%"
+                )
+
+        if not row:
+            return None
+        return CompanyReadModel(**dict(row))
+
+    @staticmethod
     async def get_companies(
         include_archived: bool = False,
         include_deleted: bool = False,

@@ -20,6 +20,9 @@ interface UseChatListOptions {
   enabled?: boolean;
 }
 
+// Extended type with optimistic marker
+type OptimisticChatListItem = ChatListItem & { _isOptimistic?: boolean };
+
 export function useChatList(options: UseChatListOptions = {}) {
   const queryClient = useQueryClient();
   const { includeArchived = false, limit = 100, enabled = true } = options;
@@ -27,8 +30,24 @@ export function useChatList(options: UseChatListOptions = {}) {
   const query = useQuery({
     queryKey: chatKeys.list({ includeArchived, limit }),
     queryFn: async () => {
-      const chats = await chatApi.getChats(includeArchived, limit, 0);
-      return chats;
+      const apiChats = await chatApi.getChats(includeArchived, limit, 0);
+
+      // CRITICAL: Preserve optimistic entries that were added via WSE events
+      const existingData = queryClient.getQueryData<OptimisticChatListItem[]>(chatKeys.list({ includeArchived, limit }));
+      if (existingData && Array.isArray(existingData)) {
+        const optimisticEntries = existingData.filter(e => e._isOptimistic);
+        if (optimisticEntries.length > 0) {
+          logger.info('useChatList: Preserving optimistic entries', {
+            optimisticCount: optimisticEntries.length,
+            apiCount: apiChats.length
+          });
+          // Merge: keep optimistic entries that aren't in API response yet
+          const apiIds = new Set(apiChats.map(c => c.id));
+          const uniqueOptimistic = optimisticEntries.filter(o => !apiIds.has(o.id));
+          return [...uniqueOptimistic, ...apiChats];
+        }
+      }
+      return apiChats;
     },
     enabled,
   });
@@ -43,7 +62,8 @@ export function useChatList(options: UseChatListOptions = {}) {
       logger.info('WSE: Chat created, adding optimistically', { chatId, newChatData });
 
       // Create optimistic chat entry from WSE event data
-      const optimisticChat: ChatListItem = {
+      // Mark as optimistic so queryFn can preserve it during race conditions
+      const optimisticChat: OptimisticChatListItem = {
         id: chatId,
         name: newChatData.name || newChatData.chat_name || 'New Chat',
         chat_type: newChatData.chat_type || 'company',
@@ -57,6 +77,7 @@ export function useChatList(options: UseChatListOptions = {}) {
         last_message_sender_id: null,
         unread_count: 0,
         participant_count: 1,
+        _isOptimistic: true, // Marker for queryFn to preserve during fetch
       };
 
       // Add to cache IMMEDIATELY (optimistic)
@@ -168,17 +189,46 @@ export function useChatList(options: UseChatListOptions = {}) {
       queryClient.removeQueries({ queryKey: chatKeys.detail(chatId) });
     };
 
+    // OPTIMISTIC UPDATE: Update last_message when message is created
+    const handleMessageCreated = (event: CustomEvent) => {
+      const message = event.detail;
+      const chatId = message.chat_id;
+
+      if (!chatId) return;
+
+      logger.debug('WSE: Message created, updating chat last_message', { chatId });
+
+      queryClient.setQueryData(
+        chatKeys.list({ includeArchived, limit }),
+        (oldData: ChatListItem[] | undefined) => {
+          if (!oldData) return oldData;
+          return oldData.map((chat) =>
+            chat.id === chatId
+              ? {
+                  ...chat,
+                  last_message_at: message.created_at || new Date().toISOString(),
+                  last_message_content: message.content || message.text || null,
+                  last_message_sender_id: message.sender_id || null,
+                }
+              : chat
+          );
+        }
+      );
+    };
+
     // Subscribe to WSE events
     window.addEventListener('chatCreated', handleChatCreated as EventListener);
     window.addEventListener('chatUpdated', handleChatUpdated as EventListener);
     window.addEventListener('chatArchived', handleChatArchived as EventListener);
     window.addEventListener('chatDeleted', handleChatDeleted as EventListener);
+    window.addEventListener('messageCreated', handleMessageCreated as EventListener);
 
     return () => {
       window.removeEventListener('chatCreated', handleChatCreated as EventListener);
       window.removeEventListener('chatUpdated', handleChatUpdated as EventListener);
       window.removeEventListener('chatArchived', handleChatArchived as EventListener);
       window.removeEventListener('chatDeleted', handleChatDeleted as EventListener);
+      window.removeEventListener('messageCreated', handleMessageCreated as EventListener);
     };
   }, [queryClient, includeArchived, limit]);
 

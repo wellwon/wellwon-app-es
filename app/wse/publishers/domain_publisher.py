@@ -120,11 +120,10 @@ class WSEDomainPublisher:
         self._running = True
 
         try:
-            log.info("Starting WSE Domain Publisher subscriptions...")
             await self._subscribe_all()
             log.info(
                 f"WSE Domain Publisher ready - "
-                f"{len(self._subscriptions)} subscriptions confirmed"
+                f"{len(self._subscriptions)} subscriptions active"
             )
 
         except Exception as e:
@@ -134,6 +133,10 @@ class WSEDomainPublisher:
 
     async def _subscribe_all(self) -> None:
         """Subscribe to all configured domain event topics"""
+        log.debug(
+            f"Subscribing to domain events - "
+            f"user={self._enable_user_events}, company={self._enable_company_events}, chat={self._enable_chat_events}"
+        )
         try:
             if self._enable_user_events:
                 await self._subscribe_to_user_events()
@@ -144,10 +147,7 @@ class WSEDomainPublisher:
             if self._enable_chat_events:
                 await self._subscribe_to_chat_events()
 
-            log.info(
-                f"WSE Domain Publisher subscriptions complete - "
-                f"{len(self._subscriptions)} topic subscriptions active"
-            )
+            log.debug(f"WSE subscriptions complete - {len(self._subscriptions)} topics")
 
         except Exception as e:
             log.error(f"Failed to subscribe to event topics: {e}", exc_info=True)
@@ -354,7 +354,17 @@ class WSEDomainPublisher:
                     topic=creator_topic,
                     event=wse_event,
                 )
-                log.debug(f"Also forwarded {event_type} to creator topic {creator_topic}")
+                log.debug(f"Forwarded {event_type} to creator topic {creator_topic}")
+
+            # For company deletion, notify the user who deleted so their UI updates
+            deleted_by = event.get("deleted_by")
+            if deleted_by and event_type == "CompanyDeleted":
+                deleter_topic = f"user:{deleted_by}:events"
+                await self._pubsub_bus.publish(
+                    topic=deleter_topic,
+                    event=wse_event,
+                )
+                log.debug(f"Also forwarded {event_type} to deleter topic {deleter_topic}")
 
             self._events_forwarded += 1
             log.debug(f"Forwarded {event_type} -> {ws_event_type} to {topic}")
@@ -429,6 +439,18 @@ class WSEDomainPublisher:
                     event=wse_event,
                 )
                 log.debug(f"Also forwarded {event_type} to creator topic {creator_topic}")
+
+            # For Telegram linking, notify the user who linked so their UI updates
+            # This is critical for saga - chat is created first, then linked to Telegram
+            # Frontend needs to know about the link to show chat in correct supergroup
+            linked_by = event.get("linked_by")
+            if linked_by and event_type == "TelegramChatLinked":
+                linker_topic = f"user:{linked_by}:events"
+                await self._pubsub_bus.publish(
+                    topic=linker_topic,
+                    event=wse_event,
+                )
+                log.debug(f"Also forwarded {event_type} to linker topic {linker_topic}")
 
             self._events_forwarded += 1
             log.debug(f"Forwarded {event_type} -> {ws_event_type} to {topic}")
@@ -619,9 +641,11 @@ class WSEDomainPublisher:
             "telegram_message_id": event.get("telegram_message_id"),
             "telegram_user_id": event.get("telegram_user_id"),
             "telegram_user_data": telegram_user_data if telegram_user_data else None,
-            # Company linking
+            # Company/Telegram linking
             "company_id": event.get("company_id"),
+            "telegram_supergroup_id": event.get("telegram_supergroup_id"),
             "created_by": event.get("created_by"),
+            "linked_by": event.get("linked_by"),
             # Timestamps
             "created_at": event.get("created_at"),
             "updated_at": event.get("updated_at"),

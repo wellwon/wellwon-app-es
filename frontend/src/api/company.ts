@@ -235,8 +235,19 @@ export async function restoreCompany(companyId: string): Promise<CommandResponse
   return data;
 }
 
-export async function deleteCompany(companyId: string): Promise<CommandResponse> {
-  const { data } = await API.delete<CommandResponse>(`/companies/${companyId}`);
+export interface DeleteCompanyOptions {
+  cascade?: boolean;          // If true, cascade delete chats/telegram (default: true)
+  preserveCompany?: boolean;  // If true, keep company for future re-linking (default: false)
+}
+
+export async function deleteCompany(
+  companyId: string,
+  options: DeleteCompanyOptions = {}
+): Promise<CommandResponse> {
+  const { cascade = true, preserveCompany = false } = options;
+  const { data } = await API.delete<CommandResponse>(`/companies/${companyId}`, {
+    params: { cascade, preserve_company: preserveCompany },
+  });
   return data;
 }
 
@@ -340,8 +351,15 @@ export async function getCompanyTelegramGroups(
   return data;
 }
 
-export async function createTelegramGroup(companyId: string): Promise<CommandResponse> {
-  const { data } = await API.post<CommandResponse>(`/companies/${companyId}/telegram`);
+export async function createTelegramGroup(
+  companyId: string,
+  title: string,
+  description?: string
+): Promise<CommandResponse> {
+  const { data } = await API.post<CommandResponse>(`/companies/${companyId}/telegram`, {
+    title,
+    description,
+  });
   return data;
 }
 

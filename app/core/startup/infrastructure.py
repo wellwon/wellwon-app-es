@@ -1,7 +1,7 @@
 # app/core/startup/infrastructure.py
 # =============================================================================
 # File: app/core/startup/infrastructure.py
-# Description: Core infrastructure initialization (DB, Redis, EventBus, Cache)
+# Description: Core infrastructure initialization (DB, Redis, ScyllaDB, EventBus, Cache)
 # =============================================================================
 
 import os
@@ -20,6 +20,29 @@ from app.infra.event_bus.redpanda_adapter import RedpandaTransportAdapter
 from app.wse.core.pubsub_bus import PubSubBus
 
 logger = logging.getLogger("wellwon.startup.infrastructure")
+
+# ScyllaDB imports with error handling
+try:
+    from app.infra.persistence.scylladb import (
+        init_global_scylla_client,
+        get_scylla_client,
+        close_global_scylla_client,
+    )
+    from app.config.scylla_config import ScyllaConfig, load_scylla_config_from_env
+
+    SCYLLA_AVAILABLE = True
+except ImportError as scylla_import_error:
+    logger.warning(f"ScyllaDB client not available: {scylla_import_error}")
+    SCYLLA_AVAILABLE = False
+
+    async def init_global_scylla_client(config=None):
+        return None
+
+    def get_scylla_client():
+        return None
+
+    async def close_global_scylla_client():
+        pass
 
 # Cache manager imports with error handling
 try:
@@ -44,11 +67,35 @@ except ImportError as cache_import_error:
 
 async def initialize_databases(app: FastAPI) -> None:
     """
-    Initialize PostgreSQL database
+    Initialize PostgreSQL and ScyllaDB databases
     """
     # Main PostgreSQL Database
     await init_db_pool()
     logger.info("PostgreSQL pool initialized.")
+
+    # ScyllaDB (for high-volume message storage)
+    if SCYLLA_AVAILABLE and os.getenv("SCYLLA_ENABLED", "false").lower() == "true":
+        try:
+            scylla_config = ScyllaConfig(
+                contact_points=os.getenv("SCYLLA_CONTACT_POINTS", "localhost"),
+                port=int(os.getenv("SCYLLA_PORT", "9042")),
+                keyspace=os.getenv("SCYLLA_KEYSPACE", "wellwon_messages"),
+                username=os.getenv("SCYLLA_USERNAME"),
+                password=os.getenv("SCYLLA_PASSWORD"),
+            )
+            scylla_client = await init_global_scylla_client(scylla_config)
+            app.state.scylla_client = scylla_client
+            logger.info(f"ScyllaDB client initialized (keyspace: {scylla_config.keyspace})")
+        except Exception as scylla_error:
+            logger.error(f"Failed to initialize ScyllaDB: {scylla_error}")
+            logger.warning("Continuing without ScyllaDB - message storage will use PostgreSQL only")
+            app.state.scylla_client = None
+    else:
+        if not SCYLLA_AVAILABLE:
+            logger.info("ScyllaDB client not available (cassandra-driver not installed)")
+        else:
+            logger.info("ScyllaDB disabled (SCYLLA_ENABLED != true)")
+        app.state.scylla_client = None
 
 
 async def initialize_cache(app: FastAPI) -> None:

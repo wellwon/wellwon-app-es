@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from app.infra.event_store.event_envelope import EventEnvelope
 from app.infra.event_store.sync_decorators import sync_projection, monitor_projection
+from app.common.exceptions.projection_exceptions import RetriableProjectionError
 
 if TYPE_CHECKING:
     from app.infra.read_repos.chat_read_repo import ChatReadRepo
@@ -29,7 +30,12 @@ class ChatProjector:
     SYNC vs ASYNC projections:
     - SYNC: ChatCreated, ParticipantAdded, MessageSent, TelegramMessageReceived
       (Critical for saga flow, real-time chat UI)
-    - ASYNC: Everything else (eventual consistency is acceptable)
+    - ASYNC: All others (UI uses optimistic updates, Worker processes via eventual consistency)
+
+    FK violation handling:
+    - ParticipantAdded, MessageSent, TelegramMessageReceived catch FK violations
+    - Raises RetriableProjectionError when chat doesn't exist yet
+    - Worker queues event for retry after ChatCreated is projected
     """
 
     def __init__(self, chat_read_repo: 'ChatReadRepo'):
@@ -63,10 +69,10 @@ class ChatProjector:
             created_at=envelope.stored_at,
         )
 
-    @sync_projection("ChatUpdated")
+    # ASYNC: UI uses optimistic update, eventual consistency OK
     @monitor_projection
     async def on_chat_updated(self, envelope: EventEnvelope) -> None:
-        """Project ChatUpdated event - SYNC for immediate UI update"""
+        """Project ChatUpdated event - ASYNC (UI uses optimistic update)"""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
 
@@ -84,10 +90,10 @@ class ChatProjector:
             log.error(f"ChatUpdated projection FAILED: chat_id={chat_id}, error={e}", exc_info=True)
             raise
 
-    @sync_projection("ChatArchived")
+    # ASYNC: UI uses optimistic update, eventual consistency OK
     @monitor_projection
     async def on_chat_archived(self, envelope: EventEnvelope) -> None:
-        """Project ChatArchived event - SYNC for immediate UI update"""
+        """Project ChatArchived event - ASYNC (UI uses optimistic update)"""
         chat_id = envelope.aggregate_id
 
         log.info(f"Projecting ChatArchived: chat_id={chat_id}, type={type(chat_id)}")
@@ -103,10 +109,10 @@ class ChatProjector:
             log.error(f"ChatArchived projection FAILED: chat_id={chat_id}, error={e}", exc_info=True)
             raise
 
-    @sync_projection("ChatRestored")
+    # ASYNC: UI uses optimistic update, eventual consistency OK
     @monitor_projection
     async def on_chat_restored(self, envelope: EventEnvelope) -> None:
-        """Project ChatRestored event - SYNC for immediate UI update"""
+        """Project ChatRestored event - ASYNC (UI uses optimistic update)"""
         chat_id = envelope.aggregate_id
 
         log.info(f"Projecting ChatRestored: chat_id={chat_id}")
@@ -117,10 +123,10 @@ class ChatProjector:
             updated_at=envelope.stored_at,
         )
 
-    @sync_projection("ChatHardDeleted")
+    # ASYNC: UI uses optimistic update, eventual consistency OK
     @monitor_projection
     async def on_chat_hard_deleted(self, envelope: EventEnvelope) -> None:
-        """Project ChatHardDeleted event - SYNC for immediate UI update (hard delete from DB)"""
+        """Project ChatHardDeleted event - ASYNC (UI uses optimistic update)"""
         chat_id = envelope.aggregate_id
 
         log.info(f"Projecting ChatHardDeleted: chat_id={chat_id}")
@@ -143,6 +149,7 @@ class ChatProjector:
         Project ParticipantAdded event.
 
         SYNC: Saga flow depends on participant. UI shows members immediately.
+        Handles FK violation gracefully when chat doesn't exist yet.
         """
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
@@ -150,20 +157,33 @@ class ChatProjector:
 
         log.info(f"Projecting ParticipantAdded: chat={chat_id}, user={user_id}")
 
-        await self.chat_read_repo.insert_participant(
-            chat_id=chat_id,
-            user_id=user_id,
-            role=event_data.get('role', 'member'),
-            joined_at=datetime.fromisoformat(event_data['joined_at']) if event_data.get('joined_at') else envelope.stored_at,
-        )
+        try:
+            await self.chat_read_repo.insert_participant(
+                chat_id=chat_id,
+                user_id=user_id,
+                role=event_data.get('role', 'member'),
+                joined_at=datetime.fromisoformat(event_data['joined_at']) if event_data.get('joined_at') else envelope.stored_at,
+            )
 
-        # Update participant count on chat
-        await self.chat_read_repo.increment_participant_count(chat_id)
+            # Update participant count on chat
+            await self.chat_read_repo.increment_participant_count(chat_id)
+        except Exception as e:
+            error_str = str(e).lower()
+            # Check for FK violation (chat doesn't exist yet)
+            if 'foreign key' in error_str or 'violates foreign key constraint' in error_str:
+                log.warning(
+                    f"FK violation for ParticipantAdded: chat={chat_id} may not exist yet. "
+                    f"Event will be retried."
+                )
+                raise RetriableProjectionError(
+                    f"Chat {chat_id} not yet projected. ParticipantAdded will be retried."
+                ) from e
+            raise
 
-    @sync_projection("ParticipantRemoved")
+    # ASYNC: UI uses optimistic update, eventual consistency OK
     @monitor_projection
     async def on_participant_removed(self, envelope: EventEnvelope) -> None:
-        """Project ParticipantRemoved event - SYNC for UI update"""
+        """Project ParticipantRemoved event - ASYNC (UI uses optimistic update)"""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
         user_id = uuid.UUID(event_data['user_id'])
@@ -178,10 +198,10 @@ class ChatProjector:
         # Update participant count on chat
         await self.chat_read_repo.decrement_participant_count(chat_id)
 
-    @sync_projection("ParticipantRoleChanged")
+    # ASYNC: UI uses optimistic update, eventual consistency OK
     @monitor_projection
     async def on_participant_role_changed(self, envelope: EventEnvelope) -> None:
-        """Project ParticipantRoleChanged event - SYNC for UI update"""
+        """Project ParticipantRoleChanged event - ASYNC (UI uses optimistic update)"""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
         user_id = uuid.UUID(event_data['user_id'])
@@ -194,10 +214,10 @@ class ChatProjector:
             role=event_data['new_role'],
         )
 
-    @sync_projection("ParticipantLeft")
+    # ASYNC: UI uses optimistic update, eventual consistency OK
     @monitor_projection
     async def on_participant_left(self, envelope: EventEnvelope) -> None:
-        """Project ParticipantLeft event - SYNC for UI update"""
+        """Project ParticipantLeft event - ASYNC (UI uses optimistic update)"""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
         user_id = uuid.UUID(event_data['user_id'])
@@ -222,6 +242,7 @@ class ChatProjector:
         Project MessageSent event.
 
         SYNC: Real-time chat requires immediate message visibility.
+        Handles FK violation gracefully when chat doesn't exist yet.
         """
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
@@ -236,41 +257,54 @@ class ChatProjector:
         source = event_data.get('source', 'web')
         sync_direction = 'telegram_to_web' if source == 'telegram' else None
 
-        await self.chat_read_repo.insert_message(
-            message_id=message_id,
-            chat_id=uuid.UUID(event_data['chat_id']),
-            sender_id=sender_id,
-            content=event_data['content'],
-            message_type=event_data.get('message_type', 'text'),
-            reply_to_id=uuid.UUID(event_data['reply_to_id']) if event_data.get('reply_to_id') else None,
-            file_url=event_data.get('file_url'),
-            file_name=event_data.get('file_name'),
-            file_size=event_data.get('file_size'),
-            file_type=event_data.get('file_type'),
-            voice_duration=event_data.get('voice_duration'),
-            source=source,
-            telegram_message_id=event_data.get('telegram_message_id'),
-            telegram_user_id=event_data.get('telegram_user_id'),
-            telegram_user_data=event_data.get('telegram_user_data'),
-            telegram_forward_data=event_data.get('telegram_forward_data'),
-            telegram_topic_id=event_data.get('telegram_topic_id'),
-            sync_direction=sync_direction,
-            created_at=envelope.stored_at,
-        )
+        try:
+            await self.chat_read_repo.insert_message(
+                message_id=message_id,
+                chat_id=uuid.UUID(event_data['chat_id']),
+                sender_id=sender_id,
+                content=event_data['content'],
+                message_type=event_data.get('message_type', 'text'),
+                reply_to_id=uuid.UUID(event_data['reply_to_id']) if event_data.get('reply_to_id') else None,
+                file_url=event_data.get('file_url'),
+                file_name=event_data.get('file_name'),
+                file_size=event_data.get('file_size'),
+                file_type=event_data.get('file_type'),
+                voice_duration=event_data.get('voice_duration'),
+                source=source,
+                telegram_message_id=event_data.get('telegram_message_id'),
+                telegram_user_id=event_data.get('telegram_user_id'),
+                telegram_user_data=event_data.get('telegram_user_data'),
+                telegram_forward_data=event_data.get('telegram_forward_data'),
+                telegram_topic_id=event_data.get('telegram_topic_id'),
+                sync_direction=sync_direction,
+                created_at=envelope.stored_at,
+            )
 
-        # Update chat's last message
-        await self.chat_read_repo.update_chat_last_message(
-            chat_id=uuid.UUID(event_data['chat_id']),
-            last_message_at=envelope.stored_at,
-            last_message_content=event_data['content'][:100],  # Truncate for preview
-            last_message_sender_id=sender_id,
-        )
+            # Update chat's last message
+            await self.chat_read_repo.update_chat_last_message(
+                chat_id=uuid.UUID(event_data['chat_id']),
+                last_message_at=envelope.stored_at,
+                last_message_content=event_data['content'][:100],  # Truncate for preview
+                last_message_sender_id=sender_id,
+            )
+        except Exception as e:
+            error_str = str(e).lower()
+            # Check for FK violation (chat doesn't exist yet)
+            if 'foreign key' in error_str or 'violates foreign key constraint' in error_str:
+                log.warning(
+                    f"FK violation for MessageSent: chat={chat_id} may not exist yet. "
+                    f"Event will be retried."
+                )
+                raise RetriableProjectionError(
+                    f"Chat {chat_id} not yet projected. MessageSent will be retried."
+                ) from e
+            raise
 
 
-    @sync_projection("MessageEdited")
+    # ASYNC: UI uses optimistic update, eventual consistency OK
     @monitor_projection
     async def on_message_edited(self, envelope: EventEnvelope) -> None:
-        """Project MessageEdited event - SYNC for real-time UI"""
+        """Project MessageEdited event - ASYNC (UI uses optimistic update)"""
         event_data = envelope.event_data
         message_id = uuid.UUID(event_data['message_id'])
 
@@ -283,10 +317,10 @@ class ChatProjector:
             updated_at=envelope.stored_at,
         )
 
-    @sync_projection("MessageDeleted")
+    # ASYNC: UI uses optimistic update, eventual consistency OK
     @monitor_projection
     async def on_message_deleted(self, envelope: EventEnvelope) -> None:
-        """Project MessageDeleted event - SYNC for real-time UI"""
+        """Project MessageDeleted event - ASYNC (UI uses optimistic update)"""
         event_data = envelope.event_data
         message_id = uuid.UUID(event_data['message_id'])
 
@@ -297,9 +331,9 @@ class ChatProjector:
             updated_at=envelope.stored_at,
         )
 
-    @sync_projection("MessageReadStatusUpdated")
+    # ASYNC: Read receipts can use eventual consistency
     async def on_message_read_status_updated(self, envelope: EventEnvelope) -> None:
-        """Project MessageReadStatusUpdated event - SYNC for read receipts"""
+        """Project MessageReadStatusUpdated event - ASYNC (eventual consistency OK)"""
         event_data = envelope.event_data
         message_id = uuid.UUID(event_data['message_id'])
         user_id = uuid.UUID(event_data['user_id'])
@@ -312,9 +346,9 @@ class ChatProjector:
             read_at=datetime.fromisoformat(event_data['read_at']) if event_data.get('read_at') else envelope.stored_at,
         )
 
-    @sync_projection("MessagesMarkedAsRead")
+    # ASYNC: Read receipts can use eventual consistency
     async def on_messages_marked_as_read(self, envelope: EventEnvelope) -> None:
-        """Project MessagesMarkedAsRead event - SYNC for batch read receipts"""
+        """Project MessagesMarkedAsRead event - ASYNC (eventual consistency OK)"""
         event_data = envelope.event_data
         chat_id = uuid.UUID(event_data['chat_id'])
         user_id = uuid.UUID(event_data['user_id'])
@@ -334,10 +368,10 @@ class ChatProjector:
     # Telegram Integration Projections
     # =========================================================================
 
-    @sync_projection("TelegramChatLinked")
+    # ASYNC: UI uses optimistic update, eventual consistency OK
     @monitor_projection
     async def on_telegram_chat_linked(self, envelope: EventEnvelope) -> None:
-        """Project TelegramChatLinked event - SYNC for UI"""
+        """Project TelegramChatLinked event - ASYNC (UI uses optimistic update)"""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
 
@@ -349,10 +383,10 @@ class ChatProjector:
             telegram_topic_id=event_data.get('telegram_topic_id'),
         )
 
-    @sync_projection("TelegramChatUnlinked")
+    # ASYNC: UI uses optimistic update, eventual consistency OK
     @monitor_projection
     async def on_telegram_chat_unlinked(self, envelope: EventEnvelope) -> None:
-        """Project TelegramChatUnlinked event - SYNC for UI"""
+        """Project TelegramChatUnlinked event - ASYNC (UI uses optimistic update)"""
         chat_id = envelope.aggregate_id
 
         log.info(f"Projecting TelegramChatUnlinked: chat={chat_id}")
@@ -372,6 +406,7 @@ class ChatProjector:
         SYNC: Real-time Telegram messages must appear immediately.
         This handler exists for backward compatibility with old events.
         New messages use unified MessageSent event with telegram_user_id field.
+        Handles FK violation gracefully when chat doesn't exist yet.
         """
         event_data = envelope.event_data
         message_id = uuid.UUID(event_data['message_id'])
@@ -379,24 +414,37 @@ class ChatProjector:
 
         log.warning(f"Projecting legacy TelegramMessageReceived: message={message_id}")
 
-        # Insert message with telegram_user_id
-        await self.chat_read_repo.insert_message(
-            message_id=message_id,
-            chat_id=chat_id,
-            sender_id=None,  # No mapped WellWon user
-            content=event_data['content'],
-            message_type=event_data.get('message_type', 'text'),
-            source='telegram',
-            telegram_message_id=event_data['telegram_message_id'],
-            telegram_user_id=event_data.get('telegram_user_id'),
-            sync_direction='telegram_to_web',
-            created_at=envelope.stored_at,
-        )
+        try:
+            # Insert message with telegram_user_id
+            await self.chat_read_repo.insert_message(
+                message_id=message_id,
+                chat_id=chat_id,
+                sender_id=None,  # No mapped WellWon user
+                content=event_data['content'],
+                message_type=event_data.get('message_type', 'text'),
+                source='telegram',
+                telegram_message_id=event_data['telegram_message_id'],
+                telegram_user_id=event_data.get('telegram_user_id'),
+                sync_direction='telegram_to_web',
+                created_at=envelope.stored_at,
+            )
 
-        # Update chat's last message
-        await self.chat_read_repo.update_chat_last_message(
-            chat_id=chat_id,
-            last_message_at=envelope.stored_at,
-            last_message_content=event_data['content'][:100],
-            last_message_sender_id=None,
-        )
+            # Update chat's last message
+            await self.chat_read_repo.update_chat_last_message(
+                chat_id=chat_id,
+                last_message_at=envelope.stored_at,
+                last_message_content=event_data['content'][:100],
+                last_message_sender_id=None,
+            )
+        except Exception as e:
+            error_str = str(e).lower()
+            # Check for FK violation (chat doesn't exist yet)
+            if 'foreign key' in error_str or 'violates foreign key constraint' in error_str:
+                log.warning(
+                    f"FK violation for TelegramMessageReceived: chat={chat_id} may not exist yet. "
+                    f"Event will be retried."
+                )
+                raise RetriableProjectionError(
+                    f"Chat {chat_id} not yet projected. TelegramMessageReceived will be retried."
+                ) from e
+            raise

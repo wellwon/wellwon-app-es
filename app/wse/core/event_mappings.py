@@ -87,8 +87,8 @@ INTERNAL_TO_WS_EVENT_TYPE_MAP = {
     'UserStartedTyping': 'user_typing',
     'UserStoppedTyping': 'user_stopped_typing',
     'MessagesRead': 'messages_read',
-    'ChatTelegramLinked': 'chat_telegram_linked',
-    'ChatTelegramUnlinked': 'chat_telegram_unlinked',
+    'TelegramChatLinked': 'chat_telegram_linked',
+    'TelegramChatUnlinked': 'chat_telegram_unlinked',
     'TelegramMessageReceived': 'message_created',  # Telegram message → same as regular message
 
     # =========================================================================

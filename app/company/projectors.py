@@ -13,6 +13,7 @@ from decimal import Decimal
 
 from app.infra.event_store.event_envelope import EventEnvelope
 from app.infra.event_store.sync_decorators import sync_projection, monitor_projection
+from app.common.exceptions.projection_exceptions import RetriableProjectionError
 
 if TYPE_CHECKING:
     from app.infra.read_repos.company_read_repo import CompanyReadRepo
@@ -29,9 +30,8 @@ class CompanyProjector:
     company_balance_transactions).
 
     SYNC vs ASYNC projections:
-    - SYNC: CompanyCreated, UserAddedToCompany, TelegramSupergroupCreated, CompanyBalanceUpdated
-      (Critical for saga flow, UI immediate feedback, or financial integrity)
-    - ASYNC: Everything else (eventual consistency is acceptable)
+    - SYNC: CompanyBalanceUpdated only (financial integrity requires immediate consistency)
+    - ASYNC: All others (UI uses optimistic updates, Worker processes via eventual consistency)
     """
 
     def __init__(self, company_read_repo: 'CompanyReadRepo'):
@@ -41,14 +41,13 @@ class CompanyProjector:
     # Company Lifecycle Projections
     # =========================================================================
 
-    @sync_projection("CompanyCreated")
+    # ASYNC: UI uses optimistic update, Worker handles projection
     @monitor_projection
     async def on_company_created(self, envelope: EventEnvelope) -> None:
         """
         Project CompanyCreated event to read model.
 
-        SYNC: Saga waits for company to exist before creating Telegram group.
-        UI shows company immediately after creation.
+        ASYNC: UI uses optimistic update, eventual consistency acceptable.
         """
         event_data = envelope.event_data
         company_id = envelope.aggregate_id
@@ -135,28 +134,39 @@ class CompanyProjector:
             updated_at=envelope.stored_at,
         )
 
+    # ASYNC: UI uses optimistic update, Worker handles projection
+    @monitor_projection
     async def on_company_deleted(self, envelope: EventEnvelope) -> None:
-        """Project CompanyDeleted event (ASYNC - soft delete)"""
+        """
+        Project CompanyDeleted event.
+
+        ASYNC: UI uses optimistic update, eventual consistency acceptable.
+        """
         company_id = envelope.aggregate_id
 
         log.info(f"Projecting CompanyDeleted: company_id={company_id}")
 
-        await self.company_read_repo.soft_delete_company(
-            company_id=company_id,
-            updated_at=envelope.stored_at,
-        )
+        try:
+            await self.company_read_repo.delete_company(
+                company_id=company_id,
+                updated_at=envelope.stored_at,
+            )
+            log.info(f"CompanyDeleted projection SUCCESS: company_id={company_id}")
+        except Exception as e:
+            log.error(f"CompanyDeleted projection FAILED: company_id={company_id}, error={e}", exc_info=True)
+            raise
 
     # =========================================================================
     # User-Company Relationship Projections
     # =========================================================================
 
-    @sync_projection("UserAddedToCompany")
+    # ASYNC: UI uses optimistic update, Worker handles projection
     @monitor_projection
     async def on_user_added_to_company(self, envelope: EventEnvelope) -> None:
         """
         Project UserAddedToCompany event.
 
-        SYNC: Saga flow depends on user being added. UI shows members immediately.
+        ASYNC: UI uses optimistic update, eventual consistency acceptable.
         """
         event_data = envelope.event_data
         company_id = envelope.aggregate_id
@@ -210,13 +220,13 @@ class CompanyProjector:
     # Telegram Supergroup Projections
     # =========================================================================
 
-    @sync_projection("TelegramSupergroupCreated")
+    # ASYNC: Worker handles with RetriableProjectionError for FK violations
     @monitor_projection
     async def on_telegram_supergroup_created(self, envelope: EventEnvelope) -> None:
         """
         Project TelegramSupergroupCreated event.
 
-        SYNC: Saga waits for supergroup link. UI shows group in sidebar immediately.
+        ASYNC: Worker handles with RetriableProjectionError for FK violations.
         """
         event_data = envelope.event_data
         company_id = envelope.aggregate_id
@@ -224,16 +234,29 @@ class CompanyProjector:
 
         log.info(f"Projecting TelegramSupergroupCreated: company={company_id}, group={telegram_group_id}")
 
-        await self.company_read_repo.insert_telegram_supergroup(
-            company_id=company_id,
-            telegram_group_id=telegram_group_id,
-            title=event_data['title'],
-            username=event_data.get('username'),
-            description=event_data.get('description'),
-            invite_link=event_data.get('invite_link'),
-            is_forum=event_data.get('is_forum', True),
-            created_at=envelope.stored_at,
-        )
+        try:
+            await self.company_read_repo.insert_telegram_supergroup(
+                company_id=company_id,
+                telegram_group_id=telegram_group_id,
+                title=event_data['title'],
+                username=event_data.get('username'),
+                description=event_data.get('description'),
+                invite_link=event_data.get('invite_link'),
+                is_forum=event_data.get('is_forum', True),
+                created_at=envelope.stored_at,
+            )
+        except Exception as e:
+            error_str = str(e).lower()
+            # Check for FK violation (company doesn't exist yet)
+            if 'foreign key' in error_str or 'violates foreign key constraint' in error_str:
+                log.warning(
+                    f"FK violation for TelegramSupergroupCreated: company={company_id} may not exist yet. "
+                    f"Event will be retried."
+                )
+                raise RetriableProjectionError(
+                    f"Company {company_id} not yet projected. TelegramSupergroupCreated will be retried."
+                ) from e
+            raise
 
     # ASYNC: Linking existing group is not time-critical
     async def on_telegram_supergroup_linked(self, envelope: EventEnvelope) -> None:
@@ -283,13 +306,13 @@ class CompanyProjector:
             updated_at=envelope.stored_at,
         )
 
-    @sync_projection("TelegramSupergroupDeleted")
+    # ASYNC: UI uses optimistic update, Worker handles projection
     @monitor_projection
     async def on_telegram_supergroup_deleted(self, envelope: EventEnvelope) -> None:
         """
         Project TelegramSupergroupDeleted event - hard delete from read model.
 
-        SYNC: UI must immediately remove the supergroup from display.
+        ASYNC: UI uses optimistic update, eventual consistency acceptable.
         """
         event_data = envelope.event_data
         telegram_group_id = event_data['telegram_group_id']

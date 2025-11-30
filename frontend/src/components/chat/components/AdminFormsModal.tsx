@@ -54,6 +54,7 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
   const [processError, setProcessError] = useState<string>('');
   const [groupCreationResult, setGroupCreationResult] = useState<any>(null);
   const [createdCompanyData, setCreatedCompanyData] = useState<any>(null);
+  const [foundDuplicateCompany, setFoundDuplicateCompany] = useState<companyApi.CompanyDetail | null>(null);
   const [telegramGroupData, setTelegramGroupData] = useState({
     title: '',
     description: 'Рабочая группа WellWon Logistics'
@@ -283,6 +284,84 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
       setCurrentStep(Math.min(stepIndex + 1, processSteps.length - 1));
     }
   };
+
+  // Handler for linking to existing company instead of creating new
+  const handleLinkToExistingCompany = async () => {
+    if (!foundDuplicateCompany || !user) return;
+
+    setFoundDuplicateCompany(null); // Close the dialog
+
+    try {
+      // Continue with saga steps 2-4 but for existing company
+      // We need to create Telegram group and link it to existing company
+      updateStepStatus(1, 'loading');
+
+      logger.info('Linking to existing company with new Telegram group', {
+        companyId: foundDuplicateCompany.id,
+        companyName: foundDuplicateCompany.name
+      });
+
+      // For existing company, we need to:
+      // 1. Create a new Telegram group for the company
+      // 2. Link it to the existing company
+      // This is done via create_telegram_group API
+      await companyApi.createTelegramGroup(
+        foundDuplicateCompany.id,
+        foundDuplicateCompany.name
+      );
+
+      updateStepStatus(1, 'success');
+      updateStepStatus(2, 'success');
+      updateStepStatus(3, 'success');
+
+      // Clear and reload cache if we had an active chat
+      if (activeChat?.id) {
+        clearCompanyCache(activeChat.id);
+        await loadCompanyForChat(activeChat.id);
+      }
+
+      setGroupCreationResult({
+        success: true,
+        telegram_group_id: null,
+        title: foundDuplicateCompany.name,
+        invite_link: null,
+        group_data: {
+          group_title: foundDuplicateCompany.name,
+        }
+      });
+      setCreatedCompanyData(foundDuplicateCompany);
+
+      logger.info('Successfully linked to existing company', {
+        companyId: foundDuplicateCompany.id
+      });
+
+      if (onSuccess) {
+        onSuccess();
+      }
+    } catch (error: any) {
+      logger.error('Error linking to existing company', error);
+      // Handle Pydantic validation errors (422) which return array of objects
+      let errorMessage = 'Ошибка при привязке к существующей компании';
+      const detail = error?.response?.data?.detail;
+      if (Array.isArray(detail)) {
+        // Pydantic validation error - extract messages
+        errorMessage = detail.map((d: any) => d.msg || String(d)).join(', ');
+      } else if (typeof detail === 'string') {
+        errorMessage = detail;
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      setProcessError(errorMessage);
+      updateStepStatus(1, 'error');
+    }
+  };
+
+  // Handler to dismiss duplicate dialog and create new company anyway
+  const handleCreateNewAnyway = () => {
+    setFoundDuplicateCompany(null);
+    // User chose to dismiss, just close the process
+    setShowingProcess(false);
+  };
   const startCompanyCreation = async () => {
     try {
       // Шаг 1: Проверка дубликатов
@@ -305,37 +384,52 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
         component: 'AdminFormsModal'
       });
 
-      // Check for duplicates by VAT or name
-      let isDuplicate = false;
+      // Check for duplicates by VAT (companies) or name (projects)
+      let existingCompany: companyApi.CompanyDetail | null = null;
       try {
-        if (!isProject && vatValue) {
-          const byVat = await companyApi.getCompanyByVat(vatValue);
-          if (byVat) isDuplicate = true;
-        }
-        if (!isDuplicate && companyName) {
-          const searchResults = await companyApi.searchCompanies(companyName, 1);
-          if (searchResults.length > 0 && searchResults[0].name === companyName) {
-            isDuplicate = true;
+        if (isProject) {
+          // For projects: check by exact name match with type 'project'
+          if (companyName) {
+            const searchResults = await companyApi.searchCompanies(companyName, 5);
+            // Find exact name match with project type
+            const projectMatch = searchResults.find(
+              c => c.name.toLowerCase() === companyName.toLowerCase() && c.company_type === 'project'
+            );
+            if (projectMatch) {
+              existingCompany = await companyApi.getCompanyById(projectMatch.id);
+            }
+          }
+        } else {
+          // For companies: check by VAT (INN) first
+          if (vatValue) {
+            existingCompany = await companyApi.getCompanyByVat(vatValue);
+          }
+          // Also check by name if no VAT match
+          if (!existingCompany && companyName) {
+            const searchResults = await companyApi.searchCompanies(companyName, 5);
+            // Find exact name match with company type
+            const companyMatch = searchResults.find(
+              c => c.name.toLowerCase() === companyName.toLowerCase() && c.company_type === 'company'
+            );
+            if (companyMatch) {
+              existingCompany = await companyApi.getCompanyById(companyMatch.id);
+            }
           }
         }
       } catch (e) {
         // Company doesn't exist, which is what we want
       }
 
-      if (isDuplicate) {
-        logger.warn('Company already exists', {
-          vat: vatValue,
-          name: companyName,
-          isProject,
+      if (existingCompany) {
+        logger.info('Existing company found', {
+          companyId: existingCompany.id,
+          vat: existingCompany.vat,
+          name: existingCompany.name,
           component: 'AdminFormsModal'
         });
-        updateStepStatus(0, 'error');
-
-        if (isProject) {
-          setProcessError(`Проект с таким названием уже существует: "${companyName}"`);
-        } else {
-          setProcessError(`Компания ${vatValue ? `с ИНН ${vatValue}` : `с названием "${companyName}"`} уже существует`);
-        }
+        // Show option to link to existing company instead of error
+        setFoundDuplicateCompany(existingCompany);
+        updateStepStatus(0, 'success'); // Check passed - found existing
         return;
       }
       updateStepStatus(0, 'success');
@@ -457,6 +551,7 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
       setIsProject(false);
       setGroupCreationResult(null);
       setCreatedCompanyData(null);
+      setFoundDuplicateCompany(null);
       setShowingProcess(false);
       setProcessSteps([]);
       setCurrentStep(0);
@@ -666,8 +761,55 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
                   </div>
                 )}
 
+                {/* Found duplicate company/project - offer to link */}
+                {foundDuplicateCompany && !groupCreationResult && (
+                  <div className="w-full p-4 border border-yellow-500/30 rounded-lg bg-card/50 space-y-6">
+                    <div className="text-center">
+                      <div className="w-16 h-16 mx-auto mb-4 flex items-center justify-center rounded-full bg-yellow-500/10">
+                        <Building className="w-8 h-8 text-yellow-400" />
+                      </div>
+                      <h4 className="text-lg font-semibold text-foreground mb-2">
+                        {foundDuplicateCompany.company_type === 'project'
+                          ? 'Найден существующий проект'
+                          : 'Найдена существующая компания'}
+                      </h4>
+                      <p className="text-sm text-muted-foreground mb-2">
+                        {foundDuplicateCompany.company_type === 'project'
+                          ? `Проект с таким названием уже существует в системе:`
+                          : `Компания ${foundDuplicateCompany.vat ? `с ИНН (${foundDuplicateCompany.vat})` : 'с таким названием'} уже существует в системе:`
+                        }
+                      </p>
+                      <p className="text-sm text-foreground font-medium mb-4">
+                        {foundDuplicateCompany.name}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {foundDuplicateCompany.company_type === 'project'
+                          ? 'Хотите создать Telegram группу и привязать к существующему проекту?'
+                          : 'Хотите создать Telegram группу и привязать к существующей компании?'
+                        }
+                      </p>
+                    </div>
+                    <div className="flex gap-3 justify-center">
+                      <GlassButton
+                        variant="primary"
+                        onClick={handleLinkToExistingCompany}
+                        className="bg-yellow-500/80 hover:bg-yellow-500/90 text-white"
+                      >
+                        <Building className="w-4 h-4 mr-2" />
+                        {foundDuplicateCompany.company_type === 'project'
+                          ? 'Привязать к проекту'
+                          : 'Привязать к компании'
+                        }
+                      </GlassButton>
+                      <GlassButton variant="secondary" onClick={handleCreateNewAnyway}>
+                        Отмена
+                      </GlassButton>
+                    </div>
+                  </div>
+                )}
+
                 {/* Ошибка */}
-                {processError && !groupCreationResult && (
+                {processError && !groupCreationResult && !foundDuplicateCompany && (
                   <div className="w-full p-4 border border-border rounded-lg bg-card/50 space-y-6">
                     <div className="text-center">
                       <div className="w-16 h-16 mx-auto mb-4 flex items-center justify-center rounded-full bg-accent-red/10">

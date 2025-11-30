@@ -123,6 +123,8 @@ class CompanyDeleteRequested(BaseEvent):
 
     TRUE SAGA Pattern: Handler enriches this event with all data saga needs.
     Saga uses ONLY this event data, NO queries.
+
+    preserve_company: If True, keep company record for re-linking to new Telegram group.
     """
     event_type: Literal["CompanyDeleteRequested"] = "CompanyDeleteRequested"
     company_id: uuid.UUID
@@ -133,6 +135,7 @@ class CompanyDeleteRequested(BaseEvent):
     telegram_group_id: Optional[int] = None
     chat_ids: List[uuid.UUID] = Field(default_factory=list)
     cascade: bool = True
+    preserve_company: bool = False  # If True, keep company for future re-linking
 
 
 # =============================================================================

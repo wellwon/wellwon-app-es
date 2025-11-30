@@ -26,6 +26,18 @@ except ImportError:
     async def shutdown_cache_manager():
         pass
 
+# Import ScyllaDB shutdown if available
+try:
+    from app.infra.persistence.scylladb import close_global_scylla_client
+
+    SCYLLA_AVAILABLE = True
+except ImportError:
+    SCYLLA_AVAILABLE = False
+
+
+    async def close_global_scylla_client():
+        pass
+
 
 async def shutdown_all_services(app: FastAPI) -> None:
     """Shutdown all services in the correct order"""
@@ -148,6 +160,17 @@ async def shutdown_infrastructure_services(app: FastAPI) -> None:
 
 async def shutdown_databases(app: FastAPI) -> None:
     """Close database connections"""
+
+    # Close ScyllaDB connection
+    if SCYLLA_AVAILABLE and getattr(app.state, 'scylla_client', None):
+        try:
+            async with asyncio.timeout(10.0):
+                await close_global_scylla_client()
+            logger.info("ScyllaDB connection closed")
+        except TimeoutError:
+            logger.error("ScyllaDB shutdown timed out after 10s")
+        except Exception as scylla_error:
+            logger.error(f"Error closing ScyllaDB connection: {scylla_error}")
 
     # Close main database pool
     try:

@@ -223,6 +223,16 @@ class LinkTelegramChatCommand(Command):
     linked_by: uuid.UUID
 
 
+class LinkChatToTelegramCommand(Command):
+    """
+    Link an existing WellWon chat to Telegram supergroup (used by saga).
+    Creates a Telegram topic in the supergroup and updates the chat.
+    """
+    chat_id: uuid.UUID
+    telegram_supergroup_id: int
+    linked_by: uuid.UUID
+
+
 class UnlinkTelegramChatCommand(Command):
     """Unlink a Telegram chat from WellWon chat"""
     chat_id: uuid.UUID

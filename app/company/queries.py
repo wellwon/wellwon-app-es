@@ -50,6 +50,13 @@ class GetCompanyByVatQuery(Query):
     vat: str
 
 
+class GetCompanyByNameQuery(Query):
+    """Get company by name (for duplicate check)"""
+    name: str
+    company_type: Optional[str] = Field(None, description="Filter by type: company, project, individual")
+    exact_match: bool = Field(default=True, description="Use exact match (case-insensitive) or partial match")
+
+
 # =============================================================================
 # User-Company Relationship Queries
 # =============================================================================

@@ -156,24 +156,34 @@ export const useChatUIStore = create<ChatUIState>()(
     setChatScope: (scope) => set({ chatScope: scope }),
 
     setScopeBySupergroup: (supergroupId, companyId) => {
+      const currentScope = get().chatScope;
+      // Don't reset if same supergroup is already selected
+      if (currentScope.type === 'supergroup' && currentScope.supergroupId === supergroupId) {
+        return;
+      }
       set({
         chatScope: {
           type: 'supergroup',
           supergroupId,
           companyId,
         },
-        activeChatId: null, // Clear active chat when scope changes
+        // Don't clear activeChatId - let SidebarChat auto-select first chat
         replyingTo: null,
       });
     },
 
     setScopeByCompany: (companyId) => {
+      const currentScope = get().chatScope;
+      // Don't reset if same company is already selected
+      if (currentScope.type === 'company' && currentScope.companyId === companyId) {
+        return;
+      }
       set({
         chatScope: {
           type: 'company',
           companyId,
         },
-        activeChatId: null,
+        // Don't clear activeChatId - let SidebarChat auto-select first chat
         replyingTo: null,
       });
     },

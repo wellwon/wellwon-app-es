@@ -366,10 +366,9 @@ class UserAccountProjector:
     # WellWon Platform Projection Handlers
     # -------------------------------------------------------------------------
 
-    @sync_projection("UserProfileUpdated")
-    @monitor_projection
+    # ASYNC: UI shows optimistic update, no saga/command dependency
     async def on_user_profile_updated(self, envelope: EventEnvelope) -> None:
-        """Project UserProfileUpdated event for WellWon platform"""
+        """Project UserProfileUpdated event for WellWon platform (ASYNC)"""
         event_data = envelope.event_data
         user_id = envelope.aggregate_id
 
@@ -396,11 +395,10 @@ class UserAccountProjector:
         except Exception as e:
             log.warning(f"Failed to clear profile cache: {e}")
 
-    @sync_projection("UserAdminStatusUpdated")
-    @monitor_projection
+    # ASYNC: WSE notifies frontend, no immediate query dependency
     async def on_user_admin_status_updated(self, envelope: EventEnvelope) -> None:
         """
-        Project UserAdminStatusUpdated event for admin panel updates.
+        Project UserAdminStatusUpdated event for admin panel updates (ASYNC).
 
         Updates user status (is_active, is_developer) in read model.
         Event is also forwarded to WSE for real-time frontend updates.
@@ -500,11 +498,10 @@ class UserAccountProjector:
 
             await self._clear_user_caches(user_id)
 
-    @sync_projection("UserDeveloperStatusChangedExternally", priority=5, timeout=2.0)
-    @monitor_projection
+    # ASYNC: Non-critical UI flag, cache can expire naturally (60s TTL)
     async def on_user_developer_status_changed_externally(self, envelope: EventEnvelope) -> None:
         """
-        Handle UserDeveloperStatusChangedExternally compensating event.
+        Handle UserDeveloperStatusChangedExternally compensating event (ASYNC).
 
         Action: Clear caches to ensure frontend gets updated is_developer flag.
         """
@@ -522,11 +519,10 @@ class UserAccountProjector:
             await self._clear_user_caches(user_id)
             log.info(f"[CES] Cache cleared for user {user_id}, is_developer={is_developer}")
 
-    @sync_projection("UserTypeChangedExternally", priority=5, timeout=2.0)
-    @monitor_projection
+    # ASYNC: Non-critical profile field, WSE notifies frontend
     async def on_user_type_changed_externally(self, envelope: EventEnvelope) -> None:
         """
-        Handle UserTypeChangedExternally compensating event.
+        Handle UserTypeChangedExternally compensating event (ASYNC).
 
         Action: Clear caches to ensure frontend gets updated user_type.
         """
@@ -543,11 +539,10 @@ class UserAccountProjector:
             user_id = uuid.UUID(user_id_str) if isinstance(user_id_str, str) else user_id_str
             await self._clear_user_caches(user_id)
 
-    @sync_projection("UserEmailVerifiedExternally", priority=5, timeout=2.0)
-    @monitor_projection
+    # ASYNC: Non-critical profile field, eventual consistency OK
     async def on_user_email_verified_externally(self, envelope: EventEnvelope) -> None:
         """
-        Handle UserEmailVerifiedExternally compensating event.
+        Handle UserEmailVerifiedExternally compensating event (ASYNC).
 
         Action: Clear caches to ensure frontend gets updated email_verified flag.
         """
@@ -564,11 +559,10 @@ class UserAccountProjector:
             user_id = uuid.UUID(user_id_str) if isinstance(user_id_str, str) else user_id_str
             await self._clear_user_caches(user_id)
 
-    @sync_projection("UserAdminFieldsChangedExternally", priority=10, timeout=2.0)
-    @monitor_projection
+    # ASYNC: Fallback handler for non-critical admin field changes
     async def on_user_admin_fields_changed_externally(self, envelope: EventEnvelope) -> None:
         """
-        Handle UserAdminFieldsChangedExternally compensating event.
+        Handle UserAdminFieldsChangedExternally compensating event (ASYNC).
 
         Fallback handler for any admin field changes not caught by specific handlers.
         """
