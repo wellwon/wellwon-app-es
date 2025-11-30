@@ -62,7 +62,7 @@ class ScyllaConfig(BaseSettings):
     )
 
     keyspace: str = Field(
-        default="wellwon_messages",
+        default="wellwon_scylla",
         description="Default keyspace to use"
     )
 
@@ -496,7 +496,7 @@ def load_scylla_config_from_env() -> ScyllaConfig:
     Environment variables should be prefixed with SCYLLA_
     For example:
     - SCYLLA_CONTACT_POINTS=scylla-1,scylla-2,scylla-3
-    - SCYLLA_KEYSPACE=wellwon_messages
+    - SCYLLA_KEYSPACE=wellwon_scylla
     - SCYLLA_USERNAME=scylla
     - SCYLLA_PASSWORD=secret
     """

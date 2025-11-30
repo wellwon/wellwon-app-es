@@ -79,7 +79,7 @@ async def initialize_databases(app: FastAPI) -> None:
             scylla_config = ScyllaConfig(
                 contact_points=os.getenv("SCYLLA_CONTACT_POINTS", "localhost"),
                 port=int(os.getenv("SCYLLA_PORT", "9042")),
-                keyspace=os.getenv("SCYLLA_KEYSPACE", "wellwon_messages"),
+                keyspace=os.getenv("SCYLLA_KEYSPACE", "wellwon_scylla"),
                 username=os.getenv("SCYLLA_USERNAME"),
                 password=os.getenv("SCYLLA_PASSWORD"),
             )

@@ -946,10 +946,39 @@ print(f"Timeout: {os.getenv('PG_COMMAND_TIMEOUT_SEC')}s")
 - **CQRS Architecture**: See `docs/cqrs.md`
 - **Event Sourcing**: See `docs/event_store_architecture.md`
 - **SYNC Projections**: See `docs/README_SYNC_PROJECTIONS.md`
+- **ScyllaDB (Messages)**: See `infrastructure/SCYLLADB_GUIDE.md`
+
+---
+
+## ScyllaDB Integration
+
+WellWon uses a **dual-database architecture** for optimal performance:
+
+| Database | Purpose | Access Pattern |
+|----------|---------|---------------|
+| **PostgreSQL** | Metadata, search, JOINs | Complex queries |
+| **ScyllaDB** | High-volume messages | Simple key-value |
+
+### When to Use ScyllaDB
+
+```
+ScyllaDB (wellwon_scylla)         PostgreSQL (wellwon)
+├── messages (PRIMARY)            ├── messages (SEARCH INDEX)
+├── message_reactions             ├── message_templates
+├── message_read_positions        ├── chats, chat_participants
+└── telegram_message_mapping      └── users, companies, etc.
+```
+
+**For full ScyllaDB documentation**, see:
+- `docs/reference/infrastructure/SCYLLADB_GUIDE.md` - Developer guide
+- `docs/mvp/infrastructure/SCYLLADB.md` - Production setup
+- `database/scylla/README.md` - Schema documentation
+
+---
 
 ## Summary
 
-The PostgreSQL client provides a robust, high-performance database layer for TradeCore:
+The PostgreSQL client provides a robust, high-performance database layer for WellWon:
 
 - **Multi-database** support (main + VB)
 - **Connection pooling** with health monitoring

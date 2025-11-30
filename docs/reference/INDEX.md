@@ -1,14 +1,15 @@
-# TradeCore Reference Documentation - Complete Index
+# WellWon Reference Documentation - Complete Index
 
 **Created**: 2025-11-10
-**Version**: 1.0
+**Updated**: 2025-11-30
+**Version**: 1.1
 **Status**: Complete
 
 ---
 
 ## Overview
 
-This is the **complete reference library** for TradeCore's event-driven architecture. All guides are production-ready and based on real code from TradeCore v0.5+.
+This is the **complete reference library** for WellWon's event-driven architecture. All guides are production-ready and based on real production code.
 
 **Total Documentation**: 20+ comprehensive guides covering every aspect of the infrastructure.
 
@@ -115,7 +116,7 @@ This is the **complete reference library** for TradeCore's event-driven architec
 
 ---
 
-### 7. Infrastructure (4 guides)
+### 7. Infrastructure (5 guides)
 
 | Guide | Lines | Description |
 |-------|-------|-------------|
@@ -123,8 +124,9 @@ This is the **complete reference library** for TradeCore's event-driven architec
 | `CIRCUIT_BREAKER_GUIDE.md` | ~1,800 | Fault tolerance, 3-state pattern, get_state_sync() bug fix |
 | `CACHE_STRATEGY_GUIDE.md` | ~1,900 | Redis caching, distributed locking, rate limiting |
 | `DATABASE_PATTERNS.md` | ~2,300 | Postgres, AsyncPG, SYNC projections, migrations |
+| `infrastructure/SCYLLADB_GUIDE.md` | ~500 | ScyllaDB for high-volume messages, Discord architecture |
 
-**Key Topics**: Redpanda/Kafka, Circuit breakers, Redis, PostgreSQL, Multi-worker safety (Granian)
+**Key Topics**: Redpanda/Kafka, Circuit breakers, Redis, PostgreSQL, ScyllaDB, Multi-worker safety (Granian)
 
 ---
 
