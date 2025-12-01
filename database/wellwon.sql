@@ -1311,6 +1311,322 @@ $$ LANGUAGE plpgsql;
 ALTER FUNCTION get_company_users(BIGINT, user_company_relationship) OWNER TO wellwon;
 
 -- =============================================================================
+-- DECLARANT MODULE: Reference Tables
+-- =============================================================================
+
+-- Шаблоны JSON форм документов (из Kontur API /common/v1/jsonTemplates)
+-- Один documentModeId может иметь несколько вариантов typeName (410 записей, 145 уникальных форм)
+CREATE TABLE IF NOT EXISTS dc_json_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    gf_code TEXT NOT NULL,                       -- Внутренний код Kontur (например "18003")
+    document_mode_id TEXT NOT NULL,              -- ID формы по альбому ФТС (например "1006107E")
+    type_name TEXT NOT NULL,                     -- Название варианта шаблона
+    is_active BOOLEAN DEFAULT TRUE,              -- Активен ли шаблон
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    -- Уникальность по комбинации gf + documentModeId + typeName
+    UNIQUE(gf_code, document_mode_id, type_name)
+);
+
+-- Индексы для dc_json_templates
+CREATE INDEX IF NOT EXISTS idx_dc_json_templates_gf_code
+    ON dc_json_templates(gf_code);
+CREATE INDEX IF NOT EXISTS idx_dc_json_templates_document_mode_id
+    ON dc_json_templates(document_mode_id);
+CREATE INDEX IF NOT EXISTS idx_dc_json_templates_is_active
+    ON dc_json_templates(is_active) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_dc_json_templates_type_name
+    ON dc_json_templates USING gin(type_name gin_trgm_ops);
+
+-- Триггер для updated_at
+CREATE TRIGGER set_dc_json_templates_updated_at
+    BEFORE UPDATE ON dc_json_templates
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+-- Комментарии
+COMMENT ON TABLE dc_json_templates IS 'Справочник шаблонов JSON форм Kontur.Declarant (из /common/v1/jsonTemplates)';
+COMMENT ON COLUMN dc_json_templates.gf_code IS 'Внутренний код Kontur (gf)';
+COMMENT ON COLUMN dc_json_templates.document_mode_id IS 'ID формы по альбому форматов ФТС';
+COMMENT ON COLUMN dc_json_templates.type_name IS 'Название варианта шаблона';
+
+-- =============================================================================
+-- DECLARANT MODULE: Form Definitions (Universal Form Generator)
+-- =============================================================================
+
+-- Определения форм (предобработанные схемы из Kontur API)
+CREATE TABLE IF NOT EXISTS dc_form_definitions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_mode_id VARCHAR(20) NOT NULL UNIQUE,   -- ID формы (например "1002007E")
+    gf_code VARCHAR(20) NOT NULL,                   -- Внутренний код Kontur
+    type_name VARCHAR(500) NOT NULL,                -- Название формы
+
+    -- Обработанная структура формы
+    fields JSONB NOT NULL DEFAULT '[]',             -- Массив определений полей
+    default_values JSONB DEFAULT '{}',              -- Значения по умолчанию
+
+    -- Оригинальная схема для отслеживания изменений
+    kontur_schema_json JSONB,                       -- Исходная схема от Kontur
+    kontur_schema_hash VARCHAR(64),                 -- SHA256 для сравнения
+
+    -- Метаданные
+    version INTEGER DEFAULT 1,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_form_definitions_document_mode
+    ON dc_form_definitions(document_mode_id);
+CREATE INDEX IF NOT EXISTS idx_dc_form_definitions_gf_code
+    ON dc_form_definitions(gf_code);
+CREATE INDEX IF NOT EXISTS idx_dc_form_definitions_is_active
+    ON dc_form_definitions(is_active) WHERE is_active = TRUE;
+
+CREATE TRIGGER set_dc_form_definitions_updated_at
+    BEFORE UPDATE ON dc_form_definitions
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_form_definitions IS 'Определения форм для универсального рендерера (из JSON схем Kontur)';
+COMMENT ON COLUMN dc_form_definitions.fields IS 'JSONB массив определений полей формы';
+COMMENT ON COLUMN dc_form_definitions.kontur_schema_json IS 'Оригинальная JSON схема от Kontur для отслеживания изменений';
+COMMENT ON COLUMN dc_form_definitions.kontur_schema_hash IS 'SHA256 хеш схемы для быстрого сравнения при синхронизации';
+
+-- Русские лейблы для полей форм (локализация)
+CREATE TABLE IF NOT EXISTS dc_field_labels_ru (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    field_path VARCHAR(500) NOT NULL UNIQUE,        -- Путь поля: "ESADout_CUConsignee.EqualIndicator"
+    label_ru VARCHAR(500) NOT NULL,                 -- Русское название: "Совпадает с декларантом"
+    hint_ru VARCHAR(1000),                          -- Подсказка при наведении
+    placeholder_ru VARCHAR(200),                    -- Placeholder в поле ввода
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_field_labels_path
+    ON dc_field_labels_ru(field_path);
+CREATE INDEX IF NOT EXISTS idx_dc_field_labels_path_prefix
+    ON dc_field_labels_ru USING gin(field_path gin_trgm_ops);
+
+CREATE TRIGGER set_dc_field_labels_ru_updated_at
+    BEFORE UPDATE ON dc_field_labels_ru
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_field_labels_ru IS 'Русские лейблы для полей форм (локализация отдельно от схем)';
+
+-- Секции форм (кастомная группировка полей в UI)
+CREATE TABLE IF NOT EXISTS dc_form_sections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    form_definition_id UUID REFERENCES dc_form_definitions(id) ON DELETE CASCADE,
+
+    section_key VARCHAR(100) NOT NULL,              -- Ключ секции: "organizations"
+    title_ru VARCHAR(200) NOT NULL,                 -- Заголовок: "Организации"
+    description_ru VARCHAR(500),                    -- Описание секции
+    icon VARCHAR(50) DEFAULT 'FileText',            -- Имя иконки Lucide
+    sort_order INTEGER DEFAULT 0,                   -- Порядок сортировки
+    field_paths JSONB NOT NULL DEFAULT '[]',        -- Массив путей полей: ["sender.name", "sender.inn"]
+    columns INTEGER DEFAULT 2,                      -- Количество колонок в grid
+    collapsible BOOLEAN DEFAULT FALSE,              -- Можно ли сворачивать
+    default_expanded BOOLEAN DEFAULT TRUE,          -- Развернуто по умолчанию
+
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(form_definition_id, section_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_form_sections_definition
+    ON dc_form_sections(form_definition_id);
+
+CREATE TRIGGER set_dc_form_sections_updated_at
+    BEFORE UPDATE ON dc_form_sections
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_form_sections IS 'Кастомные секции для группировки полей в UI формы';
+
+-- История синхронизации форм (аудит)
+CREATE TABLE IF NOT EXISTS dc_form_sync_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_mode_id VARCHAR(20),                   -- NULL для full sync
+    sync_type VARCHAR(20) NOT NULL,                 -- 'full', 'single'
+    status VARCHAR(20) NOT NULL,                    -- 'success', 'partial', 'failed'
+
+    total_processed INTEGER DEFAULT 0,
+    forms_created INTEGER DEFAULT 0,
+    forms_updated INTEGER DEFAULT 0,
+    schemas_changed INTEGER DEFAULT 0,              -- Количество изменившихся схем
+    errors INTEGER DEFAULT 0,
+    error_details JSONB,                            -- Массив ошибок
+
+    sync_duration_ms INTEGER,                       -- Длительность синхронизации
+    synced_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_form_sync_history_document
+    ON dc_form_sync_history(document_mode_id);
+CREATE INDEX IF NOT EXISTS idx_dc_form_sync_history_date
+    ON dc_form_sync_history(synced_at DESC);
+
+COMMENT ON TABLE dc_form_sync_history IS 'История синхронизации определений форм с Kontur API';
+
+-- =============================================================================
+-- DECLARANT MODULE: References from Kontur API
+-- =============================================================================
+
+-- Таможенные органы (из Kontur API GET /common/v1/options/customs)
+CREATE TABLE IF NOT EXISTS dc_customs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kontur_id VARCHAR(100) NOT NULL UNIQUE,          -- ID из Kontur API
+    code VARCHAR(20),                                 -- Код таможенного органа (8 цифр)
+    short_name VARCHAR(200),                          -- Краткое название
+    full_name VARCHAR(500),                           -- Полное название
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_customs_kontur_id ON dc_customs(kontur_id);
+CREATE INDEX IF NOT EXISTS idx_dc_customs_code ON dc_customs(code);
+CREATE INDEX IF NOT EXISTS idx_dc_customs_is_active ON dc_customs(is_active) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_dc_customs_name ON dc_customs USING gin(short_name gin_trgm_ops);
+
+CREATE TRIGGER set_dc_customs_updated_at
+    BEFORE UPDATE ON dc_customs
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_customs IS 'Справочник таможенных органов (из Kontur API /common/v1/options/customs)';
+
+
+-- Типы деклараций / Направления перемещения (из Kontur API GET /common/v1/options/declarationTypes)
+CREATE TABLE IF NOT EXISTS dc_declaration_types (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kontur_id INTEGER NOT NULL UNIQUE,               -- ID из Kontur API (числовой)
+    description VARCHAR(200) NOT NULL,               -- Описание (ИМ, ЭК, ПИ и т.д.)
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_declaration_types_kontur_id ON dc_declaration_types(kontur_id);
+CREATE INDEX IF NOT EXISTS idx_dc_declaration_types_is_active ON dc_declaration_types(is_active) WHERE is_active = TRUE;
+
+CREATE TRIGGER set_dc_declaration_types_updated_at
+    BEFORE UPDATE ON dc_declaration_types
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_declaration_types IS 'Справочник типов деклараций / направлений перемещения (из Kontur API /common/v1/options/declarationTypes)';
+
+
+-- Таможенные процедуры (из Kontur API GET /common/v1/options/declarationProcedureTypes)
+CREATE TABLE IF NOT EXISTS dc_procedures (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kontur_id INTEGER NOT NULL,                      -- ID из Kontur API (числовой)
+    declaration_type_id INTEGER NOT NULL,            -- К какому типу декларации относится (foreign key на kontur_id)
+    code VARCHAR(10) NOT NULL,                       -- Код процедуры (40, 10 и т.д.)
+    name VARCHAR(500) NOT NULL,                      -- Название процедуры
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(kontur_id, declaration_type_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_procedures_kontur_id ON dc_procedures(kontur_id);
+CREATE INDEX IF NOT EXISTS idx_dc_procedures_declaration_type ON dc_procedures(declaration_type_id);
+CREATE INDEX IF NOT EXISTS idx_dc_procedures_code ON dc_procedures(code);
+CREATE INDEX IF NOT EXISTS idx_dc_procedures_is_active ON dc_procedures(is_active) WHERE is_active = TRUE;
+
+CREATE TRIGGER set_dc_procedures_updated_at
+    BEFORE UPDATE ON dc_procedures
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_procedures IS 'Справочник таможенных процедур (из Kontur API /common/v1/options/declarationProcedureTypes)';
+
+
+-- Группы упаковки (статический справочник)
+CREATE TABLE IF NOT EXISTS dc_packaging_groups (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(10) NOT NULL UNIQUE,
+    name VARCHAR(200) NOT NULL,
+    description VARCHAR(500),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_packaging_groups_code ON dc_packaging_groups(code);
+CREATE INDEX IF NOT EXISTS idx_dc_packaging_groups_is_active ON dc_packaging_groups(is_active) WHERE is_active = TRUE;
+
+CREATE TRIGGER set_dc_packaging_groups_updated_at
+    BEFORE UPDATE ON dc_packaging_groups
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_packaging_groups IS 'Справочник групп упаковки';
+
+
+-- Валюты (статический справочник)
+CREATE TABLE IF NOT EXISTS dc_currencies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(10) NOT NULL UNIQUE,           -- Цифровой код (643, 840, etc.)
+    alpha_code VARCHAR(3) NOT NULL,              -- Буквенный код (RUB, USD, etc.)
+    name VARCHAR(200) NOT NULL,                  -- Название валюты
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_currencies_code ON dc_currencies(code);
+CREATE INDEX IF NOT EXISTS idx_dc_currencies_alpha_code ON dc_currencies(alpha_code);
+CREATE INDEX IF NOT EXISTS idx_dc_currencies_is_active ON dc_currencies(is_active) WHERE is_active = TRUE;
+
+CREATE TRIGGER set_dc_currencies_updated_at
+    BEFORE UPDATE ON dc_currencies
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_currencies IS 'Справочник валют';
+
+
+-- Категории предприятий (статический справочник)
+CREATE TABLE IF NOT EXISTS dc_enterprise_categories (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(10) NOT NULL UNIQUE,
+    name VARCHAR(1000) NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_enterprise_categories_code ON dc_enterprise_categories(code);
+CREATE INDEX IF NOT EXISTS idx_dc_enterprise_categories_is_active ON dc_enterprise_categories(is_active) WHERE is_active = TRUE;
+
+CREATE TRIGGER set_dc_enterprise_categories_updated_at
+    BEFORE UPDATE ON dc_enterprise_categories
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_enterprise_categories IS 'Справочник категорий предприятий';
+
+
+-- Единицы измерения (статический справочник)
+CREATE TABLE IF NOT EXISTS dc_measurement_units (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(10) NOT NULL UNIQUE,
+    short_name VARCHAR(50) NOT NULL,
+    full_name VARCHAR(200) NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_measurement_units_code ON dc_measurement_units(code);
+CREATE INDEX IF NOT EXISTS idx_dc_measurement_units_is_active ON dc_measurement_units(is_active) WHERE is_active = TRUE;
+
+CREATE TRIGGER set_dc_measurement_units_updated_at
+    BEFORE UPDATE ON dc_measurement_units
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_measurement_units IS 'Справочник единиц измерения';
+
+
+-- =============================================================================
 -- INITIAL DATA
 -- =============================================================================
 

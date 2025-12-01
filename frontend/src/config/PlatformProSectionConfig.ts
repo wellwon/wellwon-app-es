@@ -28,8 +28,9 @@ export interface ProSectionConfig {
 // Lazy-loaded Components
 // =============================================================================
 
+// Lazy-loaded pages for code splitting
 const DeclarantContent = lazy(() =>
-  import('@/components/platform-pro/sections/declarant/DeclarantContent')
+  import('@/declarant/pages/DeclarantContent')
 );
 
 // =============================================================================
