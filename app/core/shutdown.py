@@ -38,6 +38,14 @@ except ImportError:
     async def close_global_scylla_client():
         pass
 
+# Import storage provider shutdown
+try:
+    from app.infra.storage.minio_provider import get_storage_provider
+
+    STORAGE_AVAILABLE = True
+except ImportError:
+    STORAGE_AVAILABLE = False
+
 
 async def shutdown_all_services(app: FastAPI) -> None:
     """Shutdown all services in the correct order"""
@@ -156,6 +164,15 @@ async def shutdown_infrastructure_services(app: FastAPI) -> None:
             logger.info("Cache manager shutdown complete")
         except Exception as cache_shutdown_error:
             logger.error(f"Error shutting down cache manager: {cache_shutdown_error}")
+
+    # Shutdown MinIO/S3 storage provider
+    if STORAGE_AVAILABLE:
+        try:
+            storage = get_storage_provider()
+            await storage.close()
+            logger.info("Storage provider (MinIO/S3) shutdown complete")
+        except Exception as storage_error:
+            logger.error(f"Error shutting down storage provider: {storage_error}")
 
 
 async def shutdown_databases(app: FastAPI) -> None:

@@ -18,7 +18,7 @@ from app.company.commands import (
     DeleteTelegramSupergroupCommand,
 )
 from app.company.aggregate import CompanyAggregate
-from app.infra.cqrs.decorators import command_handler
+from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
 
 if TYPE_CHECKING:

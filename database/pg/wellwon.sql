@@ -2,36 +2,35 @@
 -- WellWon Platform - Complete PostgreSQL Schema
 -- Event Sourcing + CQRS Infrastructure + Business Domain
 -- =============================================================================
--- Version: 1.2.0
--- Date: 2025-11-30
+-- Version: 2.0.0
+-- Date: 2025-12-01
 --
 -- Features:
 -- - Event Sourcing infrastructure (Outbox, DLQ, Projections)
 -- - CQRS pattern support (Commands, Events, Read Models)
 -- - WellWon business domains (Companies, Chats, Telegram, etc.)
 -- - Comprehensive audit and system logging
--- - CDC trigger for is_developer field changes
+-- - CES trigger for admin field changes (Compensating Event System)
 --
 -- =============================================================================
--- STORAGE ARCHITECTURE (Multi-Database Pattern)
+-- STORAGE ARCHITECTURE (Discord Pattern - Multi-Database)
 -- =============================================================================
 -- PostgreSQL (this file):
---   - Chat metadata (chats, chat_participants)
---   - Message metadata for recent/searchable messages
---   - Unread tracking (via chat_participants.last_read_at)
+--   - Chat METADATA only (chats, chat_participants)
 --   - Telegram integration tables
 --   - Event Sourcing infrastructure (outbox, projections, DLQ)
 --   - User accounts and companies
+--   - Message templates
 --
--- ScyllaDB (database/scylla/wellwon_scylla.cql):
---   - High-volume message content storage (Discord-style partitioning)
+-- ScyllaDB (database/scylla/wellwon_scylla.cql) - PRIMARY for messages:
+--   - ALL message content (messages table, Discord-style partitioning)
 --   - Message reactions (message_reactions, message_reaction_counts)
 --   - Pinned messages (pinned_messages)
 --   - Telegram sync state (telegram_sync_state)
---   - Telegram message mapping (telegram_message_mapping) - O(1) dedup lookup
+--   - Telegram message mapping (telegram_message_mapping) - O(1) dedup
 --   - Channel metadata denormalized (channel_metadata)
---   - User read positions (message_read_positions)
---   - See: database/scylla/wellwon_scylla.cql, docs/SCYLLADB_IMPLEMENTATION_QUALITY_REPORT.md
+--   - User read positions (message_read_positions) - unread tracking
+--   - See: database/scylla/wellwon_scylla.cql
 --
 -- Redis:
 --   - Typing indicators (10s TTL, ephemeral)
@@ -894,7 +893,7 @@ CREATE TABLE IF NOT EXISTS chats (
 
     -- Telegram integration
     telegram_supergroup_id BIGINT,
-    telegram_topic_id INTEGER,
+    telegram_topic_id BIGINT,  -- Changed from INTEGER to match ScyllaDB schema
     telegram_sync BOOLEAN DEFAULT FALSE,
 
     -- Last message info (for chat list preview)
@@ -938,100 +937,36 @@ CREATE INDEX IF NOT EXISTS idx_chat_participants_chat_id ON chat_participants(ch
 CREATE INDEX IF NOT EXISTS idx_chat_participants_user_id ON chat_participants(user_id);
 
 -- ======================
--- MESSAGES (PostgreSQL - Search Index & Recent Message Cache)
+-- MESSAGES - REMOVED (Discord Pattern - ScyllaDB PRIMARY)
 -- ======================
--- IMPORTANT: ScyllaDB is the PRIMARY store for message content!
--- This table is a SECONDARY index for:
---   1. Full-text search (PostgreSQL FTS capabilities)
---   2. Complex joins with users/companies
---   3. Last message preview in chat list (cached)
+-- ALL message storage is now in ScyllaDB following Discord's architecture.
+-- See: database/scylla/wellwon_scylla.cql
 --
--- Data Flow:
---   1. Message written to ScyllaDB (primary, Snowflake ID)
---   2. Metadata synced to PostgreSQL (search index, joins)
+-- ScyllaDB Tables (PRIMARY):
+--   - messages: (channel_id, bucket) partitioning, Snowflake IDs, TWCS compaction
+--   - message_reactions: Individual reaction records
+--   - message_reaction_counts: Counter table for aggregated counts
+--   - pinned_messages: Pinned messages per channel
+--   - telegram_message_mapping: O(1) Telegram dedup lookup
+--   - message_read_positions: Per-user read position with cached unread_count
 --
--- ScyllaDB (PRIMARY): Full message content, reactions, read positions
--- PostgreSQL (INDEX): Search, user joins, chat list preview
--- ======================
-CREATE TABLE IF NOT EXISTS messages (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    sender_id UUID REFERENCES user_accounts(id) ON DELETE CASCADE,
-
-    -- ScyllaDB reference (Snowflake ID is the source of truth)
-    scylla_message_id BIGINT NOT NULL,  -- Snowflake ID in ScyllaDB
-    scylla_bucket INT,                   -- ScyllaDB partition bucket
-
-    -- Content for search (synced from ScyllaDB)
-    content TEXT,                        -- For full-text search
-    message_type TEXT DEFAULT 'text' CHECK (message_type IN ('text', 'file', 'voice', 'image', 'system')),
-
-    -- Telegram reference (for cross-db dedup check)
-    telegram_message_id BIGINT,
-    telegram_chat_id BIGINT,
-    source TEXT DEFAULT 'web',           -- web, telegram, api
-
-    -- Status flags
-    is_deleted BOOLEAN DEFAULT FALSE,
-
-    -- Timestamps (derived from Snowflake ID)
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- Primary lookup: ScyllaDB reference
-CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_scylla_id ON messages(scylla_message_id);
-
--- Chat message list
-CREATE INDEX IF NOT EXISTS idx_messages_chat_id_created_at ON messages(chat_id, created_at DESC);
-
--- User's messages (for moderation, history)
-CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages(sender_id) WHERE sender_id IS NOT NULL;
-
--- Telegram deduplication check
-CREATE INDEX IF NOT EXISTS idx_messages_telegram ON messages(telegram_message_id, telegram_chat_id)
-    WHERE telegram_message_id IS NOT NULL;
-
--- Full-text search (GIN index for fast text search)
-CREATE INDEX IF NOT EXISTS idx_messages_content_search ON messages USING gin(to_tsvector('english', content))
-    WHERE content IS NOT NULL AND NOT is_deleted;
-
-DROP TRIGGER IF EXISTS set_messages_updated_at ON messages;
-CREATE TRIGGER set_messages_updated_at
-    BEFORE UPDATE ON messages
-    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
-
--- ======================
--- MESSAGE_READS - REMOVED (Now in ScyllaDB)
--- ======================
--- Read tracking is now handled by ScyllaDB table: message_read_positions
--- ScyllaDB provides:
---   - O(1) lookup per (channel_id, user_id)
---   - last_read_message_id (Snowflake ID)
---   - Cached unread_count
+-- PostgreSQL Metadata Only:
+--   - chats: Chat metadata, last_message_at/content preview
+--   - chat_participants: Roles, last_read_at (for chat list)
 --
--- For unread badge counts, use:
---   SELECT unread_count FROM message_read_positions
---   WHERE channel_id = ? AND user_id = ?
---
--- Legacy per-message read tracking removed (was too granular for high-volume)
+-- For message search, consider adding Elasticsearch/Meilisearch when needed.
+-- ScyllaDB content can be scanned for simple searches (see MessageScyllaRepo).
 -- ======================
 
 -- ======================
--- TYPING_INDICATORS - REMOVED (Redis Only)
+-- TYPING_INDICATORS - Redis Only
 -- ======================
 -- Typing indicators are ephemeral (10s TTL) and belong in Redis ONLY.
--- PostgreSQL fallback removed - adds complexity without benefit.
 --
 -- Redis implementation:
 --   Key pattern: typing:{chat_id}:{user_id}
 --   Value: JSON {user_id, username, started_at}
 --   TTL: 10 seconds (auto-expire)
---
--- Usage:
---   SET typing:{chat_id}:{user_id} '{"user_id":"...","username":"..."}' EX 10
---   KEYS typing:{chat_id}:*  -- Get all typing users in chat
---   DEL typing:{chat_id}:{user_id}  -- Stop typing
 -- ======================
 
 -- ======================
@@ -1414,7 +1349,7 @@ VALUES ('1.1.0', 'ScyllaDB integration for high-volume messages', 'system')
 ON CONFLICT (version) DO NOTHING;
 
 INSERT INTO schema_migrations (version, description, applied_by)
-VALUES ('1.2.0', 'Simplified messages table (ScyllaDB primary), removed message_reads (use ScyllaDB message_read_positions)', 'system')
+VALUES ('2.0.0', 'Discord pattern: messages table removed (ScyllaDB PRIMARY for all messages)', 'system')
 ON CONFLICT (version) DO NOTHING;
 
 -- =============================================================================

@@ -1899,7 +1899,7 @@ class KurrentDBEventStore:
     async def _load_sync_projections(self):
         """Load SYNC projection registry"""
         try:
-            from app.infra.event_store.sync_decorators import SYNC_PROJECTION_REGISTRY
+            from app.infra.cqrs.projector_decorators import SYNC_PROJECTION_REGISTRY
             if SYNC_PROJECTION_REGISTRY:
                 self._synchronous_event_types = set(SYNC_PROJECTION_REGISTRY.keys())
                 self._sync_projection_handlers = SYNC_PROJECTION_REGISTRY.copy()

@@ -10,7 +10,7 @@ from typing import Dict, Any
 from app.core.fastapi_types import FastAPI
 
 from app.infra.cqrs.handler_dependencies import HandlerDependencies
-from app.infra.cqrs.decorators import (
+from app.infra.cqrs.cqrs_decorators import (
     auto_register_all_handlers,
     get_registered_handlers,
     validate_handler_registrations
@@ -167,6 +167,7 @@ async def register_cqrs_handlers(app: FastAPI) -> None:
         user_read_repo=app.state.user_account_read_repo,
         company_read_repo=CompanyReadRepo,  # Static class methods
         chat_read_repo=app.state.chat_read_repo if hasattr(app.state, 'chat_read_repo') else None,
+        message_scylla_repo=app.state.message_scylla_repo if hasattr(app.state, 'message_scylla_repo') else None,
         global_config={},
         saga_manager=app.state.saga_service.saga_manager if app.state.saga_service else None,
         cache_manager=app.state.cache_manager,

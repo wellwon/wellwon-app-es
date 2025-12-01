@@ -103,7 +103,7 @@ class ConsumerManager:
         else:
             # Fallback: Use decorator-based sync event registry
             try:
-                from app.infra.event_store.sync_decorators import get_all_sync_events
+                from app.infra.cqrs.projector_decorators import get_all_sync_events
                 self._sync_events = get_all_sync_events()
             except Exception:
                 self._sync_events = set()  # No sync events if registry unavailable

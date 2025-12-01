@@ -527,6 +527,66 @@ class ReliabilityConfigs:
             distributed=True
         )
 
+    # MinIO/S3 Storage configurations
+    @staticmethod
+    def storage_circuit_breaker() -> CircuitBreakerConfig:
+        """Circuit breaker for MinIO/S3 storage operations"""
+        return CircuitBreakerConfig(
+            name="storage_minio",
+            failure_threshold=5,
+            success_threshold=3,
+            reset_timeout_seconds=30,
+            half_open_max_calls=3,
+            window_size=20,
+            failure_rate_threshold=0.5
+        )
+
+    @staticmethod
+    def storage_retry() -> RetryConfig:
+        """Retry config for MinIO/S3 storage operations"""
+        return RetryConfig(
+            max_attempts=3,
+            initial_delay_ms=100,
+            max_delay_ms=5000,
+            backoff_factor=2.0,
+            jitter=True,
+            jitter_type="full",
+            retry_condition=lambda err: ReliabilityConfigs._should_retry_storage(err)
+        )
+
+    @staticmethod
+    def storage_reliability() -> ReliabilityConfig:
+        """Complete reliability config for storage operations"""
+        return ReliabilityConfig(
+            circuit_breaker=ReliabilityConfigs.storage_circuit_breaker(),
+            retry=ReliabilityConfigs.storage_retry(),
+            rate_limiter=None
+        )
+
+    @staticmethod
+    def _should_retry_storage(error: Exception) -> bool:
+        """MinIO/S3 specific retry logic"""
+        if error is None:
+            return False
+
+        error_str = str(error).lower()
+
+        # Don't retry on access denied or invalid credentials
+        if any(term in error_str for term in [
+            "accessdenied", "invalidaccesskeyid", "signaturesdoesnotmatch",
+            "403", "401", "nosuchbucket"
+        ]):
+            return False
+
+        # Retry on transient errors
+        if any(term in error_str for term in [
+            "timeout", "connection", "503", "500", "slowdown",
+            "serviceunavailable", "internalerror"
+        ]):
+            return True
+
+        return ReliabilityConfigs.should_retry_error(error)
+
     # Webhook configurations
     @staticmethod
     def webhook_rate_limiter() -> RateLimiterConfig:

@@ -181,12 +181,12 @@ class EventTransformer:
                     latency_delta = datetime.now(timezone.utc) - event_timestamp.replace(tzinfo=timezone.utc)
                     event_latency_ms = int(latency_delta.total_seconds() * 1000)
 
-                    # Log latency for monitoring (info level only for high latency)
-                    if event_latency_ms > 1000:  # > 1 second
+                    # Log latency for monitoring (warning only for very high latency)
+                    if event_latency_ms > 3000:  # > 3 seconds (warning)
                         log.warning(
                             f"High event latency detected: {event_latency_ms}ms for event type {event_type}"
                         )
-                    elif event_latency_ms > 100:  # > 100ms
+                    elif event_latency_ms > 500:  # > 500ms (info)
                         log.info(
                             f"Event latency: {event_latency_ms}ms for event type {event_type}"
                         )

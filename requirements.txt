@@ -147,6 +147,12 @@ lxml>=5.3.0                       # XML/HTML processing
 xmltodict>=0.14.2                 # XML to dict conversion
 
 # =============================================================================
+# Object Storage - MinIO/S3
+# =============================================================================
+aioboto3>=13.0.0                  # Async S3 client
+boto3>=1.35.0                     # AWS S3 SDK (sync, used by init scripts)
+
+# =============================================================================
 # Telegram Integration (Optional)
 # =============================================================================
 # python-telegram-bot>=21.7       # Telegram bot API

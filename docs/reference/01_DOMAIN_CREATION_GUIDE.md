@@ -1,8 +1,10 @@
 # Domain Creation Guide
 
-**TradeCore v0.5 - Complete Step-by-Step Reference**
+**WellWon Platform v1.0 - Complete Step-by-Step Reference**
 
-This is the authoritative guide for creating new domains in TradeCore. Follow this guide exactly to ensure consistency with existing architecture and best practices.
+**Last Updated:** 2025-12-01
+
+This is the authoritative guide for creating new domains in WellWon. Follow this guide exactly to ensure consistency with existing architecture and best practices.
 
 ---
 
@@ -24,7 +26,7 @@ This is the authoritative guide for creating new domains in TradeCore. Follow th
 
 ### What is a Domain?
 
-In TradeCore, a **domain** is a **bounded context** following Domain-Driven Design (DDD) principles. Each domain:
+In WellWon, a **domain** is a **bounded context** following Domain-Driven Design (DDD) principles. Each domain:
 
 - **Encapsulates** a specific business capability (e.g., broker accounts, automation, positions)
 - **Owns** its data and business logic
@@ -60,8 +62,8 @@ Before creating a domain, ensure you understand:
 5. **Async Python**: All I/O operations must be async
 
 **Required Reading:**
-- `/Users/silvermpx/PycharmProjects/TradeCore/docs/cqrs.md`
-- `/Users/silvermpx/PycharmProjects/TradeCore/CLAUDE.md` (Architecture section)
+- `/docs/reference/PROJECTION_DECORATORS.md` - Projection decorator patterns
+- `/docs/mvp/architecture/PROJECTION_ARCHITECTURE.md` - Full architecture overview
 
 ---
 
@@ -78,10 +80,9 @@ app/{domain_name}/
 ├── value_objects.py              # Immutable value objects (frozen dataclasses)
 ├── enums.py                      # Domain-specific enumerations
 ├── exceptions.py                 # Custom domain exceptions
-├── projectors.py                 # Event projectors (read model updates)
+├── projectors.py                 # Event projectors (@sync_projection/@async_projection)
 ├── read_models.py                # Read model schemas (Pydantic)
 ├── queries.py                    # Query definitions (read operations)
-├── sync_events.py                # ⭐ CRITICAL: Sync event configuration
 ├── command_handlers/             # Modular command handlers
 │   ├── __init__.py
 │   ├── lifecycle_handlers.py    # Creation, deletion handlers
@@ -109,12 +110,12 @@ app/{domain_name}/
 | `command_handlers/` | Command handler classes | BaseCommandHandler | ✅ YES | `broker_account` |
 | `query_handlers/` | Query handler classes | BaseQueryHandler | ✅ YES | `broker_account` |
 
-**⚠️ 2025-11-22 BREAKING CHANGES**:
+**⚠️ 2025-12-01 BREAKING CHANGES**:
 - `commands.py` - NOW inherits from `Command` (Pydantic v2), NOT @dataclass
 - `queries.py` - NOW inherits from `Query` (Pydantic v2), NOT @dataclass
 - `exceptions.py` - NOW REQUIRED for all domains
 - `enums.py` - NOW REQUIRED for all domains
-- `sync_events.py` - DEPRECATED (use @domain_event decorator instead)
+- `sync_events.py` - **REMOVED** (use `@sync_projection`/`@async_projection` decorators in projectors.py)
 
 ---
 
@@ -538,7 +539,7 @@ from app.infra.cqrs.decorators import command_handler
 if TYPE_CHECKING:
     from app.infra.cqrs.handler_dependencies import HandlerDependencies
 
-log = logging.getLogger("tradecore.broker_account.lifecycle_handlers")
+log = logging.getLogger("wellwon.broker_account.lifecycle_handlers")
 
 
 @command_handler(LinkDiscoveredBrokerAccountCommand)
@@ -614,212 +615,228 @@ class LinkDiscoveredBrokerAccountHandler(BaseCommandHandler):
 
 **File:** `projectors.py`
 
-Projectors update **read models** (PostgreSQL) when events occur.
+Projectors update **read models** (PostgreSQL/ScyllaDB) when events occur.
 
-#### 6.1 Define Projector Class
+**CRITICAL:** Use explicit `@sync_projection` or `@async_projection` decorators for ALL projection methods.
+
+#### 6.1 Dual-Decorator Pattern (2025 Best Practice)
 
 ```python
 import logging
-from typing import Optional, Any, Dict
-from datetime import datetime
-
-from app.infra.read_repos.broker_account_read_repo import BrokerAccountReadRepo
-from app.infra.event_bus.event_bus import EventBus
 from app.infra.event_store.event_envelope import EventEnvelope
-from app.infra.event_store.sync_decorators import sync_projection
+from app.infra.cqrs.projector_decorators import (
+    sync_projection,
+    async_projection,
+    monitor_projection
+)
 
-log = logging.getLogger("tradecore.broker_account.projectors")
+log = logging.getLogger("wellwon.company.projectors")
 
 
-class BrokerAccountProjector:
-    """Projector for broker account events"""
+class CompanyProjector:
+    """
+    Projector for Company domain read models.
 
-    def __init__(
-        self,
-        account_read_repo: BrokerAccountReadRepo,
-        event_bus: Optional[EventBus] = None
-    ):
-        self._account_read_repo = account_read_repo
-        self._event_bus = event_bus
+    SYNC vs ASYNC Decision:
+    - @sync_projection: User expects immediate feedback (saga dependencies, UI critical)
+    - @async_projection: Eventual consistency OK (background updates, metrics)
+    """
 
-        log.info("BrokerAccountProjector initialized")
+    def __init__(self, company_read_repo: CompanyReadRepo):
+        self.company_read_repo = company_read_repo
 
-    async def handle_event(self, event_dict: Dict[str, Any]) -> None:
-        """Generic event handler for event processor compatibility"""
-        event_type = event_dict.get("event_type")
-        if not event_type:
-            log.error(f"Event dict missing event_type: {event_dict}")
-            return
+    # =========================================================================
+    # SYNC Projections - Execute on SERVER before HTTP response
+    # =========================================================================
 
-        # Create EventEnvelope from dict
-        envelope = EventEnvelope.from_partial_data(event_dict)
-
-        # Route to appropriate handler
-        method_name = f"on_{event_type.lower()}"
-        method = getattr(self, method_name, None)
-        if method:
-            await method(envelope)
-        else:
-            log.debug(f"No handler for event type {event_type}")
-
-    @sync_projection("BrokerAccountLinked", priority=3, timeout=5.0)
-    async def on_broker_account_linked(self, envelope: EventEnvelope) -> None:
-        """Handle broker account linked event"""
+    @sync_projection("CompanyCreated", priority=1, timeout=2.0)
+    @monitor_projection  # Optional: detailed logging
+    async def on_company_created(self, envelope: EventEnvelope) -> None:
+        """
+        SYNC: Saga creates chat immediately after company - must exist in read model.
+        """
         event_data = envelope.event_data
+        company_id = envelope.aggregate_id
 
-        account_id = event_data.get("account_aggregate_id")
-        user_id = event_data.get("user_id")
-        broker_connection_id = event_data.get("broker_connection_id")
+        await self.company_read_repo.insert_company(
+            company_id=company_id,
+            name=event_data['name'],
+            company_type=event_data.get('company_type', 'company'),
+            created_by=event_data['created_by'],
+            created_at=envelope.stored_at,
+        )
+        log.info(f"Projected CompanyCreated: {company_id}")
 
-        # Insert or update read model
-        await self._account_read_repo.create_or_update(
-            account_id=account_id,
-            user_id=user_id,
-            broker_connection_id=broker_connection_id,
-            broker_id=event_data.get("broker_id"),
-            broker_account_id=event_data.get("broker_account_id"),
-            account_name=event_data.get("account_name"),
-            balance=event_data.get("initial_balance"),
-            currency=event_data.get("currency"),
-            equity=event_data.get("initial_equity"),
-            buying_power=event_data.get("initial_buying_power"),
-            status=event_data.get("initial_status_from_broker"),
-            metadata=event_data.get("initial_metadata_from_broker"),
-            aggregate_version=envelope.version,
-            last_event_sequence=envelope.sequence_number
+    # =========================================================================
+    # ASYNC Projections - Execute on WORKER via Kafka
+    # =========================================================================
+
+    @async_projection("CompanyUpdated")
+    async def on_company_updated(self, envelope: EventEnvelope) -> None:
+        """
+        ASYNC: Company update is not time-critical. UI uses optimistic update.
+        """
+        event_data = envelope.event_data
+        company_id = envelope.aggregate_id
+
+        await self.company_read_repo.update_company(
+            company_id=company_id,
+            name=event_data.get('name'),
+            updated_at=envelope.stored_at,
         )
 
-        log.info(f"Projected BrokerAccountLinked: {account_id}")
+    @async_projection("CompanyDeleted")
+    @monitor_projection
+    async def on_company_deleted(self, envelope: EventEnvelope) -> None:
+        """
+        ASYNC: UI uses optimistic update, eventual consistency acceptable.
+        """
+        company_id = envelope.aggregate_id
 
-    @sync_projection("AccountDataFromBrokerUpdated", priority=2, timeout=3.0)
-    async def on_account_data_from_broker_updated(self, envelope: EventEnvelope) -> None:
-        """Handle account data update event"""
-        event_data = envelope.event_data
+        try:
+            await self.company_read_repo.delete_company(
+                company_id=company_id,
+                updated_at=envelope.stored_at,
+            )
+        except Exception as e:
+            log.error(f"CompanyDeleted projection FAILED: {company_id}, error={e}")
+            raise  # Re-raise for Worker retry
+```
 
-        account_id = event_data.get("account_aggregate_id")
+#### 6.2 SYNC vs ASYNC Decision Matrix
 
-        await self._account_read_repo.update_balances(
-            account_id=account_id,
-            balance=event_data.get("balance"),
-            equity=event_data.get("equity"),
-            buying_power=event_data.get("buying_power"),
-            status=event_data.get("status_from_broker"),
-            metadata=event_data.get("metadata_from_broker"),
-            last_synced_at=event_data.get("refreshed_at")
-        )
+| Criteria | @sync_projection | @async_projection |
+|----------|-----------------|-------------------|
+| User expects immediate feedback | YES | NO |
+| Saga depends on read model | YES | NO |
+| Critical for next operation | YES | NO |
+| UI uses optimistic update | NO | YES |
+| Background analytics | NO | YES |
+| Audit logging | NO | YES |
 
-        log.info(f"Projected AccountDataFromBrokerUpdated: {account_id}")
+#### 6.3 Idempotency Pattern (REQUIRED)
+
+```python
+# CORRECT: Idempotent with ON CONFLICT
+await pg.execute("""
+    INSERT INTO companies (id, name, created_at)
+    VALUES ($1, $2, $3)
+    ON CONFLICT (id) DO NOTHING
+""", company_id, name, created_at)
+
+# WRONG: Not idempotent - fails on replay
+await pg.execute("""
+    INSERT INTO companies (id, name, created_at)
+    VALUES ($1, $2, $3)
+""", company_id, name, created_at)
 ```
 
 **Projector Best Practices:**
-1. Use `@sync_projection` decorator for synchronous events
-2. Always update `aggregate_version` and `last_event_sequence`
-3. Handle both insert and update cases (idempotency)
-4. Use read repositories (not direct SQL)
-5. Log projections for debugging
+1. **ALWAYS use explicit decorators** - `@sync_projection` or `@async_projection`
+2. **Idempotent handlers** - use `ON CONFLICT DO NOTHING/UPDATE`
+3. **Import from correct location** - `app.infra.cqrs.projector_decorators`
+4. **Re-raise exceptions in ASYNC** - enables Worker retry mechanism
+5. **Use `@monitor_projection`** for critical operations
+6. **Short timeouts for SYNC** - default 2.0s, max 5.0s
 
 ---
 
-### Step 7: Create sync_events.py (CRITICAL)
+### Step 7: Register Domain in Domain Registry
 
-**File:** `sync_events.py`
+**File:** `app/infra/worker_core/event_processor/domain_registry.py`
 
-**⭐ THIS IS THE MOST IMPORTANT FILE FOR PERFORMANCE**
+**⚠️ NOTE:** `sync_events.py` is **DEPRECATED** as of 2025-12-01. Sync/async configuration is now handled via `@sync_projection` and `@async_projection` decorators directly on projector methods.
 
-This file defines which events require **synchronous projection** (wait for database update before acknowledging event).
+Register your new domain in the domain registry for Worker event processing.
 
-#### 7.1 Define Sync Events
+#### 7.1 Create Domain Factory Function
 
 ```python
-"""
-Broker Account Synchronous Events
+# In domain_registry.py
 
-TRUE SAGA REFACTORING (Nov 2025):
-================================
-Events requiring immediate consistency for cross-domain queries.
+def create_shipment_domain() -> DomainRegistration:
+    """Factory function for shipment domain configuration"""
 
-Only SYNC events: Cross-domain validation and critical user actions
-"""
+    # Import projector module FIRST to trigger decorator registration
+    import app.shipment.projectors
 
-# Events requiring synchronous projection
-SYNC_EVENTS = {
-    # === CRITICAL - CROSS-DOMAIN QUERIES ===
-    "BrokerAccountLinked",      # Order/Position validate account exists
-    "BrokerAccountUnlinked",    # Cleanup references
+    from app.shipment.events import (
+        ShipmentCreated,
+        ShipmentUpdated,
+        ShipmentStatusChanged,
+        ShipmentDelivered,
+    )
 
-    # === CRITICAL - ACCOUNT STATE ===
-    "AccountStatusChanged",     # Order validation depends on account status
-    "BrokerAccountActivated",   # Cross-domain validation
-    "BrokerAccountDeactivated", # Cross-domain validation
+    def shipment_projector_factory():
+        from app.shipment.projectors import ShipmentProjector
+        from app.infra.read_repos.shipment_read_repo import ShipmentReadRepo
 
-    # === CRITICAL - USER PREFERENCES ===
-    "DefaultAccountSet",        # User queries immediately
+        read_repo = ShipmentReadRepo()
+        return ShipmentProjector(read_repo)
 
-    # === CRITICAL - ACCOUNT DELETION ===
-    "BrokerAccountDeleted",     # Single account hard delete
-}
-
-# Configuration for specific events
-EVENT_CONFIG = {
-    "BrokerAccountLinked": {
-        "priority": 1,
-        "timeout": 2.0,
-        "description": "Cross-domain: Order/Position validate account"
-    },
-    "BrokerAccountDeleted": {
-        "priority": 1,
-        "timeout": 3.0,
-        "description": "Single broker account hard deleted"
-    },
-    "DefaultAccountSet": {
-        "priority": 3,
-        "timeout": 1.0,
-        "description": "User queries immediately"
-    },
-}
-
-# Events that are intentionally async (eventual consistency OK)
-ASYNC_EVENTS = {
-    "AccountDataFromBrokerUpdated",  # High-frequency (every trade/quote)
-    "UserAccountArchivedStatusChanged",  # Archive status - UI only
-    "UserSetAccountDetailsChanged",  # User-defined details - eventual OK
-    "AccountBalanceUpdated",      # High-frequency - eventual OK
-    "AccountEquityUpdated",       # High-frequency - eventual OK
-}
-
-# Auto-registration with decorator system
-def register_domain_events():
-    """Register this domain's sync events with the decorator system"""
-    try:
-        from app.infra.event_store.sync_decorators import register_domain_sync_events
-        register_domain_sync_events("broker_account", SYNC_EVENTS)
-    except ImportError:
-        pass
-
-# Auto-register on import
-register_domain_events()
+    return DomainRegistration(
+        name="shipment",
+        topics=["transport.shipment-events"],
+        projector_factory=shipment_projector_factory,
+        event_models={
+            "ShipmentCreated": ShipmentCreated,
+            "ShipmentUpdated": ShipmentUpdated,
+            "ShipmentStatusChanged": ShipmentStatusChanged,
+            "ShipmentDelivered": ShipmentDelivered,
+        },
+        projection_config={
+            "aggregate_type": "Shipment",
+            "transport_topic": "transport.shipment-events"
+        },
+        enable_sequence_tracking=True
+    )
 ```
 
-**When to Use SYNC vs ASYNC:**
+#### 7.2 Register in Domain Registry Creation
 
-**SYNC (Immediate consistency required):**
-- Cross-domain validation (other domains query this data)
-- User-facing state changes (user expects immediate update)
-- Critical business rules (order placement depends on account state)
-- Account lifecycle (creation, deletion, activation)
+```python
+def create_domain_registry() -> DomainRegistry:
+    """Create and populate the domain registry"""
+    global _domain_registry
 
-**ASYNC (Eventual consistency OK):**
-- High-frequency updates (balances, equity, positions)
-- Background calculations (metrics, analytics)
-- Saga coordination events (sagas are event-driven, not query-driven)
-- Notifications and logging
+    if _domain_registry is None:
+        registry = DomainRegistry()
 
-**Performance Impact:**
-- Too many SYNC events = slow system (database bottleneck)
-- Too few SYNC events = race conditions (stale reads)
-- **Goal**: 20-30% SYNC rate (broker_account: 7 SYNC / 25 total = 28%)
+        # Register existing domains
+        registry.register(create_user_account_domain())
+        registry.register(create_company_domain())
+        registry.register(create_chat_domain())
 
----
+        # Register your new domain
+        registry.register(create_shipment_domain())  # ADD THIS
+
+        log.info(f"Domain registry created with {len(registry._domains)} domains")
+        _domain_registry = registry
+
+    return _domain_registry
+```
+
+#### 7.3 Add Topic Configuration
+
+In `app/config/eventbus_transport_config.py`:
+
+```python
+# Add to _init_default_topics()
+"transport.shipment-events": TopicConfig(
+    name="transport.shipment-events",
+    type=TopicType.STREAM,
+    partitions=9,
+    retention_ms=604800000,  # 7 days
+    consumer_group="event-processor-workers"
+),
+```
+
+**Domain Registration Checklist:**
+1. ✅ Import projector module in factory (triggers decorator registration)
+2. ✅ Define all event models in `event_models` dict
+3. ✅ Create `projector_factory` function
+4. ✅ Add TopicConfig for your transport topic
+5. ✅ Consumer group should be `event-processor-workers`
 
 ### Step 8: Create Queries and Query Handlers
 
@@ -869,7 +886,7 @@ from app.infra.cqrs.decorators import query_handler
 if TYPE_CHECKING:
     from app.infra.cqrs.handler_dependencies import HandlerDependencies
 
-log = logging.getLogger("tradecore.broker_account.query_handlers.account")
+log = logging.getLogger("wellwon.broker_account.query_handlers.account")
 
 
 @query_handler(GetAccountsByUserQuery)
@@ -908,52 +925,7 @@ class GetAccountByIdHandler:
 
 ---
 
-### Step 9: Register Domain
-
-**File:** `app/infra/consumers/domain_registry.py`
-
-Add your domain to the registry so workers can process events.
-
-```python
-# At the top of the file, import your domain modules
-from app.{domain_name}.projectors import {DomainName}Projector
-from app.{domain_name}.events import *  # Import all events
-
-# In the _build_domain_registry() function, add your domain
-def _build_domain_registry(
-    pg_client: PGClient,
-    cache_manager: CacheManager,
-    event_bus: Optional[EventBus] = None
-) -> Dict[str, DomainRegistration]:
-    """Build complete domain registry"""
-
-    # ... existing domains ...
-
-    # Your new domain
-    sync_events, event_config = load_domain_sync_events("{domain_name}")
-
-    registrations["{domain_name}"] = DomainRegistration(
-        name="{domain_name}",
-        topics=["{DOMAIN_NAME}_EVENTS_TOPIC"],
-        projector_factory=lambda: {DomainName}Projector(
-            {domain_name}_read_repo={DomainName}ReadRepo(pg_client, cache_manager),
-            event_bus=event_bus
-        ),
-        event_models={
-            "{EventName}": {EventName},
-            # ... all your events
-        },
-        sync_events=sync_events,
-        sync_event_config=event_config,
-        enabled=True
-    )
-
-    return registrations
-```
-
----
-
-### Step 10: Database Migrations
+### Step 9: Database Migrations
 
 Create database schema for read models.
 
@@ -1348,10 +1320,10 @@ Use this checklist to ensure your domain is complete:
 - [ ] `aggregate.py` - Aggregate root with state and business logic
 - [ ] `events.py` - Domain events (Pydantic BaseEvent)
 - [ ] `commands.py` - Command definitions
-- [ ] `projectors.py` - Event projectors
+- [ ] `projectors.py` - Event projectors with `@sync_projection`/`@async_projection`
 - [ ] `read_models.py` - Read model schemas
 - [ ] `queries.py` - Query definitions
-- [ ] `sync_events.py` - **CRITICAL** - Sync event configuration
+- [ ] `exceptions.py` - Domain-specific exceptions
 - [ ] `command_handlers/` - Command handler implementations
 - [ ] `query_handlers/` - Query handler implementations
 

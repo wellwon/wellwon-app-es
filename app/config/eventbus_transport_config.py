@@ -262,6 +262,20 @@ class EventBusConfig:
                 retention_ms=604800000,  # 7 days
                 consumer_group="event-processor-workers"  # From WorkerConsumerGroups
             ),
+            "transport.company-events": TopicConfig(
+                name="transport.company-events",
+                type=TopicType.STREAM,
+                partitions=9,
+                retention_ms=604800000,  # 7 days
+                consumer_group="event-processor-workers"  # Worker processes company ASYNC projections
+            ),
+            "transport.chat-events": TopicConfig(
+                name="transport.chat-events",
+                type=TopicType.STREAM,
+                partitions=12,  # More partitions for higher message volume
+                retention_ms=604800000,  # 7 days
+                consumer_group="event-processor-workers"  # Worker processes chat ASYNC projections
+            ),
 
             # System topics
             "system.data-integrity-events": TopicConfig(
@@ -522,6 +536,8 @@ class TransportConfig:
     # Default transport topics (for outbox pattern)
     default_transport_topics: List[str] = field(default_factory=lambda: [
         "transport.user-account-events",
+        "transport.company-events",
+        "transport.chat-events",
     ])
 
     # Outbox settings
@@ -555,6 +571,34 @@ class TransportConfig:
             "UserAccountDeleted": "transport.user-account-events",
             "UserPasswordChanged": "transport.user-account-events",
             "UserEmailVerified": "transport.user-account-events",
+            "UserProfileUpdated": "transport.user-account-events",
+
+            # Company events
+            "CompanyCreated": "transport.company-events",
+            "CompanyUpdated": "transport.company-events",
+            "CompanyArchived": "transport.company-events",
+            "CompanyRestored": "transport.company-events",
+            "CompanyDeleted": "transport.company-events",
+            "UserAddedToCompany": "transport.company-events",
+            "UserRemovedFromCompany": "transport.company-events",
+            "TelegramSupergroupCreated": "transport.company-events",
+            "TelegramSupergroupDeleted": "transport.company-events",
+            "CompanyBalanceUpdated": "transport.company-events",
+
+            # Chat events
+            "ChatCreated": "transport.chat-events",
+            "ChatUpdated": "transport.chat-events",
+            "ChatArchived": "transport.chat-events",
+            "ChatRestored": "transport.chat-events",
+            "ChatHardDeleted": "transport.chat-events",
+            "MessageSent": "transport.chat-events",
+            "MessageEdited": "transport.chat-events",
+            "MessageDeleted": "transport.chat-events",
+            "ParticipantAdded": "transport.chat-events",
+            "ParticipantRemoved": "transport.chat-events",
+            "ParticipantLeft": "transport.chat-events",
+            "TelegramChatLinked": "transport.chat-events",
+            "TelegramMessageReceived": "transport.chat-events",
 
             # Worker control events
             "WorkerControlCommand": "system.worker-control.{worker_type}",

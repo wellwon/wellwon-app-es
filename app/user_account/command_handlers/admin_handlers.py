@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from app.user_account.commands import UpdateUserAdminStatusCommand
 from app.user_account.queries import GetUserProfileQuery
 
-from app.infra.cqrs.decorators import command_handler
+from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
 from app.user_account.aggregate import UserAccountAggregate
 

@@ -14,7 +14,6 @@ from app.infra.persistence import pg_client
 from app.chat.read_models import (
     ChatReadModel,
     ChatParticipantReadModel,
-    MessageReadModel,
     ChatListItemReadModel,
 )
 
@@ -116,19 +115,16 @@ class ChatReadRepo:
     @staticmethod
     async def hard_delete_chat(chat_id: uuid.UUID) -> None:
         """
-        Hard delete a chat and all related data.
+        Hard delete a chat and all related PostgreSQL data.
 
         Deletes:
-        - Chat messages
         - Chat participants (includes read status via last_read_at/last_read_message_id)
         - The chat itself
+
+        Note: Messages are stored in ScyllaDB (Discord pattern) and require
+        separate cleanup via MessageScyllaRepo or TTL expiration.
         """
         # Delete in correct order to avoid FK constraint violations
-        # Table names: messages (not chat_messages), chat_participants, chats
-        await pg_client.execute(
-            "DELETE FROM messages WHERE chat_id = $1",
-            chat_id
-        )
         await pg_client.execute(
             "DELETE FROM chat_participants WHERE chat_id = $1",
             chat_id
@@ -272,30 +268,28 @@ class ChatReadRepo:
         limit: int = 50,
         offset: int = 0,
     ) -> List[ChatListItemReadModel]:
-        """Get all chats for a user with unread counts"""
+        """
+        Get all chats for a user.
+
+        Discord Pattern: Messages are in ScyllaDB, not PostgreSQL.
+        Unread counts are tracked in ScyllaDB's message_read_positions table
+        and should be fetched separately via MessageScyllaRepo.
+        """
         active_filter = "" if include_archived else "AND c.is_active = true"
 
         rows = await pg_client.fetch(
             f"""
             SELECT
                 c.id, c.name, c.type as chat_type, c.participant_count,
-                c.updated_at as last_message_at, NULL::text as last_message_content, c.is_active,
+                c.last_message_at, c.last_message_content, c.is_active,
                 c.telegram_supergroup_id, c.telegram_topic_id, c.company_id,
-                COALESCE(unread.count, 0) as unread_count,
+                0 as unread_count,
                 CASE
                     WHEN c.type = 'direct' THEN other_user.full_name
                     ELSE NULL
                 END as other_participant_name
             FROM chats c
             INNER JOIN chat_participants cp ON c.id = cp.chat_id AND cp.user_id = $1 AND cp.is_active = true
-            LEFT JOIN LATERAL (
-                SELECT COUNT(*) as count
-                FROM messages m
-                WHERE m.chat_id = c.id
-                  AND m.created_at > COALESCE(cp.last_read_at, '1970-01-01'::timestamp)
-                  AND m.sender_id != $1
-                  AND m.is_deleted = false
-            ) unread ON true
             LEFT JOIN LATERAL (
                 SELECT COALESCE(u.first_name || ' ' || u.last_name, u.first_name, u.last_name, 'Unknown') as full_name
                 FROM chat_participants cp2
@@ -304,7 +298,7 @@ class ChatReadRepo:
                 LIMIT 1
             ) other_user ON c.type = 'direct'
             WHERE 1=1 {active_filter}
-            ORDER BY c.updated_at DESC NULLS LAST
+            ORDER BY c.last_message_at DESC NULLS LAST
             LIMIT $2 OFFSET $3
             """,
             user_id, limit, offset
@@ -475,237 +469,6 @@ class ChatReadRepo:
         if not row:
             return None
         return ChatParticipantReadModel(**dict(row))
-
-    # =========================================================================
-    # Message Operations
-    # =========================================================================
-
-    @staticmethod
-    async def insert_message(
-        message_id: uuid.UUID,
-        chat_id: uuid.UUID,
-        sender_id: Optional[uuid.UUID],
-        content: str,
-        message_type: str = "text",
-        reply_to_id: Optional[uuid.UUID] = None,
-        file_url: Optional[str] = None,
-        file_name: Optional[str] = None,
-        file_size: Optional[int] = None,
-        file_type: Optional[str] = None,
-        voice_duration: Optional[int] = None,
-        source: str = "web",
-        telegram_message_id: Optional[int] = None,
-        telegram_user_id: Optional[int] = None,
-        telegram_user_data: Optional[Dict[str, Any]] = None,
-        telegram_forward_data: Optional[Dict[str, Any]] = None,
-        telegram_topic_id: Optional[int] = None,
-        sync_direction: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        created_at: Optional[datetime] = None,
-    ) -> None:
-        """Insert a new message"""
-        await pg_client.execute(
-            """
-            INSERT INTO messages (
-                id, chat_id, sender_id, content, message_type,
-                reply_to_id, file_url, file_name, file_size, file_type,
-                voice_duration, source, telegram_message_id,
-                telegram_user_id, telegram_user_data, telegram_forward_data,
-                telegram_topic_id, sync_direction, metadata, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-            ON CONFLICT (id) DO NOTHING
-            """,
-            message_id, chat_id, sender_id, content, message_type,
-            reply_to_id, file_url, file_name, file_size, file_type,
-            voice_duration, source, telegram_message_id,
-            telegram_user_id, telegram_user_data, telegram_forward_data,
-            telegram_topic_id, sync_direction, metadata or {}, created_at or datetime.utcnow()
-        )
-
-    @staticmethod
-    async def update_message_content(
-        message_id: uuid.UUID,
-        content: str,
-        is_edited: bool = True,
-        updated_at: Optional[datetime] = None,
-    ) -> None:
-        """Update message content"""
-        await pg_client.execute(
-            """
-            UPDATE messages
-            SET content = $1, is_edited = $2, updated_at = $3
-            WHERE id = $4
-            """,
-            content, is_edited, updated_at or datetime.utcnow(), message_id
-        )
-
-    @staticmethod
-    async def soft_delete_message(
-        message_id: uuid.UUID,
-        updated_at: Optional[datetime] = None,
-    ) -> None:
-        """Soft delete a message"""
-        await pg_client.execute(
-            """
-            UPDATE messages SET is_deleted = true, updated_at = $1
-            WHERE id = $2
-            """,
-            updated_at or datetime.utcnow(), message_id
-        )
-
-    @staticmethod
-    async def get_message_by_id(message_id: uuid.UUID) -> Optional[MessageReadModel]:
-        """Get message by ID"""
-        row = await pg_client.fetchrow(
-            "SELECT * FROM messages WHERE id = $1",
-            message_id
-        )
-        if not row:
-            return None
-        return MessageReadModel(**dict(row))
-
-    @staticmethod
-    async def get_chat_messages(
-        chat_id: uuid.UUID,
-        limit: int = 50,
-        offset: int = 0,
-        before_id: Optional[uuid.UUID] = None,
-        after_id: Optional[uuid.UUID] = None,
-    ) -> List[MessageReadModel]:
-        """Get messages from a chat with pagination"""
-        if before_id:
-            rows = await pg_client.fetch(
-                """
-                SELECT m.*,
-                    COALESCE(u.first_name || ' ' || u.last_name, u.first_name, u.last_name, 'Unknown') as sender_name,
-                    u.avatar_url as sender_avatar_url,
-                    rm.content as reply_to_content,
-                    COALESCE(ru.first_name || ' ' || ru.last_name, ru.first_name, ru.last_name, 'Unknown') as reply_to_sender_name
-                FROM messages m
-                LEFT JOIN user_accounts u ON m.sender_id = u.id
-                LEFT JOIN messages rm ON m.reply_to_id = rm.id
-                LEFT JOIN user_accounts ru ON rm.sender_id = ru.id
-                WHERE m.chat_id = $1 AND m.created_at < (SELECT created_at FROM messages WHERE id = $2)
-                ORDER BY m.created_at DESC
-                LIMIT $3
-                """,
-                chat_id, before_id, limit
-            )
-        elif after_id:
-            rows = await pg_client.fetch(
-                """
-                SELECT m.*,
-                    COALESCE(u.first_name || ' ' || u.last_name, u.first_name, u.last_name, 'Unknown') as sender_name,
-                    u.avatar_url as sender_avatar_url,
-                    rm.content as reply_to_content,
-                    COALESCE(ru.first_name || ' ' || ru.last_name, ru.first_name, ru.last_name, 'Unknown') as reply_to_sender_name
-                FROM messages m
-                LEFT JOIN user_accounts u ON m.sender_id = u.id
-                LEFT JOIN messages rm ON m.reply_to_id = rm.id
-                LEFT JOIN user_accounts ru ON rm.sender_id = ru.id
-                WHERE m.chat_id = $1 AND m.created_at > (SELECT created_at FROM messages WHERE id = $2)
-                ORDER BY m.created_at ASC
-                LIMIT $3
-                """,
-                chat_id, after_id, limit
-            )
-        else:
-            rows = await pg_client.fetch(
-                """
-                SELECT m.*,
-                    COALESCE(u.first_name || ' ' || u.last_name, u.first_name, u.last_name, 'Unknown') as sender_name,
-                    u.avatar_url as sender_avatar_url,
-                    rm.content as reply_to_content,
-                    COALESCE(ru.first_name || ' ' || ru.last_name, ru.first_name, ru.last_name, 'Unknown') as reply_to_sender_name
-                FROM messages m
-                LEFT JOIN user_accounts u ON m.sender_id = u.id
-                LEFT JOIN messages rm ON m.reply_to_id = rm.id
-                LEFT JOIN user_accounts ru ON rm.sender_id = ru.id
-                WHERE m.chat_id = $1
-                ORDER BY m.created_at DESC
-                LIMIT $2 OFFSET $3
-                """,
-                chat_id, limit, offset
-            )
-
-        return [MessageReadModel(**dict(row)) for row in rows]
-
-    @staticmethod
-    async def search_messages(
-        chat_id: uuid.UUID,
-        search_term: str,
-        limit: int = 20,
-    ) -> List[MessageReadModel]:
-        """Search messages in chat by content"""
-        rows = await pg_client.fetch(
-            """
-            SELECT * FROM messages
-            WHERE chat_id = $1 AND content ILIKE $2 AND is_deleted = false
-            ORDER BY created_at DESC
-            LIMIT $3
-            """,
-            chat_id, f"%{search_term}%", limit
-        )
-
-        return [MessageReadModel(**dict(row)) for row in rows]
-
-    # =========================================================================
-    # Message Read Status Operations
-    # =========================================================================
-
-    @staticmethod
-    async def insert_message_read(
-        message_id: uuid.UUID,
-        user_id: uuid.UUID,
-        read_at: datetime,
-    ) -> None:
-        """Insert message read status"""
-        await pg_client.execute(
-            """
-            INSERT INTO message_reads (id, message_id, user_id, read_at)
-            VALUES (gen_random_uuid(), $1, $2, $3)
-            ON CONFLICT (message_id, user_id) DO UPDATE SET read_at = $3
-            """,
-            message_id, user_id, read_at
-        )
-
-    @staticmethod
-    async def get_unread_messages_count(
-        chat_id: uuid.UUID,
-        user_id: uuid.UUID,
-    ) -> int:
-        """Get count of unread messages for user in chat"""
-        result = await pg_client.fetchval(
-            """
-            SELECT COUNT(*) FROM messages m
-            LEFT JOIN chat_participants cp ON cp.chat_id = m.chat_id AND cp.user_id = $2
-            WHERE m.chat_id = $1
-              AND m.sender_id != $2
-              AND m.is_deleted = false
-              AND m.created_at > COALESCE(cp.last_read_at, '1970-01-01'::timestamp)
-            """,
-            chat_id, user_id
-        )
-        return result or 0
-
-    @staticmethod
-    async def get_unread_chats_count(user_id: uuid.UUID) -> int:
-        """Get count of chats with unread messages"""
-        result = await pg_client.fetchval(
-            """
-            SELECT COUNT(DISTINCT c.id) FROM chats c
-            INNER JOIN chat_participants cp ON c.id = cp.chat_id AND cp.user_id = $1 AND cp.is_active = true
-            WHERE EXISTS (
-                SELECT 1 FROM messages m
-                WHERE m.chat_id = c.id
-                  AND m.sender_id != $1
-                  AND m.is_deleted = false
-                  AND m.created_at > COALESCE(cp.last_read_at, '1970-01-01'::timestamp)
-            )
-            """,
-            user_id
-        )
-        return result or 0
 
     # =========================================================================
     # Message Templates Operations (Read Model)

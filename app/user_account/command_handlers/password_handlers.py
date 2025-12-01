@@ -29,7 +29,7 @@ from app.user_account.queries import (
 )
 
 from app.infra.cqrs.command_bus import ICommandHandler
-from app.infra.cqrs.decorators import command_handler
+from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
 from app.user_account.aggregate import UserAccountAggregate
 

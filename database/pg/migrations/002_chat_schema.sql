@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS public.chats (
     last_message_sender_id UUID REFERENCES public.users(id),
     -- Telegram integration
     telegram_chat_id BIGINT,
-    telegram_topic_id INTEGER,
+    telegram_topic_id BIGINT,  -- Changed from INTEGER to match ScyllaDB
     -- Metadata and versioning
     metadata JSONB NOT NULL DEFAULT '{}',
     version INTEGER NOT NULL DEFAULT 0

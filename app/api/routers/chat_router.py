@@ -772,7 +772,7 @@ async def unlink_telegram_chat(
 # File Upload Endpoints
 # =============================================================================
 
-from app.infra.storage.local_adapter import get_storage_adapter
+from app.infra.storage.minio_provider import get_storage_provider
 
 
 class FileUploadResponse(BaseModel):
@@ -844,7 +844,7 @@ async def upload_chat_file(
             )
 
         # Upload to storage
-        storage = get_storage_adapter()
+        storage = get_storage_provider()
         result = await storage.upload_file(
             bucket="chat-files",
             file_content=content,
@@ -901,7 +901,7 @@ async def upload_voice_message(
             )
 
         # Upload to storage
-        storage = get_storage_adapter()
+        storage = get_storage_provider()
         result = await storage.upload_file(
             bucket="chat-voice",
             file_content=content,

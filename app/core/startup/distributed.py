@@ -17,7 +17,7 @@ from app.infra.event_store.dlq_service import create_dlq_service
 from app.infra.event_store.stream_archival_service import create_and_start_archival_service
 
 # Import decorator-based sync projection system
-from app.infra.event_store.sync_decorators import auto_register_sync_projections
+from app.infra.cqrs.projector_decorators import auto_register_sync_projections
 
 logger = logging.getLogger("wellwon.startup.distributed")
 
@@ -169,7 +169,7 @@ async def start_outbox_publisher(app: FastAPI) -> None:
     """Start the outbox publisher for exactly-once delivery"""
 
     # Import to get registered sync events
-    from app.infra.event_store.sync_decorators import get_all_sync_events
+    from app.infra.cqrs.projector_decorators import get_all_sync_events
     sync_event_types = get_all_sync_events()
 
     # Create and start the outbox publisher
@@ -314,9 +314,16 @@ async def register_sync_projections_phase(app: FastAPI) -> None:
             app.state.user_account_read_repo
         )
 
-    # NOTE: Chat and Company projectors removed from sync registration
-    # They will be processed ASYNC by Event Processor Worker
-    # This is the correct Event Sourcing pattern - eventual consistency
+    # Company Projector - SYNC (needed for saga to continue after CompanyCreated)
+    from app.company.projectors import CompanyProjector
+    from app.infra.read_repos.company_read_repo import CompanyReadRepo
+    projector_instances["company"] = CompanyProjector(CompanyReadRepo())
+
+    # Chat Projector - SYNC (ScyllaDB = PRIMARY for messages)
+    from app.chat.projectors import ChatProjector
+    from app.infra.read_repos.chat_read_repo import ChatReadRepo
+    from app.infra.read_repos.message_scylla_repo import MessageScyllaRepo
+    projector_instances["chat"] = ChatProjector(ChatReadRepo(), MessageScyllaRepo())
 
     # Store projector instances in app state for debugging
     app.state.projector_instances = projector_instances

@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from app.infra.read_repos.user_account_read_repo import UserAccountReadRepo
     from app.infra.read_repos.company_read_repo import CompanyReadRepo
     from app.infra.read_repos.chat_read_repo import ChatReadRepo
+    from app.infra.read_repos.message_scylla_repo import MessageScyllaRepo
     from app.infra.persistence.cache_manager import CacheManager
     from app.infra.saga.saga_manager import SagaManager
     from app.infra.telegram.adapter import TelegramAdapter
@@ -44,6 +45,7 @@ class HandlerDependencies:
     user_read_repo: Optional['UserAccountReadRepo'] = None
     company_read_repo: Optional['CompanyReadRepo'] = None
     chat_read_repo: Optional['ChatReadRepo'] = None
+    message_scylla_repo: Optional['MessageScyllaRepo'] = None
 
     cache_manager: Optional['CacheManager'] = None
 

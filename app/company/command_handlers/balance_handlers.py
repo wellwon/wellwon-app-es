@@ -13,7 +13,7 @@ from app.config.logging_config import get_logger
 from app.company.commands import UpdateCompanyBalanceCommand
 from app.company.queries import GetCompanyByIdQuery
 from app.company.aggregate import CompanyAggregate
-from app.infra.cqrs.decorators import command_handler
+from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
 
 if TYPE_CHECKING:

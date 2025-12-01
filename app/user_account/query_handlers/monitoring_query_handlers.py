@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from datetime import datetime, timezone, timedelta
 
 from app.infra.cqrs.query_bus import IQueryHandler
-from app.infra.cqrs.decorators import query_handler, readonly_query, cached_query_handler, readonly_query
+from app.infra.cqrs.cqrs_decorators import query_handler, readonly_query, cached_query_handler, readonly_query
 from app.common.base.base_query_handler import BaseQueryHandler
 from app.user_account.queries import (
     GetUsersWithActiveMonitoringQuery,

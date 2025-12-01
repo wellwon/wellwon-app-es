@@ -1,58 +1,90 @@
 # =============================================================================
 # File: app/chat/projectors.py
-# Description: Chat domain event projectors for read model updates
+# Description: Chat domain event projectors - Discord-style architecture
+# =============================================================================
+# Architecture (Discord Pattern):
+#   ScyllaDB = PRIMARY for message content (trillions of messages)
+#   PostgreSQL = METADATA only (chat list, participants, last_message preview)
+#
+# Message Flow:
+#   Event → ScyllaDB (content) → PostgreSQL (metadata update) → WSE
+#
+# References:
+#   - Discord: https://discord.com/blog/how-discord-stores-trillions-of-messages
+#   - Level Infinite CQRS: ScyllaDB + Event Sourcing pattern
 # =============================================================================
 
 from __future__ import annotations
 
-import logging
 import uuid
-from typing import TYPE_CHECKING
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Optional
 
+from app.config.logging_config import get_logger
 from app.infra.event_store.event_envelope import EventEnvelope
-from app.infra.event_store.sync_decorators import sync_projection, monitor_projection
+from app.infra.cqrs.projector_decorators import sync_projection, async_projection, monitor_projection
 from app.common.exceptions.projection_exceptions import RetriableProjectionError
+
+# ScyllaDB imports - REQUIRED for messaging
+from app.infra.read_repos.message_scylla_repo import (
+    MessageScyllaRepo,
+    MessageData,
+    MessageType,
+    MessageSource,
+    SyncDirection,
+)
 
 if TYPE_CHECKING:
     from app.infra.read_repos.chat_read_repo import ChatReadRepo
 
-log = logging.getLogger("wellwon.chat.projectors")
+log = get_logger("wellwon.chat.projectors")
 
 
 class ChatProjector:
     """
-    Projects chat domain events to PostgreSQL read models.
+    Discord-style chat projector with ScyllaDB as PRIMARY message storage.
 
-    Handles all chat-related events and updates the corresponding
-    read model tables (chats, chat_participants, messages, message_reads).
+    Architecture:
+        ScyllaDB (PRIMARY):
+            - ALL message content
+            - Reactions, pins, read positions
+            - Telegram sync state
+            - Partitioned by (channel_id, bucket) with Snowflake IDs
 
-    SYNC vs ASYNC projections:
-    - SYNC: ChatCreated, ParticipantAdded, MessageSent, TelegramMessageReceived
-      (Critical for saga flow, real-time chat UI)
-    - ASYNC: All others (UI uses optimistic updates, Worker processes via eventual consistency)
+        PostgreSQL (METADATA ONLY):
+            - chats table: name, type, last_message_* (preview)
+            - chat_participants: roles, last_read_at
+            - telegram_supergroups, telegram_users
 
-    FK violation handling:
-    - ParticipantAdded, MessageSent, TelegramMessageReceived catch FK violations
-    - Raises RetriableProjectionError when chat doesn't exist yet
-    - Worker queues event for retry after ChatCreated is projected
+    Projection Pattern:
+        SYNC: ChatCreated, ParticipantAdded, MessageSent, TelegramMessageReceived
+        ASYNC: All others (eventual consistency via Worker)
     """
 
-    def __init__(self, chat_read_repo: 'ChatReadRepo'):
+    def __init__(
+        self,
+        chat_read_repo: 'ChatReadRepo',
+        message_scylla_repo: MessageScyllaRepo,
+    ):
+        """
+        Initialize projector with both repositories.
+
+        Args:
+            chat_read_repo: PostgreSQL repository for chat metadata
+            message_scylla_repo: ScyllaDB repository for message content (REQUIRED)
+        """
         self.chat_read_repo = chat_read_repo
+        self.message_scylla_repo = message_scylla_repo
+        log.info("ChatProjector initialized with ScyllaDB PRIMARY architecture")
 
     # =========================================================================
-    # Chat Lifecycle Projections
+    # Chat Lifecycle Projections (PostgreSQL)
     # =========================================================================
 
     @sync_projection("ChatCreated")
     @monitor_projection
     async def on_chat_created(self, envelope: EventEnvelope) -> None:
-        """
-        Project ChatCreated event to read model.
-
-        SYNC: Saga waits for chat to exist. UI shows chat immediately.
-        """
+        """Project ChatCreated to PostgreSQL. SYNC for saga flow."""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
 
@@ -69,52 +101,40 @@ class ChatProjector:
             created_at=envelope.stored_at,
         )
 
-    # ASYNC: UI uses optimistic update, eventual consistency OK
+    @async_projection("ChatUpdated")
     @monitor_projection
     async def on_chat_updated(self, envelope: EventEnvelope) -> None:
-        """Project ChatUpdated event - ASYNC (UI uses optimistic update)"""
+        """Project ChatUpdated to PostgreSQL. ASYNC."""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
 
-        log.info(f"Projecting ChatUpdated: chat_id={chat_id}, type={type(chat_id)}, name={event_data.get('name')}")
+        log.info(f"Projecting ChatUpdated: chat_id={chat_id}")
 
-        try:
-            await self.chat_read_repo.update_chat(
-                chat_id=chat_id,
-                name=event_data.get('name'),
-                metadata=event_data.get('metadata'),
-                updated_at=envelope.stored_at,
-            )
-            log.info(f"ChatUpdated projection SUCCESS: chat_id={chat_id}")
-        except Exception as e:
-            log.error(f"ChatUpdated projection FAILED: chat_id={chat_id}, error={e}", exc_info=True)
-            raise
+        await self.chat_read_repo.update_chat(
+            chat_id=chat_id,
+            name=event_data.get('name'),
+            metadata=event_data.get('metadata'),
+            updated_at=envelope.stored_at,
+        )
 
-    # ASYNC: UI uses optimistic update, eventual consistency OK
+    @async_projection("ChatArchived")
     @monitor_projection
     async def on_chat_archived(self, envelope: EventEnvelope) -> None:
-        """Project ChatArchived event - ASYNC (UI uses optimistic update)"""
+        """Project ChatArchived to PostgreSQL. ASYNC."""
         chat_id = envelope.aggregate_id
+        log.info(f"Projecting ChatArchived: chat_id={chat_id}")
 
-        log.info(f"Projecting ChatArchived: chat_id={chat_id}, type={type(chat_id)}")
+        await self.chat_read_repo.update_chat_status(
+            chat_id=chat_id,
+            is_active=False,
+            updated_at=envelope.stored_at,
+        )
 
-        try:
-            await self.chat_read_repo.update_chat_status(
-                chat_id=chat_id,
-                is_active=False,
-                updated_at=envelope.stored_at,
-            )
-            log.info(f"ChatArchived projection SUCCESS: chat_id={chat_id}")
-        except Exception as e:
-            log.error(f"ChatArchived projection FAILED: chat_id={chat_id}, error={e}", exc_info=True)
-            raise
-
-    # ASYNC: UI uses optimistic update, eventual consistency OK
+    @async_projection("ChatRestored")
     @monitor_projection
     async def on_chat_restored(self, envelope: EventEnvelope) -> None:
-        """Project ChatRestored event - ASYNC (UI uses optimistic update)"""
+        """Project ChatRestored to PostgreSQL. ASYNC."""
         chat_id = envelope.aggregate_id
-
         log.info(f"Projecting ChatRestored: chat_id={chat_id}")
 
         await self.chat_read_repo.update_chat_status(
@@ -123,34 +143,53 @@ class ChatProjector:
             updated_at=envelope.stored_at,
         )
 
-    # ASYNC: UI uses optimistic update, eventual consistency OK
+    @async_projection("ChatHardDeleted")
     @monitor_projection
     async def on_chat_hard_deleted(self, envelope: EventEnvelope) -> None:
-        """Project ChatHardDeleted event - ASYNC (UI uses optimistic update)"""
-        chat_id = envelope.aggregate_id
+        """
+        Project ChatHardDeleted - ScyllaDB + PostgreSQL cleanup.
 
+        Order:
+            1. ScyllaDB - delete ALL message data (messages, reactions, pins, etc.)
+            2. PostgreSQL - delete chat metadata (CASCADE handles participants)
+
+        This ensures complete cleanup when a chat is hard deleted via GroupDeletionSaga.
+        """
+        chat_id = envelope.aggregate_id
         log.info(f"Projecting ChatHardDeleted: chat_id={chat_id}")
 
+        # -----------------------------------------------------------------
+        # 1. ScyllaDB - delete ALL channel data (messages, reactions, etc.)
+        # -----------------------------------------------------------------
         try:
-            await self.chat_read_repo.hard_delete_chat(chat_id=chat_id)
-            log.info(f"ChatHardDeleted projection SUCCESS: chat_id={chat_id}")
+            scylla_result = await self.message_scylla_repo.delete_all_channel_data(chat_id)
+            log.info(
+                f"ScyllaDB cleanup complete for chat {chat_id}: "
+                f"messages={scylla_result.get('messages', 0)}, "
+                f"reactions={scylla_result.get('reactions', 0)}, "
+                f"pinned={scylla_result.get('pinned', 0)}, "
+                f"read_positions={scylla_result.get('read_positions', 0)}, "
+                f"telegram_mappings={scylla_result.get('telegram_mappings', 0)}"
+            )
         except Exception as e:
-            log.error(f"ChatHardDeleted projection FAILED: chat_id={chat_id}, error={e}", exc_info=True)
-            raise
+            # Log error but continue with PostgreSQL cleanup
+            # ScyllaDB data will be orphaned but won't break the system
+            log.error(f"ScyllaDB cleanup failed for chat {chat_id}: {e}", exc_info=True)
+
+        # -----------------------------------------------------------------
+        # 2. PostgreSQL - delete chat metadata (CASCADE handles participants)
+        # -----------------------------------------------------------------
+        await self.chat_read_repo.hard_delete_chat(chat_id=chat_id)
 
     # =========================================================================
-    # Participant Projections
+    # Participant Projections (PostgreSQL)
     # =========================================================================
 
+    # SYNC: Saga may query participants after adding
     @sync_projection("ParticipantAdded")
     @monitor_projection
     async def on_participant_added(self, envelope: EventEnvelope) -> None:
-        """
-        Project ParticipantAdded event.
-
-        SYNC: Saga flow depends on participant. UI shows members immediately.
-        Handles FK violation gracefully when chat doesn't exist yet.
-        """
+        """Project ParticipantAdded to PostgreSQL. SYNC for saga flow."""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
         user_id = uuid.UUID(event_data['user_id'])
@@ -164,44 +203,29 @@ class ChatProjector:
                 role=event_data.get('role', 'member'),
                 joined_at=datetime.fromisoformat(event_data['joined_at']) if event_data.get('joined_at') else envelope.stored_at,
             )
-
-            # Update participant count on chat
             await self.chat_read_repo.increment_participant_count(chat_id)
         except Exception as e:
-            error_str = str(e).lower()
-            # Check for FK violation (chat doesn't exist yet)
-            if 'foreign key' in error_str or 'violates foreign key constraint' in error_str:
-                log.warning(
-                    f"FK violation for ParticipantAdded: chat={chat_id} may not exist yet. "
-                    f"Event will be retried."
-                )
-                raise RetriableProjectionError(
-                    f"Chat {chat_id} not yet projected. ParticipantAdded will be retried."
-                ) from e
+            if 'foreign key' in str(e).lower():
+                raise RetriableProjectionError(f"Chat {chat_id} not yet projected") from e
             raise
 
-    # ASYNC: UI uses optimistic update, eventual consistency OK
+    @async_projection("ParticipantRemoved")
     @monitor_projection
     async def on_participant_removed(self, envelope: EventEnvelope) -> None:
-        """Project ParticipantRemoved event - ASYNC (UI uses optimistic update)"""
+        """Project ParticipantRemoved to PostgreSQL. ASYNC."""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
         user_id = uuid.UUID(event_data['user_id'])
 
         log.info(f"Projecting ParticipantRemoved: chat={chat_id}, user={user_id}")
 
-        await self.chat_read_repo.deactivate_participant(
-            chat_id=chat_id,
-            user_id=user_id,
-        )
-
-        # Update participant count on chat
+        await self.chat_read_repo.deactivate_participant(chat_id=chat_id, user_id=user_id)
         await self.chat_read_repo.decrement_participant_count(chat_id)
 
-    # ASYNC: UI uses optimistic update, eventual consistency OK
+    @async_projection("ParticipantRoleChanged")
     @monitor_projection
     async def on_participant_role_changed(self, envelope: EventEnvelope) -> None:
-        """Project ParticipantRoleChanged event - ASYNC (UI uses optimistic update)"""
+        """Project ParticipantRoleChanged to PostgreSQL. ASYNC."""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
         user_id = uuid.UUID(event_data['user_id'])
@@ -214,153 +238,160 @@ class ChatProjector:
             role=event_data['new_role'],
         )
 
-    # ASYNC: UI uses optimistic update, eventual consistency OK
+    @async_projection("ParticipantLeft")
     @monitor_projection
     async def on_participant_left(self, envelope: EventEnvelope) -> None:
-        """Project ParticipantLeft event - ASYNC (UI uses optimistic update)"""
+        """Project ParticipantLeft to PostgreSQL. ASYNC."""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
         user_id = uuid.UUID(event_data['user_id'])
 
         log.info(f"Projecting ParticipantLeft: chat={chat_id}, user={user_id}")
 
-        await self.chat_read_repo.deactivate_participant(
-            chat_id=chat_id,
-            user_id=user_id,
-        )
-
+        await self.chat_read_repo.deactivate_participant(chat_id=chat_id, user_id=user_id)
         await self.chat_read_repo.decrement_participant_count(chat_id)
 
     # =========================================================================
-    # Message Projections
+    # Message Projections (ScyllaDB PRIMARY)
     # =========================================================================
 
+    # SYNC: User expects immediate message visibility
     @sync_projection("MessageSent")
     @monitor_projection
     async def on_message_sent(self, envelope: EventEnvelope) -> None:
         """
-        Project MessageSent event.
+        Project MessageSent - ScyllaDB PRIMARY.
 
-        SYNC: Real-time chat requires immediate message visibility.
-        Handles FK violation gracefully when chat doesn't exist yet.
+        SYNC: User expects immediate message visibility in chat.
+
+        Flow:
+            1. Write message content to ScyllaDB (primary storage)
+            2. Update PostgreSQL chat.last_message_* (metadata preview)
         """
         event_data = envelope.event_data
-        chat_id = envelope.aggregate_id
-        message_id = uuid.UUID(event_data['message_id'])
-
-        log.info(f"Projecting MessageSent: message_id={message_id}, chat_id={chat_id}")
-
-        # sender_id can be None for external Telegram users
+        chat_id = uuid.UUID(event_data['chat_id'])
         sender_id = uuid.UUID(event_data['sender_id']) if event_data.get('sender_id') else None
-
-        # Determine sync_direction based on source
         source = event_data.get('source', 'web')
-        sync_direction = 'telegram_to_web' if source == 'telegram' else None
 
+        # IDEMPOTENCY: Convert event's message_id UUID to deterministic Snowflake ID
+        # This ensures both API server and Worker produce the same message_id
+        message_uuid = uuid.UUID(event_data['message_id'])
+        # Use first 8 bytes of UUID as int64, ensure positive
+        deterministic_snowflake = int.from_bytes(message_uuid.bytes[:8], byteorder='big') & 0x7FFFFFFFFFFFFFFF
+
+        log.info(f"Projecting MessageSent to ScyllaDB: chat_id={chat_id}, snowflake={deterministic_snowflake}")
+
+        # -----------------------------------------------------------------
+        # 1. ScyllaDB - PRIMARY message storage (IDEMPOTENT)
+        # -----------------------------------------------------------------
+        message = MessageData(
+            channel_id=chat_id,
+            message_id=deterministic_snowflake,  # Use deterministic ID for idempotency
+            sender_id=sender_id,
+            content=event_data['content'],
+            message_type=MessageType(event_data.get('message_type', 'text')),
+            source=MessageSource(source),
+            reply_to_id=event_data.get('reply_to_snowflake_id'),
+            file_url=event_data.get('file_url'),
+            file_name=event_data.get('file_name'),
+            file_size=event_data.get('file_size'),
+            file_type=event_data.get('file_type'),
+            voice_duration=event_data.get('voice_duration'),
+            telegram_message_id=event_data.get('telegram_message_id'),
+            telegram_chat_id=event_data.get('telegram_chat_id'),
+            telegram_user_id=event_data.get('telegram_user_id'),
+            telegram_user_data=event_data.get('telegram_user_data'),
+            telegram_forward_data=event_data.get('telegram_forward_data'),
+            telegram_topic_id=event_data.get('telegram_topic_id'),
+            sync_direction=SyncDirection.TELEGRAM_TO_WEB if source == 'telegram' else None,
+            created_at=envelope.stored_at,
+        )
+
+        snowflake_id = await self.message_scylla_repo.insert_message(message)
+        log.debug(f"ScyllaDB insert SUCCESS: snowflake_id={snowflake_id}")
+
+        # -----------------------------------------------------------------
+        # 2. PostgreSQL - metadata update (last message preview)
+        # -----------------------------------------------------------------
         try:
-            await self.chat_read_repo.insert_message(
-                message_id=message_id,
-                chat_id=uuid.UUID(event_data['chat_id']),
-                sender_id=sender_id,
-                content=event_data['content'],
-                message_type=event_data.get('message_type', 'text'),
-                reply_to_id=uuid.UUID(event_data['reply_to_id']) if event_data.get('reply_to_id') else None,
-                file_url=event_data.get('file_url'),
-                file_name=event_data.get('file_name'),
-                file_size=event_data.get('file_size'),
-                file_type=event_data.get('file_type'),
-                voice_duration=event_data.get('voice_duration'),
-                source=source,
-                telegram_message_id=event_data.get('telegram_message_id'),
-                telegram_user_id=event_data.get('telegram_user_id'),
-                telegram_user_data=event_data.get('telegram_user_data'),
-                telegram_forward_data=event_data.get('telegram_forward_data'),
-                telegram_topic_id=event_data.get('telegram_topic_id'),
-                sync_direction=sync_direction,
-                created_at=envelope.stored_at,
-            )
-
-            # Update chat's last message
             await self.chat_read_repo.update_chat_last_message(
-                chat_id=uuid.UUID(event_data['chat_id']),
+                chat_id=chat_id,
                 last_message_at=envelope.stored_at,
-                last_message_content=event_data['content'][:100],  # Truncate for preview
+                last_message_content=event_data['content'][:100],
                 last_message_sender_id=sender_id,
             )
         except Exception as e:
-            error_str = str(e).lower()
-            # Check for FK violation (chat doesn't exist yet)
-            if 'foreign key' in error_str or 'violates foreign key constraint' in error_str:
-                log.warning(
-                    f"FK violation for MessageSent: chat={chat_id} may not exist yet. "
-                    f"Event will be retried."
-                )
-                raise RetriableProjectionError(
-                    f"Chat {chat_id} not yet projected. MessageSent will be retried."
-                ) from e
+            if 'foreign key' in str(e).lower():
+                raise RetriableProjectionError(f"Chat {chat_id} not yet projected") from e
             raise
 
-
-    # ASYNC: UI uses optimistic update, eventual consistency OK
+    @async_projection("MessageEdited")
     @monitor_projection
     async def on_message_edited(self, envelope: EventEnvelope) -> None:
-        """Project MessageEdited event - ASYNC (UI uses optimistic update)"""
+        """Project MessageEdited - ScyllaDB PRIMARY. ASYNC."""
         event_data = envelope.event_data
-        message_id = uuid.UUID(event_data['message_id'])
+        chat_id = uuid.UUID(event_data['chat_id'])
+        snowflake_id = event_data.get('snowflake_id')
 
-        log.info(f"Projecting MessageEdited: message_id={message_id}")
+        if not snowflake_id:
+            log.warning(f"MessageEdited missing snowflake_id, skipping ScyllaDB update")
+            return
 
-        await self.chat_read_repo.update_message_content(
-            message_id=message_id,
-            content=event_data['new_content'],
-            is_edited=True,
-            updated_at=envelope.stored_at,
+        log.info(f"Projecting MessageEdited to ScyllaDB: snowflake_id={snowflake_id}")
+
+        await self.message_scylla_repo.update_message_content(
+            channel_id=chat_id,
+            message_id=snowflake_id,
+            new_content=event_data['new_content'],
         )
 
-    # ASYNC: UI uses optimistic update, eventual consistency OK
+    @async_projection("MessageDeleted")
     @monitor_projection
     async def on_message_deleted(self, envelope: EventEnvelope) -> None:
-        """Project MessageDeleted event - ASYNC (UI uses optimistic update)"""
+        """Project MessageDeleted - ScyllaDB PRIMARY. ASYNC."""
         event_data = envelope.event_data
-        message_id = uuid.UUID(event_data['message_id'])
+        chat_id = uuid.UUID(event_data['chat_id'])
+        snowflake_id = event_data.get('snowflake_id')
 
-        log.info(f"Projecting MessageDeleted: message_id={message_id}")
+        if not snowflake_id:
+            log.warning(f"MessageDeleted missing snowflake_id, skipping ScyllaDB update")
+            return
 
-        await self.chat_read_repo.soft_delete_message(
-            message_id=message_id,
-            updated_at=envelope.stored_at,
+        log.info(f"Projecting MessageDeleted to ScyllaDB: snowflake_id={snowflake_id}")
+
+        await self.message_scylla_repo.soft_delete_message(
+            channel_id=chat_id,
+            message_id=snowflake_id,
         )
 
-    # ASYNC: Read receipts can use eventual consistency
-    async def on_message_read_status_updated(self, envelope: EventEnvelope) -> None:
-        """Project MessageReadStatusUpdated event - ASYNC (eventual consistency OK)"""
-        event_data = envelope.event_data
-        message_id = uuid.UUID(event_data['message_id'])
-        user_id = uuid.UUID(event_data['user_id'])
+    # =========================================================================
+    # Read Status Projections (ScyllaDB)
+    # =========================================================================
 
-        log.debug(f"Projecting MessageReadStatusUpdated: message={message_id}, user={user_id}")
-
-        await self.chat_read_repo.insert_message_read(
-            message_id=message_id,
-            user_id=user_id,
-            read_at=datetime.fromisoformat(event_data['read_at']) if event_data.get('read_at') else envelope.stored_at,
-        )
-
-    # ASYNC: Read receipts can use eventual consistency
+    @async_projection("MessagesMarkedAsRead")
+    @monitor_projection
     async def on_messages_marked_as_read(self, envelope: EventEnvelope) -> None:
-        """Project MessagesMarkedAsRead event - ASYNC (eventual consistency OK)"""
+        """Project MessagesMarkedAsRead - ScyllaDB + PostgreSQL. ASYNC."""
         event_data = envelope.event_data
         chat_id = uuid.UUID(event_data['chat_id'])
         user_id = uuid.UUID(event_data['user_id'])
-        last_read_message_id = uuid.UUID(event_data['last_read_message_id'])
+        last_read_snowflake_id = event_data.get('last_read_snowflake_id')
 
         log.debug(f"Projecting MessagesMarkedAsRead: chat={chat_id}, user={user_id}")
 
-        # Update participant's last read position
+        # ScyllaDB - read position (if snowflake_id available)
+        if last_read_snowflake_id:
+            await self.message_scylla_repo.update_read_position(
+                channel_id=chat_id,
+                user_id=user_id,
+                last_read_message_id=last_read_snowflake_id,
+            )
+
+        # PostgreSQL - participant last_read_at
         await self.chat_read_repo.update_participant_last_read(
             chat_id=chat_id,
             user_id=user_id,
-            last_read_message_id=last_read_message_id,
+            last_read_message_id=uuid.UUID(event_data['last_read_message_id']),
             last_read_at=envelope.stored_at,
         )
 
@@ -368,68 +399,101 @@ class ChatProjector:
     # Telegram Integration Projections
     # =========================================================================
 
-    # ASYNC: UI uses optimistic update, eventual consistency OK
+    @async_projection("TelegramChatLinked")
     @monitor_projection
     async def on_telegram_chat_linked(self, envelope: EventEnvelope) -> None:
-        """Project TelegramChatLinked event - ASYNC (UI uses optimistic update)"""
+        """Project TelegramChatLinked - PostgreSQL + ScyllaDB. ASYNC."""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
 
-        log.info(f"Projecting TelegramChatLinked: chat={chat_id}, telegram={event_data['telegram_chat_id']}")
+        log.info(f"Projecting TelegramChatLinked: chat={chat_id}")
 
+        # PostgreSQL - chat metadata
         await self.chat_read_repo.update_chat_telegram(
             chat_id=chat_id,
             telegram_chat_id=event_data['telegram_chat_id'],
             telegram_topic_id=event_data.get('telegram_topic_id'),
         )
 
-    # ASYNC: UI uses optimistic update, eventual consistency OK
+        # ScyllaDB - sync state
+        await self.message_scylla_repo.update_telegram_sync_state(
+            channel_id=chat_id,
+            telegram_chat_id=event_data['telegram_chat_id'],
+            telegram_topic_id=event_data.get('telegram_topic_id'),
+            sync_enabled=True,
+        )
+
+    @async_projection("TelegramChatUnlinked")
     @monitor_projection
     async def on_telegram_chat_unlinked(self, envelope: EventEnvelope) -> None:
-        """Project TelegramChatUnlinked event - ASYNC (UI uses optimistic update)"""
+        """Project TelegramChatUnlinked - PostgreSQL + ScyllaDB. ASYNC."""
         chat_id = envelope.aggregate_id
 
         log.info(f"Projecting TelegramChatUnlinked: chat={chat_id}")
 
+        # PostgreSQL
         await self.chat_read_repo.update_chat_telegram(
             chat_id=chat_id,
             telegram_chat_id=None,
             telegram_topic_id=None,
         )
 
+        # ScyllaDB - disable sync
+        await self.message_scylla_repo.update_telegram_sync_state(
+            channel_id=chat_id,
+            telegram_chat_id=None,
+            telegram_topic_id=None,
+            sync_enabled=False,
+        )
+
+    # SYNC: User expects immediate Telegram message visibility
     @sync_projection("TelegramMessageReceived")
     @monitor_projection
     async def on_telegram_message_received(self, envelope: EventEnvelope) -> None:
         """
-        Project TelegramMessageReceived event (legacy).
+        Project TelegramMessageReceived - ScyllaDB PRIMARY.
 
-        SYNC: Real-time Telegram messages must appear immediately.
-        This handler exists for backward compatibility with old events.
-        New messages use unified MessageSent event with telegram_user_id field.
-        Handles FK violation gracefully when chat doesn't exist yet.
+        SYNC: User expects immediate Telegram message visibility in chat.
         """
         event_data = envelope.event_data
-        message_id = uuid.UUID(event_data['message_id'])
         chat_id = uuid.UUID(event_data['chat_id'])
+        telegram_message_id = event_data['telegram_message_id']
+        telegram_chat_id = event_data.get('telegram_chat_id', 0)
 
-        log.warning(f"Projecting legacy TelegramMessageReceived: message={message_id}")
+        # IDEMPOTENCY: Create deterministic Snowflake ID from Telegram IDs
+        # Combine telegram_chat_id (high bits) + telegram_message_id (low bits)
+        # This ensures both API server and Worker produce the same message_id
+        deterministic_snowflake = ((abs(telegram_chat_id) & 0xFFFFFFFF) << 31) | (telegram_message_id & 0x7FFFFFFF)
 
+        log.info(f"Projecting TelegramMessageReceived to ScyllaDB: chat_id={chat_id}, snowflake={deterministic_snowflake}")
+
+        # -----------------------------------------------------------------
+        # 1. ScyllaDB - PRIMARY message storage (IDEMPOTENT)
+        # -----------------------------------------------------------------
+        message = MessageData(
+            channel_id=chat_id,
+            message_id=deterministic_snowflake,  # Use deterministic ID for idempotency
+            sender_id=None,  # No mapped WellWon user
+            content=event_data['content'],
+            message_type=MessageType(event_data.get('message_type', 'text')),
+            source=MessageSource.TELEGRAM,
+            telegram_message_id=telegram_message_id,
+            telegram_chat_id=telegram_chat_id,
+            telegram_user_id=event_data.get('telegram_user_id'),
+            telegram_user_data=event_data.get('telegram_user_data'),
+            telegram_forward_data=event_data.get('telegram_forward_data'),
+            telegram_topic_id=event_data.get('telegram_topic_id'),
+            sync_direction=SyncDirection.TELEGRAM_TO_WEB,
+            created_at=envelope.stored_at,
+        )
+
+        snowflake_id = await self.message_scylla_repo.insert_message(message)
+        log.debug(f"ScyllaDB Telegram insert SUCCESS: snowflake_id={snowflake_id}")
+
+        # -----------------------------------------------------------------
+        # 2. PostgreSQL - metadata update
+        # -----------------------------------------------------------------
         try:
-            # Insert message with telegram_user_id
-            await self.chat_read_repo.insert_message(
-                message_id=message_id,
-                chat_id=chat_id,
-                sender_id=None,  # No mapped WellWon user
-                content=event_data['content'],
-                message_type=event_data.get('message_type', 'text'),
-                source='telegram',
-                telegram_message_id=event_data['telegram_message_id'],
-                telegram_user_id=event_data.get('telegram_user_id'),
-                sync_direction='telegram_to_web',
-                created_at=envelope.stored_at,
-            )
-
-            # Update chat's last message
             await self.chat_read_repo.update_chat_last_message(
                 chat_id=chat_id,
                 last_message_at=envelope.stored_at,
@@ -437,14 +501,6 @@ class ChatProjector:
                 last_message_sender_id=None,
             )
         except Exception as e:
-            error_str = str(e).lower()
-            # Check for FK violation (chat doesn't exist yet)
-            if 'foreign key' in error_str or 'violates foreign key constraint' in error_str:
-                log.warning(
-                    f"FK violation for TelegramMessageReceived: chat={chat_id} may not exist yet. "
-                    f"Event will be retried."
-                )
-                raise RetriableProjectionError(
-                    f"Chat {chat_id} not yet projected. TelegramMessageReceived will be retried."
-                ) from e
+            if 'foreign key' in str(e).lower():
+                raise RetriableProjectionError(f"Chat {chat_id} not yet projected") from e
             raise

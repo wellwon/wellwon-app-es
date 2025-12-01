@@ -240,8 +240,8 @@ class ScyllaConfig(BaseSettings):
     # =========================================================================
 
     protocol_version: int = Field(
-        default=5,
-        description="CQL protocol version"
+        default=4,
+        description="CQL protocol version (ScyllaDB 6.x supports v4)"
     )
 
     compression_enabled: bool = Field(

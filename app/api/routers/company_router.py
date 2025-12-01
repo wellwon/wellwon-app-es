@@ -831,7 +831,7 @@ async def get_company_balance_history(
 # Logo Endpoints
 # =============================================================================
 
-from app.infra.storage import get_storage_adapter
+from app.infra.storage.minio_provider import get_storage_provider
 
 
 class LogoUploadResponse(BaseModel):
@@ -882,7 +882,7 @@ async def upload_company_logo(
             )
 
         # Upload to storage
-        storage = get_storage_adapter()
+        storage = get_storage_provider()
         result = await storage.upload_file(
             bucket="company-logos",
             file_content=content,
@@ -913,7 +913,7 @@ async def delete_company_logo(
 ):
     """Delete company logo by URL"""
     try:
-        storage = get_storage_adapter()
+        storage = get_storage_provider()
         deleted = await storage.delete_by_url(logo_url)
 
         if deleted:

@@ -94,7 +94,7 @@ async def add_distributed_features_status(app: FastAPI, health_data: Dict[str, A
         # Add sync projection details using new decorator system
         if os.getenv("ENABLE_SYNC_PROJECTIONS", "true").lower() == "true":
             try:
-                from app.infra.event_store.sync_decorators import get_sync_projection_metrics, get_projector_info
+                from app.infra.cqrs.projector_decorators import get_sync_projection_metrics, get_projector_info
 
                 metrics = get_sync_projection_metrics()
                 info = get_projector_info()

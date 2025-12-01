@@ -159,7 +159,8 @@ class EventProcessingWorker(BaseWorker):
             )
             self.logger.info(f"Enabled domains: {[d.name for d in enabled_domains]}")
 
-        # Create event processor with CQRS buses and sync events
+        # Create event processor with CQRS buses
+        # Worker processes ALL events (SYNC projections must be idempotent)
         self.event_processor = EventProcessor(
             domain_registry=self.domain_registry,
             event_bus=self.event_bus,
@@ -168,8 +169,9 @@ class EventProcessingWorker(BaseWorker):
             saga_manager=None,  # NO sagas in worker
             sequence_tracker=self.sequence_tracker,
             metrics=self.metrics,
-            sync_events_registry=self.sync_events_registry,  # Pass sync events
+            sync_events_registry=self.sync_events_registry,
             dlq_service=self.dlq_service
+            # skip_sync_events=False (default) - Worker processes all events for reliability
         )
 
         # Create consumer manager with domain registry

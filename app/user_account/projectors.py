@@ -12,7 +12,7 @@ from typing import Optional
 import uuid
 
 from app.infra.event_store.event_envelope import EventEnvelope
-from app.infra.event_store.sync_decorators import sync_projection, monitor_projection
+from app.infra.cqrs.projector_decorators import sync_projection, async_projection, monitor_projection
 from app.infra.read_repos.user_account_read_repo import UserAccountReadRepo
 
 log = logging.getLogger("wellwon.user_account.projectors")
@@ -65,6 +65,7 @@ class UserAccountProjector:
         """Handle legacy UserCreated event"""
         await self.on_user_created(envelope)
 
+    @async_projection("UserPasswordChanged")
     async def on_user_password_changed(self, envelope: EventEnvelope) -> None:
         """Project UserPasswordChanged event
 
@@ -81,6 +82,7 @@ class UserAccountProjector:
             user_id, event_data['new_hashed_password']
         )
 
+    @async_projection("UserPasswordResetViaSecret")
     async def on_user_password_reset(self, envelope: EventEnvelope) -> None:
         """Project UserPasswordResetViaSecret event
 
@@ -165,6 +167,7 @@ class UserAccountProjector:
         # Clear caches again to ensure no stale data
         await self._clear_user_caches(user_id)
 
+    @async_projection("UserEmailVerified")
     async def on_user_email_verified(self, envelope: EventEnvelope) -> None:
         """Project UserEmailVerified event
 
@@ -178,6 +181,7 @@ class UserAccountProjector:
         # Use static method
         await UserAccountReadRepo.verify_user_email_projection(user_id)
 
+    @async_projection("UserBrokerAccountMappingSet")
     async def on_user_account_mapping_set(self, envelope: EventEnvelope) -> None:
         """Project UserBrokerAccountMappingSet event
 
@@ -196,6 +200,7 @@ class UserAccountProjector:
             uuid.UUID(event_data['account_id'])
         )
 
+    @async_projection("UserAccountMappingSet")
     async def on_user_account_mapping_set_legacy(self, envelope: EventEnvelope) -> None:
         """Handle legacy UserAccountMappingSet event
 
@@ -204,6 +209,7 @@ class UserAccountProjector:
         """
         await self.on_user_account_mapping_set(envelope)
 
+    @async_projection("UserConnectedBrokerAdded")
     async def on_user_connected_broker_added(self, envelope: EventEnvelope) -> None:
         """Project UserConnectedBrokerAdded event
 
@@ -222,6 +228,7 @@ class UserAccountProjector:
             event_data['environment']
         )
 
+    @async_projection("UserConnectedBrokerRemoved")
     async def on_user_connected_broker_removed(self, envelope: EventEnvelope) -> None:
         """Project UserConnectedBrokerRemoved event
 
@@ -240,6 +247,7 @@ class UserAccountProjector:
             event_data['environment']
         )
 
+    @async_projection("UserAuthenticationSucceeded")
     async def on_user_authentication_succeeded(self, envelope: EventEnvelope) -> None:
         """Project UserAuthenticationSucceeded event - updates last login
 
@@ -266,6 +274,7 @@ class UserAccountProjector:
         # Update last login timestamp - use static method
         await UserAccountReadRepo.update_last_login(user_id)
 
+    @async_projection("UserAuthenticationFailed")
     async def on_user_authentication_failed(self, envelope: EventEnvelope) -> None:
         """Project UserAuthenticationFailed event
 
@@ -285,6 +294,7 @@ class UserAccountProjector:
             event_data['reason']
         )
 
+    @async_projection("UserLoggedOut")
     async def on_user_logged_out(self, envelope: EventEnvelope) -> None:
         """
         Project UserLoggedOut event - minimal handler for event acknowledgment.
@@ -366,9 +376,10 @@ class UserAccountProjector:
     # WellWon Platform Projection Handlers
     # -------------------------------------------------------------------------
 
-    # ASYNC: UI shows optimistic update, no saga/command dependency
+    # SYNC: User expects immediate profile update visibility
+    @sync_projection("UserProfileUpdated")
     async def on_user_profile_updated(self, envelope: EventEnvelope) -> None:
-        """Project UserProfileUpdated event for WellWon platform (ASYNC)"""
+        """Project UserProfileUpdated event for WellWon platform (SYNC)"""
         event_data = envelope.event_data
         user_id = envelope.aggregate_id
 
@@ -396,6 +407,7 @@ class UserAccountProjector:
             log.warning(f"Failed to clear profile cache: {e}")
 
     # ASYNC: WSE notifies frontend, no immediate query dependency
+    @async_projection("UserAdminStatusUpdated")
     async def on_user_admin_status_updated(self, envelope: EventEnvelope) -> None:
         """
         Project UserAdminStatusUpdated event for admin panel updates (ASYNC).
@@ -459,8 +471,8 @@ class UserAccountProjector:
 
             # Revoke all refresh tokens to force re-login
             try:
-                from app.security.jwt_auth import JWTAuthManager
-                jwt_manager = JWTAuthManager()
+                from app.security.jwt_auth import JwtTokenManager
+                jwt_manager = JwtTokenManager()
                 await jwt_manager.revoke_all_refresh_tokens(str(user_id))
                 log.info(f"[CES] Revoked all tokens for user {user_id}")
             except Exception as e:
@@ -489,8 +501,8 @@ class UserAccountProjector:
 
             if not new_status:  # User deactivated
                 try:
-                    from app.security.jwt_auth import JWTAuthManager
-                    jwt_manager = JWTAuthManager()
+                    from app.security.jwt_auth import JwtTokenManager
+                    jwt_manager = JwtTokenManager()
                     await jwt_manager.revoke_all_refresh_tokens(str(user_id))
                     log.info(f"[CES] User {user_id} deactivated - all sessions revoked")
                 except Exception as e:
@@ -499,6 +511,7 @@ class UserAccountProjector:
             await self._clear_user_caches(user_id)
 
     # ASYNC: Non-critical UI flag, cache can expire naturally (60s TTL)
+    @async_projection("UserDeveloperStatusChangedExternally")
     async def on_user_developer_status_changed_externally(self, envelope: EventEnvelope) -> None:
         """
         Handle UserDeveloperStatusChangedExternally compensating event (ASYNC).
@@ -520,6 +533,7 @@ class UserAccountProjector:
             log.info(f"[CES] Cache cleared for user {user_id}, is_developer={is_developer}")
 
     # ASYNC: Non-critical profile field, WSE notifies frontend
+    @async_projection("UserTypeChangedExternally")
     async def on_user_type_changed_externally(self, envelope: EventEnvelope) -> None:
         """
         Handle UserTypeChangedExternally compensating event (ASYNC).
@@ -540,6 +554,7 @@ class UserAccountProjector:
             await self._clear_user_caches(user_id)
 
     # ASYNC: Non-critical profile field, eventual consistency OK
+    @async_projection("UserEmailVerifiedExternally")
     async def on_user_email_verified_externally(self, envelope: EventEnvelope) -> None:
         """
         Handle UserEmailVerifiedExternally compensating event (ASYNC).
@@ -560,6 +575,7 @@ class UserAccountProjector:
             await self._clear_user_caches(user_id)
 
     # ASYNC: Fallback handler for non-critical admin field changes
+    @async_projection("UserAdminFieldsChangedExternally")
     async def on_user_admin_fields_changed_externally(self, envelope: EventEnvelope) -> None:
         """
         Handle UserAdminFieldsChangedExternally compensating event (ASYNC).

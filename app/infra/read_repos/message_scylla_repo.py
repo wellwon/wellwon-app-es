@@ -204,7 +204,7 @@ class MessageData(BaseModel):
 
     model_config = ConfigDict(
         from_attributes=True,
-        validate_assignment=True,
+        validate_assignment=False,  # MUST be False to avoid recursion in model_validator
         str_strip_whitespace=True,
     )
 
@@ -705,10 +705,11 @@ class MessageScyllaRepo:
             limit: int = DEFAULT_MESSAGE_LIMIT,
     ) -> List[Dict[str, Any]]:
         """
-        Get messages by author using materialized view.
+        Get messages by author using application-level filtering.
 
-        Uses the `messages_by_author` materialized view for efficient
-        author-based queries.
+        NOTE: ScyllaDB 5.x+ tablets are incompatible with Materialized Views.
+        This method fetches recent messages and filters by sender_id in application.
+        For high-volume channels, consider using PostgreSQL search instead.
 
         Args:
             channel_id: UUID of the channel
@@ -718,10 +719,18 @@ class MessageScyllaRepo:
         Returns:
             List of message dicts from the specified author
         """
-        return await self.client.execute_prepared(
-            "SELECT * FROM messages_by_author WHERE channel_id = ? AND sender_id = ? LIMIT ?",
-            (channel_id, sender_id, min(limit, MAX_MESSAGE_LIMIT)),
-        )
+        # Fetch more messages than needed to find enough from this author
+        # This is less efficient than MV but works with tablets
+        fetch_limit = min(limit * 10, MAX_MESSAGE_LIMIT)
+        all_messages = await self.get_messages(channel_id, limit=fetch_limit)
+
+        # Filter by sender_id in application
+        author_messages = [
+            msg for msg in all_messages
+            if msg.get('sender_id') == sender_id
+        ]
+
+        return author_messages[:limit]
 
     async def get_message_by_telegram_id(
             self,
@@ -968,6 +977,120 @@ class MessageScyllaRepo:
         )
 
     # =========================================================================
+    # Read Positions (Discord pattern - unread tracking)
+    # =========================================================================
+
+    async def get_unread_count(
+            self,
+            channel_id: ChannelID,
+            user_id: UserID,
+    ) -> int:
+        """
+        Get unread message count for a user in a channel.
+
+        Uses the message_read_positions table which stores cached unread counts.
+        The unread_count is approximate and updated asynchronously.
+
+        Args:
+            channel_id: UUID of the channel
+            user_id: UUID of the user
+
+        Returns:
+            Unread message count (0 if no read position exists)
+
+        Example:
+            >>> count = await repo.get_unread_count(channel_id, user_id)
+            >>> print(f"You have {count} unread messages")
+        """
+        result = await self.client.execute_prepared(
+            "SELECT unread_count FROM message_read_positions WHERE channel_id = ? AND user_id = ?",
+            (channel_id, user_id),
+        )
+        return result[0]['unread_count'] if result else 0
+
+    async def update_read_position(
+            self,
+            channel_id: ChannelID,
+            user_id: UserID,
+            last_read_message_id: MessageID,
+    ) -> None:
+        """
+        Update user's read position in a channel.
+
+        Sets the last read message and resets unread count to 0.
+        This is an upsert operation (INSERT with implicit update semantics).
+
+        Args:
+            channel_id: UUID of the channel
+            user_id: UUID of the user
+            last_read_message_id: Snowflake ID of the last read message
+
+        Example:
+            >>> await repo.update_read_position(
+            ...     channel_id=channel_uuid,
+            ...     user_id=user_uuid,
+            ...     last_read_message_id=snowflake_id,
+            ... )
+        """
+        await self.client.execute_prepared(
+            """INSERT INTO message_read_positions
+               (channel_id, user_id, last_read_message_id, last_read_at, unread_count)
+               VALUES (?, ?, ?, ?, 0)""",
+            (channel_id, user_id, last_read_message_id, datetime.now(timezone.utc)),
+            execution_profile='write',
+        )
+
+    async def get_read_position(
+            self,
+            channel_id: ChannelID,
+            user_id: UserID,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get user's read position in a channel.
+
+        Args:
+            channel_id: UUID of the channel
+            user_id: UUID of the user
+
+        Returns:
+            Read position dict with last_read_message_id, last_read_at, unread_count
+            None if no position exists
+        """
+        result = await self.client.execute_prepared(
+            "SELECT * FROM message_read_positions WHERE channel_id = ? AND user_id = ?",
+            (channel_id, user_id),
+        )
+        return result[0] if result else None
+
+    async def increment_unread_count(
+            self,
+            channel_id: ChannelID,
+            user_id: UserID,
+    ) -> None:
+        """
+        Increment unread count for a user in a channel.
+
+        Called when a new message is sent to update unread counts for other participants.
+        Note: This requires the read position to already exist.
+
+        Args:
+            channel_id: UUID of the channel
+            user_id: UUID of the user whose unread count should increment
+        """
+        # First check if position exists
+        current = await self.get_read_position(channel_id, user_id)
+        if current:
+            new_count = (current.get('unread_count') or 0) + 1
+            await self.client.execute_prepared(
+                """INSERT INTO message_read_positions
+                   (channel_id, user_id, last_read_message_id, last_read_at, unread_count)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (channel_id, user_id, current.get('last_read_message_id'),
+                 current.get('last_read_at'), new_count),
+                execution_profile='write',
+            )
+
+    # =========================================================================
     # Telegram Sync State
     # =========================================================================
 
@@ -1090,6 +1213,251 @@ class MessageScyllaRepo:
             messages.extend(result)
 
         return messages[:limit]
+
+    # =========================================================================
+    # Channel Deletion (for saga cleanup)
+    # =========================================================================
+
+    async def delete_messages_for_channel(self, channel_id: ChannelID) -> int:
+        """
+        Delete ALL messages for a channel from ScyllaDB.
+
+        ScyllaDB partition key is (channel_id, bucket), so we need to:
+        1. Find all buckets that have messages for this channel
+        2. Delete from each bucket
+
+        This is called by GroupDeletionSaga when deleting a company/chat.
+
+        Args:
+            channel_id: UUID of the channel to delete messages from
+
+        Returns:
+            Number of buckets deleted from (approximate message count not available)
+        """
+        # Get distinct buckets for this channel by scanning recent buckets
+        # Start from current bucket and go back BUCKET_SCAN_DEPTH * 10 (100 buckets = ~3 years)
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        current_bucket = int(now.timestamp() * 1000) // (1000 * 60 * 60 * 24 * 10)
+
+        # Scan back 100 buckets (~3 years of data)
+        buckets_deleted = 0
+        for bucket in range(current_bucket, max(0, current_bucket - 100), -1):
+            try:
+                # Check if bucket has any messages
+                result = await self.client.execute_prepared(
+                    "SELECT message_id FROM messages WHERE channel_id = ? AND bucket = ? LIMIT 1",
+                    (channel_id, bucket),
+                )
+                if result:
+                    # Delete all messages in this bucket
+                    await self.client.execute(
+                        "DELETE FROM messages WHERE channel_id = ? AND bucket = ?",
+                        (channel_id, bucket),
+                        execution_profile='write',
+                    )
+                    buckets_deleted += 1
+                    log.debug(f"Deleted messages from channel {channel_id} bucket {bucket}")
+            except Exception as e:
+                log.warning(f"Error deleting messages from bucket {bucket}: {e}")
+
+        log.info(f"Deleted messages from {buckets_deleted} buckets for channel {channel_id}")
+        return buckets_deleted
+
+    async def delete_reactions_for_channel(self, channel_id: ChannelID) -> int:
+        """
+        Delete ALL reactions for a channel.
+
+        Reactions are partitioned by (channel_id, message_id), so we need to
+        find all message_ids first, then delete reactions for each.
+
+        Args:
+            channel_id: UUID of the channel
+
+        Returns:
+            Number of reaction records deleted (approximate)
+        """
+        deleted = 0
+        try:
+            # Get all reactions for this channel (scan is acceptable for deletion)
+            reactions = await self.client.execute(
+                "SELECT DISTINCT message_id FROM message_reactions WHERE channel_id = ? ALLOW FILTERING",
+                (channel_id,),
+            )
+            for row in reactions:
+                message_id = row['message_id']
+                # Delete reactions
+                await self.client.execute(
+                    "DELETE FROM message_reactions WHERE channel_id = ? AND message_id = ?",
+                    (channel_id, message_id),
+                    execution_profile='write',
+                )
+                # Delete reaction counts
+                await self.client.execute(
+                    "DELETE FROM message_reaction_counts WHERE channel_id = ? AND message_id = ?",
+                    (channel_id, message_id),
+                    execution_profile='write',
+                )
+                deleted += 1
+        except Exception as e:
+            log.warning(f"Error deleting reactions for channel {channel_id}: {e}")
+
+        log.info(f"Deleted reactions for {deleted} messages in channel {channel_id}")
+        return deleted
+
+    async def delete_pinned_for_channel(self, channel_id: ChannelID) -> int:
+        """
+        Delete ALL pinned messages for a channel.
+
+        Args:
+            channel_id: UUID of the channel
+
+        Returns:
+            Number of pinned messages deleted
+        """
+        try:
+            # Count first
+            pinned = await self.client.execute_prepared(
+                "SELECT message_id FROM pinned_messages WHERE channel_id = ?",
+                (channel_id,),
+            )
+            count = len(pinned)
+
+            # Delete all pinned for this channel
+            await self.client.execute(
+                "DELETE FROM pinned_messages WHERE channel_id = ?",
+                (channel_id,),
+                execution_profile='write',
+            )
+            log.info(f"Deleted {count} pinned messages for channel {channel_id}")
+            return count
+        except Exception as e:
+            log.warning(f"Error deleting pinned messages for channel {channel_id}: {e}")
+            return 0
+
+    async def delete_read_positions_for_channel(self, channel_id: ChannelID) -> int:
+        """
+        Delete ALL read positions for a channel.
+
+        Args:
+            channel_id: UUID of the channel
+
+        Returns:
+            Number of read positions deleted
+        """
+        try:
+            # Get all user read positions for this channel
+            positions = await self.client.execute(
+                "SELECT user_id FROM message_read_positions WHERE channel_id = ? ALLOW FILTERING",
+                (channel_id,),
+            )
+            count = 0
+            for row in positions:
+                await self.client.execute(
+                    "DELETE FROM message_read_positions WHERE channel_id = ? AND user_id = ?",
+                    (channel_id, row['user_id']),
+                    execution_profile='write',
+                )
+                count += 1
+
+            log.info(f"Deleted {count} read positions for channel {channel_id}")
+            return count
+        except Exception as e:
+            log.warning(f"Error deleting read positions for channel {channel_id}: {e}")
+            return 0
+
+    async def delete_telegram_sync_state_for_channel(self, channel_id: ChannelID) -> bool:
+        """
+        Delete Telegram sync state for a channel.
+
+        Args:
+            channel_id: UUID of the channel
+
+        Returns:
+            True if deleted, False otherwise
+        """
+        try:
+            await self.client.execute(
+                "DELETE FROM telegram_sync_state WHERE channel_id = ?",
+                (channel_id,),
+                execution_profile='write',
+            )
+            log.info(f"Deleted telegram_sync_state for channel {channel_id}")
+            return True
+        except Exception as e:
+            log.warning(f"Error deleting telegram_sync_state for channel {channel_id}: {e}")
+            return False
+
+    async def delete_telegram_mappings_for_channel(self, channel_id: ChannelID) -> int:
+        """
+        Delete ALL telegram_message_mapping entries for a channel.
+
+        This requires scanning since the mapping table is partitioned by
+        (telegram_message_id, telegram_chat_id), not by channel_id.
+
+        Args:
+            channel_id: UUID of the channel
+
+        Returns:
+            Number of mappings deleted
+        """
+        try:
+            # Scan mappings for this channel (acceptable for deletion)
+            mappings = await self.client.execute(
+                "SELECT telegram_message_id, telegram_chat_id FROM telegram_message_mapping WHERE channel_id = ? ALLOW FILTERING",
+                (channel_id,),
+            )
+            count = 0
+            for row in mappings:
+                await self.client.execute(
+                    "DELETE FROM telegram_message_mapping WHERE telegram_message_id = ? AND telegram_chat_id = ?",
+                    (row['telegram_message_id'], row['telegram_chat_id']),
+                    execution_profile='write',
+                )
+                count += 1
+
+            log.info(f"Deleted {count} telegram_message_mappings for channel {channel_id}")
+            return count
+        except Exception as e:
+            log.warning(f"Error deleting telegram_message_mappings for channel {channel_id}: {e}")
+            return 0
+
+    async def delete_all_channel_data(self, channel_id: ChannelID) -> Dict[str, int]:
+        """
+        Delete ALL ScyllaDB data for a channel.
+
+        This is the main method called by chat deletion to clean up all
+        ScyllaDB data associated with a channel.
+
+        Deletes from:
+        - messages (all buckets)
+        - message_reactions
+        - message_reaction_counts
+        - pinned_messages
+        - message_read_positions
+        - telegram_sync_state
+        - telegram_message_mapping
+
+        Args:
+            channel_id: UUID of the channel to delete
+
+        Returns:
+            Dict with counts of deleted items per table
+        """
+        log.info(f"Deleting all ScyllaDB data for channel {channel_id}")
+
+        results = {
+            'messages_buckets': await self.delete_messages_for_channel(channel_id),
+            'reactions': await self.delete_reactions_for_channel(channel_id),
+            'pinned': await self.delete_pinned_for_channel(channel_id),
+            'read_positions': await self.delete_read_positions_for_channel(channel_id),
+            'telegram_sync': 1 if await self.delete_telegram_sync_state_for_channel(channel_id) else 0,
+            'telegram_mappings': await self.delete_telegram_mappings_for_channel(channel_id),
+        }
+
+        log.info(f"ScyllaDB cleanup complete for channel {channel_id}: {results}")
+        return results
 
     @staticmethod
     def create_dm_channel_id(user1_id: UserID, user2_id: UserID) -> ChannelID:

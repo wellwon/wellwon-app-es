@@ -12,7 +12,7 @@ import json
 import logging
 from typing import Optional, TYPE_CHECKING
 
-from app.infra.cqrs.decorators import cached_query_handler
+from app.infra.cqrs.cqrs_decorators import cached_query_handler
 from app.common.base.base_query_handler import BaseQueryHandler
 from app.chat.queries import (
     GetAllTemplatesQuery,

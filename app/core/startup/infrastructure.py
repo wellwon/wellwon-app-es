@@ -73,28 +73,23 @@ async def initialize_databases(app: FastAPI) -> None:
     await init_db_pool()
     logger.info("PostgreSQL pool initialized.")
 
-    # ScyllaDB (for high-volume message storage)
+    # ScyllaDB (PRIMARY for messaging - REQUIRED when enabled)
     if SCYLLA_AVAILABLE and os.getenv("SCYLLA_ENABLED", "false").lower() == "true":
-        try:
-            scylla_config = ScyllaConfig(
-                contact_points=os.getenv("SCYLLA_CONTACT_POINTS", "localhost"),
-                port=int(os.getenv("SCYLLA_PORT", "9042")),
-                keyspace=os.getenv("SCYLLA_KEYSPACE", "wellwon_scylla"),
-                username=os.getenv("SCYLLA_USERNAME"),
-                password=os.getenv("SCYLLA_PASSWORD"),
-            )
-            scylla_client = await init_global_scylla_client(scylla_config)
-            app.state.scylla_client = scylla_client
-            logger.info(f"ScyllaDB client initialized (keyspace: {scylla_config.keyspace})")
-        except Exception as scylla_error:
-            logger.error(f"Failed to initialize ScyllaDB: {scylla_error}")
-            logger.warning("Continuing without ScyllaDB - message storage will use PostgreSQL only")
-            app.state.scylla_client = None
+        scylla_config = ScyllaConfig(
+            contact_points=os.getenv("SCYLLA_CONTACT_POINTS", "localhost"),
+            port=int(os.getenv("SCYLLA_PORT", "9042")),
+            keyspace=os.getenv("SCYLLA_KEYSPACE", "wellwon_scylla"),
+            username=os.getenv("SCYLLA_USERNAME"),
+            password=os.getenv("SCYLLA_PASSWORD"),
+        )
+        scylla_client = await init_global_scylla_client(scylla_config)
+        app.state.scylla_client = scylla_client
+        logger.info(f"ScyllaDB client initialized (keyspace: {scylla_config.keyspace})")
+    elif os.getenv("SCYLLA_ENABLED", "false").lower() == "true":
+        # SCYLLA_ENABLED=true but driver not available - FAIL
+        raise RuntimeError("ScyllaDB is ENABLED but cassandra-driver not installed!")
     else:
-        if not SCYLLA_AVAILABLE:
-            logger.info("ScyllaDB client not available (cassandra-driver not installed)")
-        else:
-            logger.info("ScyllaDB disabled (SCYLLA_ENABLED != true)")
+        logger.info("ScyllaDB disabled (SCYLLA_ENABLED != true)")
         app.state.scylla_client = None
 
 
@@ -187,7 +182,7 @@ async def initialize_event_infrastructure(app: FastAPI) -> None:
 async def run_database_schemas() -> None:
     """Run database schemas for main database"""
     # Main database schema
-    schema_file_path = "database/wellwon.sql"
+    schema_file_path = "database/pg/wellwon.sql"
     try:
         await run_schema(schema_file_path)
         logger.info(f"Main database schema checked/applied.")

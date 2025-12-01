@@ -167,7 +167,8 @@ class ParticipantInfo(BaseModel):
 
 class MessageDetail(BaseModel):
     """Message details for API response"""
-    id: uuid.UUID
+    id: Optional[uuid.UUID] = None  # PostgreSQL UUID (legacy, not used with ScyllaDB)
+    message_id: Optional[int] = None  # Snowflake ID (PRIMARY with ScyllaDB)
     chat_id: uuid.UUID
     sender_id: Optional[uuid.UUID] = None  # None for external Telegram users
     content: str

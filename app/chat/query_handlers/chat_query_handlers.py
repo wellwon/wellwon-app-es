@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, List, Optional
 
-from app.infra.cqrs.decorators import query_handler, cached_query_handler
+from app.infra.cqrs.cqrs_decorators import query_handler, cached_query_handler
 from app.common.base.base_query_handler import BaseQueryHandler
 from app.chat.queries import (
     GetChatByIdQuery,

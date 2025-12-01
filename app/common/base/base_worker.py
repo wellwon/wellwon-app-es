@@ -60,6 +60,24 @@ from app.infra.persistence.redis_client import (
 )
 from app.infra.persistence.cache_manager import initialize_cache_manager, get_cache_manager
 
+# ScyllaDB imports with error handling
+try:
+    from app.infra.persistence.scylladb import (
+        init_global_scylla_client,
+        get_scylla_client,
+        close_global_scylla_client,
+    )
+    from app.config.scylla_config import ScyllaConfig
+    SCYLLA_AVAILABLE = True
+except ImportError as scylla_import_error:
+    SCYLLA_AVAILABLE = False
+    async def init_global_scylla_client(config=None):
+        return None
+    def get_scylla_client():
+        return None
+    async def close_global_scylla_client():
+        pass
+
 # Event Bus
 from app.infra.event_bus.event_bus import EventBus
 
@@ -208,6 +226,7 @@ class BaseWorker(ABC):
         self.event_bus: Optional[EventBus] = None
         self.redpanda_adapter = None
         self.cache_manager = None
+        self.scylla_client = None  # ScyllaDB client for message projections
         self.dlq_service: Optional[DLQService] = None
 
         # CQRS buses
@@ -308,6 +327,25 @@ class BaseWorker(ABC):
             add_startup_info("Redis", "[green]✓[/green] Initializing", "database")
             await init_redis()
             add_startup_info("Redis", "[green]✓[/green] Ready", "database")
+
+            # ScyllaDB (for message projections)
+            if SCYLLA_AVAILABLE and os.getenv("SCYLLA_ENABLED", "false").lower() == "true":
+                add_startup_info("ScyllaDB", "[green]✓[/green] Initializing", "database")
+                scylla_config = ScyllaConfig(
+                    contact_points=os.getenv("SCYLLA_CONTACT_POINTS", "localhost"),
+                    port=int(os.getenv("SCYLLA_PORT", "9042")),
+                    keyspace=os.getenv("SCYLLA_KEYSPACE", "wellwon_scylla"),
+                    username=os.getenv("SCYLLA_USERNAME"),
+                    password=os.getenv("SCYLLA_PASSWORD"),
+                )
+                self.scylla_client = await init_global_scylla_client(scylla_config)
+                add_startup_info("ScyllaDB", "[green]✓[/green] Ready", "database")
+            else:
+                self.scylla_client = None
+                if os.getenv("SCYLLA_ENABLED", "false").lower() == "true":
+                    self.logger.warning("ScyllaDB ENABLED but driver not available")
+                else:
+                    self.logger.info("ScyllaDB disabled (SCYLLA_ENABLED != true)")
 
             # Initialize cache manager
             add_startup_info("Cache Manager", "[green]✓[/green] Initializing", "features")
@@ -615,6 +653,14 @@ class BaseWorker(ABC):
         if self.cache_manager and hasattr(self.cache_manager, 'stop'):
             await self.cache_manager.stop()
 
+        # Close ScyllaDB connection
+        if self.scylla_client:
+            try:
+                await close_global_scylla_client()
+                self.logger.info("ScyllaDB connection closed")
+            except Exception as e:
+                self.logger.error(f"Error closing ScyllaDB: {e}")
+
         self.logger.info(f"Worker {self.config.worker_id} stopped")
 
     async def _log_final_metrics(self):
@@ -663,6 +709,7 @@ class BaseWorker(ABC):
                 "command_bus": self.command_bus is not None,
                 "query_bus": self.query_bus is not None,
                 "event_bus": self.event_bus is not None,
+                "scylla_client": self.scylla_client is not None,
                 "distributed_lock": self.lock_manager is not None,
                 "sequence_tracking": self.sequence_tracker is not None,
                 "persistent_state": self.persistent_state is not None,

@@ -10,7 +10,7 @@ from typing import Dict, Any, List, Optional, Callable, Type, Set
 from dataclasses import dataclass, field
 
 from app.common.base.base_model import BaseEvent
-from app.infra.event_store.sync_decorators import get_all_sync_events
+from app.infra.cqrs.projector_decorators import get_all_sync_events
 
 log = logging.getLogger("wellwon.worker.domain_registry")
 
@@ -94,7 +94,7 @@ def create_user_account_domain() -> DomainRegistration:
         return UserAccountProjector(read_repo)
 
     # NOTE: sync_events removed - now auto-discovered from @sync_projection decorators
-    # Single source of truth: sync_decorators.get_all_sync_events()
+    # Single source of truth: projector_decorators.get_all_sync_events()
 
     return DomainRegistration(
         name="user_account",
@@ -226,12 +226,23 @@ def create_chat_domain() -> DomainRegistration:
     )
 
     def chat_projector_factory():
+        """
+        Create ChatProjector with Discord-style architecture.
+
+        ScyllaDB = PRIMARY for messages (REQUIRED)
+        PostgreSQL = METADATA only
+        """
         from app.chat.projectors import ChatProjector
         from app.infra.read_repos.chat_read_repo import ChatReadRepo
+        from app.infra.read_repos.message_scylla_repo import MessageScyllaRepo
 
-        # ChatReadRepo uses static methods - no instance initialization needed
+        # PostgreSQL for metadata
         read_repo = ChatReadRepo()
-        return ChatProjector(read_repo)
+
+        # ScyllaDB for messages (REQUIRED - Discord pattern)
+        message_scylla_repo = MessageScyllaRepo()
+
+        return ChatProjector(read_repo, message_scylla_repo)
 
     return DomainRegistration(
         name="chat",
@@ -280,7 +291,7 @@ class DomainRegistry:
         self._topic_to_domains: Dict[str, List[DomainRegistration]] = {}
         self._initialized = False
         self.projectors: Dict[str, Any] = {}
-        # NOTE: sync_events tracking removed - now uses sync_decorators.get_all_sync_events()
+        # NOTE: sync_events tracking removed - now uses projector_decorators.get_all_sync_events()
 
     def register(self, domain: DomainRegistration) -> None:
         """Register a domain configuration"""

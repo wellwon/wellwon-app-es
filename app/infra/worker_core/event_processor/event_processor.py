@@ -824,17 +824,20 @@ class EventProcessor:
                             continue
 
                     if has_sync_decorators:
-                        # Use sync projection decorators
+                        # Use projection decorators (SYNC and ASYNC)
                         from app.infra.event_store.event_envelope import EventEnvelope
-                        from app.infra.event_store.sync_decorators import execute_sync_projections
+                        from app.infra.cqrs.projector_decorators import (
+                            execute_sync_projections,
+                            execute_async_projections,
+                            has_sync_handler,
+                            has_async_handler
+                        )
 
                         # Create EventEnvelope from event_dict
                         envelope = EventEnvelope.from_partial_data(event_dict)
 
-                        # Execute sync projections
+                        # Collect ALL projector instances for cross-domain events
                         projector_instances = {}
-
-                        # For cross-domain events, we need ALL projector instances
                         for d in self.domain_registry.get_enabled_domains():
                             if d.has_projector() and event_type in d.event_models:
                                 projector_instances[d.name] = d.projector_instance
@@ -848,25 +851,26 @@ class EventProcessor:
                                 f"Enabled domains: {[d.name for d in self.domain_registry.get_enabled_domains()]}"
                             )
 
-                        # CRITICAL FIX: Do NOT wrap SYNC projections in transaction()
-                        # The transaction() context uses Database.MAIN and forces all
-                        # database operations (including vb_db.execute()) to use the MAIN
-                        # database connection via ContextVar. This breaks Virtual Broker
-                        # projections that need to write to the VB database.
-                        # Each projector manages its own transactions if needed.
+                        # Try SYNC projections first (immediate consistency)
                         result = await execute_sync_projections(envelope, projector_instances)
 
-                        # Check if any handlers were executed
+                        # Check if any SYNC handlers were executed
                         if result.get('handlers_executed', 0) == 0:
-                            # No sync handlers for this event, check for handle_event
-                            if hasattr(domain.projector_instance, 'handle_event'):
-                                # Use transaction for handle_event (backwards compatibility)
-                                async with transaction():
-                                    await domain.projector_instance.handle_event(event_dict)
+                            # No sync handlers - try ASYNC projections (eventual consistency)
+                            async_result = await execute_async_projections(envelope, projector_instances)
+
+                            if async_result.get('handlers_executed', 0) == 0:
+                                # No async handlers either - try legacy handle_event
+                                if hasattr(domain.projector_instance, 'handle_event'):
+                                    async with transaction():
+                                        await domain.projector_instance.handle_event(event_dict)
+                                else:
+                                    log.debug(f"No projection handlers for {event_type} in domain {domain.name}")
                             else:
-                                log.debug(f"No handlers found for event {event_type} in domain {domain.name}")
-                        # FIXED: If sync projections executed, continue to mark as processed
-                        # even if handlers_executed == 0 (event was found in event_models)
+                                log.debug(
+                                    f"ASYNC projection executed for {event_type}: "
+                                    f"{async_result.get('handlers_executed', 0)} handlers"
+                                )
                     else:
                         # Fall back to handle_event if available
                         if hasattr(domain.projector_instance, 'handle_event'):

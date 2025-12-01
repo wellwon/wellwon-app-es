@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Optional, List
 from decimal import Decimal
 
 from app.config.logging_config import get_logger
-from app.infra.cqrs.decorators import query_handler, readonly_query, cached_query_handler
+from app.infra.cqrs.cqrs_decorators import query_handler, readonly_query, cached_query_handler
 from app.common.base.base_query_handler import BaseQueryHandler
 from app.company.queries import (
     # Company queries
