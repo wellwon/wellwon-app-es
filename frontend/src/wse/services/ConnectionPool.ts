@@ -3,7 +3,7 @@
 // Description: Enhanced connection pool with health scoring and load balancing (FIXED V2)
 // =============================================================================
 
-import { logger } from '@/wse';
+import { logger, MessageCategory, WS_PROTOCOL_VERSION } from '@/wse';
 
 interface EndpointHealth {
   url: string;
@@ -519,10 +519,15 @@ export class ConnectionPool {
     );
 
     if (existingConnection) {
-      // Use existing connection for ping
+      // Use existing connection for ping with WSE prefix (Protocol v2)
       try {
         const start = Date.now();
-        existingConnection.send(`PING:${start}`);
+        const pingMessage = {
+          t: 'PING',
+          p: { timestamp: start },
+          v: WS_PROTOCOL_VERSION,
+        };
+        existingConnection.send(`${MessageCategory.SYSTEM}${JSON.stringify(pingMessage)}`);
 
         // Record success - actual latency will be recorded when PONG is received
         this.recordSuccess(endpoint);

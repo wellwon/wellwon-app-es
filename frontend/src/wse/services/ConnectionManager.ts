@@ -8,6 +8,8 @@ import {
   WSMessage,
   ReconnectionStrategy,
   MessagePriority,
+  MessageCategory,
+  WSE_SYSTEM_EVENT_TYPES,
 } from '@/wse';
 import { useWSEStore } from '@/wse';
 import { logger } from '@/wse';
@@ -756,14 +758,28 @@ export class ConnectionManager {
     }
 
     try {
-      const data = JSON.stringify(message);
+      // Determine message category prefix (Protocol v2)
+      // S = Snapshot, U = Update, WSE = System
+      let msgCat: string;
+      const msgType = message.t || '';
+      if (msgType.toLowerCase().includes('snapshot')) {
+        msgCat = MessageCategory.SNAPSHOT; // "S"
+      } else if (WSE_SYSTEM_EVENT_TYPES.has(msgType)) {
+        msgCat = MessageCategory.SYSTEM; // "WSE"
+      } else {
+        msgCat = MessageCategory.UPDATE; // "U"
+      }
+
+      // Serialize with prefix: {category}{json}
+      const jsonData = JSON.stringify(message);
+      const data = `${msgCat}${jsonData}`;
       this.ws.send(data);
 
       const store = useWSEStore.getState();
       store.incrementMetric('messagesSent');
       store.incrementMetric('bytesSent', new Blob([data]).size);
 
-      logger.debug(`[ConnectionManager] ✓ Sent ${isCriticalMessage ? 'critical' : ''} message: ${message.t}`);
+      logger.debug(`[ConnectionManager] ✓ Sent [${msgCat}] ${isCriticalMessage ? 'critical' : ''} message: ${message.t}`);
       return true;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1010,10 +1026,16 @@ export class ConnectionManager {
         return;
       }
 
-      // Send PING as text format for backend
+      // Send PING with WSE prefix (Protocol v2 format)
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         try {
-          this.ws.send(`PING:${Date.now()}`);
+          const pingMessage = {
+            t: 'PING',
+            p: { timestamp: Date.now() },
+            v: WS_PROTOCOL_VERSION,
+          };
+          const data = `${MessageCategory.SYSTEM}${JSON.stringify(pingMessage)}`;
+          this.ws.send(data);
           const store = useWSEStore.getState();
           store.incrementMetric('messagesSent');
         } catch (error) {

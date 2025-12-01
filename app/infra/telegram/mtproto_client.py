@@ -7,12 +7,118 @@ from __future__ import annotations
 
 import logging
 import asyncio
-from typing import Optional, List, Dict, Any
-from dataclasses import dataclass
+import random
+import time
+from functools import wraps
+from typing import Optional, List, Dict, Any, Callable, TypeVar, Tuple
+from dataclasses import dataclass, field
 
-from app.infra.telegram.config import TelegramConfig
+from app.config.telegram_config import TelegramConfig
 
 log = logging.getLogger("wellwon.telegram.mtproto_client")
+
+# Type variable for generic return type
+T = TypeVar('T')
+
+
+def _calculate_backoff_delay(
+    attempt: int,
+    initial_delay: float,
+    max_delay: float,
+    multiplier: float,
+    jitter: bool
+) -> float:
+    """Calculate exponential backoff delay with optional jitter."""
+    delay = min(initial_delay * (multiplier ** attempt), max_delay)
+    if jitter:
+        # Full jitter: random between 0 and delay
+        delay = random.uniform(0, delay)
+    return delay
+
+
+async def _retry_with_backoff(
+    func: Callable,
+    *args,
+    max_retries: int = 3,
+    initial_delay: float = 1.0,
+    max_delay: float = 60.0,
+    multiplier: float = 2.0,
+    jitter: bool = True,
+    operation_name: str = "operation",
+    **kwargs
+) -> Any:
+    """
+    Retry an async function with exponential backoff.
+
+    Handles FloodWaitError by waiting the required time plus backoff.
+    Other exceptions trigger standard backoff retries.
+
+    Args:
+        func: Async function to retry
+        *args: Positional arguments for func
+        max_retries: Maximum retry attempts
+        initial_delay: Initial backoff delay in seconds
+        max_delay: Maximum backoff delay in seconds
+        multiplier: Exponential multiplier
+        jitter: Add random jitter to delays
+        operation_name: Name for logging
+        **kwargs: Keyword arguments for func
+
+    Returns:
+        Result of func if successful
+
+    Raises:
+        Last exception if all retries fail
+    """
+    # Import FloodWaitError lazily to avoid import issues
+    try:
+        from telethon.errors import FloodWaitError as TelethonFloodWaitError
+    except ImportError:
+        TelethonFloodWaitError = None
+
+    last_exception = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            # Check if it's a FloodWaitError
+            is_flood_error = TelethonFloodWaitError and isinstance(e, TelethonFloodWaitError)
+
+            if is_flood_error:
+                # FloodWaitError - must wait the specified time
+                wait_time = e.seconds + 1  # Add 1 second buffer
+                if attempt < max_retries:
+                    log.warning(
+                        f"[{operation_name}] FloodWaitError: waiting {wait_time}s "
+                        f"(attempt {attempt + 1}/{max_retries + 1})"
+                    )
+                    await asyncio.sleep(wait_time)
+                    last_exception = e
+                    continue
+                else:
+                    raise
+
+            # Other exceptions - use exponential backoff
+            last_exception = e
+            if attempt < max_retries:
+                delay = _calculate_backoff_delay(
+                    attempt=attempt,
+                    initial_delay=initial_delay,
+                    max_delay=max_delay,
+                    multiplier=multiplier,
+                    jitter=jitter
+                )
+                log.warning(
+                    f"[{operation_name}] Retry {attempt + 1}/{max_retries + 1} after {delay:.1f}s: {e}"
+                )
+                await asyncio.sleep(delay)
+            else:
+                raise
+
+    # Should not reach here, but just in case
+    if last_exception:
+        raise last_exception
 
 # Lazy import telethon to avoid import errors when not installed
 try:
@@ -195,6 +301,14 @@ class TelegramMTProtoClient:
         self._monitored_chats: Dict[int, int] = {}  # telegram_chat_id -> last_message_id
         self._polling_interval: float = 5.0  # Poll every 5 seconds for faster message detection
 
+        # Entity cache for reducing API calls (Telethon best practice)
+        self._entity_cache: Dict[int, Tuple[Any, float]] = {}  # id -> (entity, timestamp)
+        self._entity_cache_populated = False
+
+        # Reconnection state
+        self._reconnect_attempts = 0
+        self._last_disconnect_time: Optional[float] = None
+
     async def connect(self) -> bool:
         """Connect to Telegram MTProto servers"""
         if not TELETHON_AVAILABLE:
@@ -222,9 +336,15 @@ class TelegramMTProtoClient:
                     self.config.api_hash
                 )
 
+            # Set flood_sleep_threshold (Telethon best practice)
+            # Auto-sleep for FloodWaitError if wait is below threshold
+            flood_threshold = getattr(self.config, 'flood_sleep_threshold', 60)
+            self._client.flood_sleep_threshold = flood_threshold
+            log.info(f"MTProto flood_sleep_threshold set to {flood_threshold}s")
+
             await self._client.connect()
 
-            # Check if authorized
+            # Validate session - check if session is authorized
             if not await self._client.is_user_authorized():
                 if self.config.admin_phone:
                     log.info(f"Starting MTProto authorization for {self.config.admin_phone}")
@@ -233,9 +353,17 @@ class TelegramMTProtoClient:
                     log.error("MTProto not authorized and no phone number provided")
                     return False
 
+            # Session validation - verify we can get user info
             me = await self._client.get_me()
+            if not me:
+                log.error("MTProto session invalid - cannot get user info")
+                return False
+
             log.info(f"MTProto connected as: {me.first_name} (ID: {me.id})")
             print(f"[MTPROTO] Connected as: {me.first_name} (ID: {me.id})")
+
+            # Reset reconnection counter on successful connect
+            self._reconnect_attempts = 0
 
             # Register incoming message handler
             @self._client.on(events.NewMessage(incoming=True))
@@ -251,11 +379,20 @@ class TelegramMTProtoClient:
             log.info("MTProto update loop started in background")
             print("[MTPROTO] Update loop started - ready to receive messages")
 
+            # Pre-populate entity cache if configured (Telethon best practice)
+            # This avoids ResolveUsernameRequest calls for entities in our dialogs
+            cache_on_connect = getattr(self.config, 'cache_dialogs_on_connect', True)
+            if cache_on_connect and not self._entity_cache_populated:
+                asyncio.create_task(self._populate_entity_cache())
+
             self._connected = True
             return True
 
         except Exception as e:
             log.error(f"Failed to connect MTProto: {e}", exc_info=True)
+            # Attempt reconnection if configured
+            if getattr(self.config, 'auto_reconnect', True):
+                asyncio.create_task(self._attempt_reconnect())
             return False
 
     async def _run_update_loop(self) -> None:
@@ -299,9 +436,55 @@ class TelegramMTProtoClient:
     async def disconnect(self) -> None:
         """Disconnect from Telegram"""
         if self._client and self._connected:
+            self._last_disconnect_time = time.time()
             await self._client.disconnect()
             self._connected = False
             log.info("MTProto disconnected")
+
+    async def _attempt_reconnect(self) -> bool:
+        """
+        Attempt to reconnect to Telegram with exponential backoff.
+
+        This is called automatically when connection is lost and
+        auto_reconnect is enabled in config.
+
+        Returns:
+            True if reconnection succeeded, False if max attempts reached
+        """
+        max_attempts = getattr(self.config, 'max_reconnect_attempts', 5)
+
+        while self._reconnect_attempts < max_attempts:
+            self._reconnect_attempts += 1
+
+            # Calculate backoff delay
+            delay = _calculate_backoff_delay(
+                attempt=self._reconnect_attempts - 1,
+                initial_delay=getattr(self.config, 'reconnect_delay', 5.0),
+                max_delay=getattr(self.config, 'backoff_max_delay', 300.0),
+                multiplier=getattr(self.config, 'backoff_multiplier', 2.0),
+                jitter=getattr(self.config, 'backoff_jitter', True)
+            )
+
+            log.warning(
+                f"MTProto connection lost. Attempting reconnect {self._reconnect_attempts}/{max_attempts} "
+                f"in {delay:.1f}s"
+            )
+            await asyncio.sleep(delay)
+
+            try:
+                # Reset client state
+                self._client = None
+                self._connected = False
+
+                # Attempt reconnection
+                if await self.connect():
+                    log.info(f"MTProto reconnected successfully after {self._reconnect_attempts} attempts")
+                    return True
+            except Exception as e:
+                log.error(f"Reconnection attempt {self._reconnect_attempts} failed: {e}")
+
+        log.error(f"MTProto failed to reconnect after {max_attempts} attempts")
+        return False
 
     async def _ensure_connected(self) -> bool:
         """Ensure client is connected"""
@@ -345,9 +528,12 @@ class TelegramMTProtoClient:
         """
         Populate the entity cache by iterating through dialogs.
 
-        This is necessary because Telethon's get_entity() only works
-        for entities that are in the session cache. By iterating dialogs
-        once, we ensure all chats the account is part of are cached.
+        This is a Telethon best practice to avoid ResolveUsernameRequest calls
+        that can trigger rate limits. By caching all entities from dialogs,
+        subsequent get_entity() calls will use the cached version.
+
+        The cache is stored both in Telethon's internal session and in our
+        own _entity_cache dict for TTL management.
         """
         if not self._connected or not self._client:
             return
@@ -355,12 +541,83 @@ class TelegramMTProtoClient:
         try:
             log.info("Populating entity cache from dialogs...")
             count = 0
+            current_time = time.time()
+
             async for dialog in self._client.iter_dialogs():
-                count += 1
+                entity = dialog.entity
+                if entity and hasattr(entity, 'id'):
+                    # Cache in our local cache with timestamp
+                    self._entity_cache[entity.id] = (entity, current_time)
+                    count += 1
+
+            self._entity_cache_populated = True
             log.info(f"Entity cache populated with {count} dialogs")
             print(f"[MTPROTO] Entity cache populated with {count} dialogs")
+
+        except FloodWaitError as e:
+            # Handle rate limit during cache population
+            log.warning(f"FloodWaitError during entity cache population: {e.seconds}s wait required")
+            # Don't mark as populated - will retry on next connect
         except Exception as e:
             log.warning(f"Failed to populate entity cache: {e}")
+
+    async def _get_cached_entity(self, entity_id: int) -> Optional[Any]:
+        """
+        Get entity from cache if available and not expired.
+
+        Args:
+            entity_id: Telegram entity ID
+
+        Returns:
+            Cached entity or None if not found/expired
+        """
+        if entity_id not in self._entity_cache:
+            return None
+
+        entity, cached_time = self._entity_cache[entity_id]
+        cache_ttl = getattr(self.config, 'entity_cache_ttl', 3600)
+
+        if time.time() - cached_time > cache_ttl:
+            # Cache expired
+            del self._entity_cache[entity_id]
+            return None
+
+        return entity
+
+    async def _get_entity_with_cache(self, entity_id: int) -> Optional[Any]:
+        """
+        Get entity, preferring cache over API call.
+
+        This reduces API calls and avoids rate limiting.
+
+        Args:
+            entity_id: Telegram entity ID (can be positive user ID or negative chat ID)
+
+        Returns:
+            Entity object or None
+        """
+        # Try cache first
+        cached = await self._get_cached_entity(abs(entity_id))
+        if cached:
+            return cached
+
+        # Not in cache - fetch from Telegram
+        if not self._connected or not self._client:
+            return None
+
+        try:
+            entity = await self._client.get_entity(entity_id)
+            if entity:
+                # Add to cache
+                self._entity_cache[abs(entity_id)] = (entity, time.time())
+            return entity
+        except FloodWaitError as e:
+            log.warning(f"FloodWaitError getting entity {entity_id}: {e.seconds}s")
+            # Auto-sleep handled by flood_sleep_threshold
+            raise
+        except Exception as e:
+            log.debug(f"Failed to get entity {entity_id}: {e}")
+            return None
 
     async def _run_polling_loop(self) -> None:
         """

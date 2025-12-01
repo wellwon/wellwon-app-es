@@ -20,7 +20,7 @@
 #   - telethon for MTProto operations
 # =============================================================================
 
-from app.infra.telegram.config import (
+from app.config.telegram_config import (
     TelegramConfig,
     get_telegram_config,
     reset_telegram_config,

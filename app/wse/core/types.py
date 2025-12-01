@@ -56,28 +56,81 @@ class MessageCategory(Enum):
     SYSTEM = "WSE"
 
 
-# System event types that belong to WSE category
+# System event types that belong to WSE category (protocol/infrastructure messages)
 WSE_SYSTEM_EVENT_TYPES = frozenset({
+    # Connection lifecycle
     'server_ready',
-    'snapshot_complete',
+    'server_hello',
     'client_hello',
     'client_hello_ack',
-    'server_hello',
     'connection_state_change',
-    'error',
-    'pong',
-    'PONG',
-    'ping',
-    'PING',
-    'heartbeat',
-    'subscription_update',
-    'health_check_response',
-    'metrics_response',
-    'config_update',
-    'rate_limit_warning',
+    'connection_state_response',
     'connection_stats',
     'connection_quality',
+
+    # Ping/Pong heartbeat
+    'ping',
+    'PING',
+    'pong',
+    'PONG',
+    'heartbeat',
+
+    # Subscription management
+    'subscription',
+    'subscription_update',
+    'subscription_request',
+
+    # Sync/snapshot completion
+    'sync_request',
+    'sync_response',
+    'snapshot_complete',
+
+    # Health and metrics
+    'health_check',
+    'health_check_request',
+    'health_check_response',
+    'metrics_request',
+    'metrics_response',
+
+    # Configuration
+    'config_request',
+    'config_response',
+    'config_update',
+    'config_update_response',
+
+    # Security
+    'encryption_request',
+    'encryption_response',
+    'key_rotation_request',
+    'key_rotation_response',
+
+    # Batching
+    'batch',
+    'batch_message',
+    'batch_message_result',
+
+    # Debug/diagnostics
+    'debug_request',
+    'debug_response',
+    'debug_handlers',
+    'sequence_stats_request',
+    'sequence_stats_response',
+
+    # Errors and warnings
+    'error',
+    'rate_limit_warning',
+
+    # System status
+    'system_status',
+    'system_status_request',
+    'system_announcement',
+
+    # Priority messages (system routing)
+    'priority_message',
 })
+
+# Snapshot event types (full state dump) - identified by 'snapshot' in name
+# These are detected dynamically by checking if 'snapshot' is in the event type
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -860,27 +860,23 @@ class EventProcessor:
                             async_result = await execute_async_projections(envelope, projector_instances)
 
                             if async_result.get('handlers_executed', 0) == 0:
-                                # No async handlers either - try legacy handle_event
-                                if hasattr(domain.projector_instance, 'handle_event'):
-                                    async with transaction():
-                                        await domain.projector_instance.handle_event(event_dict)
-                                else:
-                                    log.debug(f"No projection handlers for {event_type} in domain {domain.name}")
+                                # No handlers - event has no projection (check decorators)
+                                log.warning(
+                                    f"No projection handlers for {event_type} in domain {domain.name}. "
+                                    f"Ensure @sync_projection or @async_projection decorator is applied."
+                                )
                             else:
                                 log.debug(
                                     f"ASYNC projection executed for {event_type}: "
                                     f"{async_result.get('handlers_executed', 0)} handlers"
                                 )
                     else:
-                        # Fall back to handle_event if available
-                        if hasattr(domain.projector_instance, 'handle_event'):
-                            async with transaction():
-                                await domain.projector_instance.handle_event(event_dict)
-                        else:
-                            log.warning(
-                                f"Domain {domain.name} projector has neither sync decorators nor handle_event method"
-                            )
-                            continue
+                        # No decorators found - this should not happen with current architecture
+                        log.error(
+                            f"Domain {domain.name} projector missing decorators for {event_type}. "
+                            f"All projections must use @sync_projection or @async_projection."
+                        )
+                        continue
 
                     # Calculate processing time
                     processing_time_ms = (time.time() - processing_start) * 1000

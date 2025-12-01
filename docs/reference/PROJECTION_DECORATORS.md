@@ -384,9 +384,9 @@ execute_sync_projections()  ← Try SYNC first
          ↓
 execute_async_projections() ← Then ASYNC
          ↓
-[If no ASYNC handlers]
+[If no handlers found]
          ↓
-handle_event() legacy fallback
+log.warning() ← Missing decorator alert (no legacy fallback)
 ```
 
 ### TopicConfig

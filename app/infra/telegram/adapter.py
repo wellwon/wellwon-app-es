@@ -5,15 +5,15 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 
-from app.infra.telegram.config import TelegramConfig, get_telegram_config
+from app.config.logging_config import get_logger
+from app.config.telegram_config import TelegramConfig, get_telegram_config
 from app.infra.telegram.bot_client import TelegramBotClient, TelegramMessage, SendMessageResult
 from app.infra.telegram.mtproto_client import TelegramMTProtoClient, GroupInfo, TopicInfo, MemberInfo, IncomingMessage
 
-log = logging.getLogger("wellwon.telegram.adapter")
+log = get_logger("wellwon.telegram.adapter")
 
 
 @dataclass
@@ -52,8 +52,13 @@ class TelegramAdapter:
         topic = await adapter.create_chat_topic(group_id, "Topic Name", emoji="🎯")
     """
 
-    def __init__(self, config: Optional[TelegramConfig] = None):
+    def __init__(
+        self,
+        config: Optional[TelegramConfig] = None,
+        redis_client: Optional[Any] = None,
+    ):
         self.config = config or get_telegram_config()
+        self._redis = redis_client
         self._bot_client: Optional[TelegramBotClient] = None
         self._mtproto_client: Optional[TelegramMTProtoClient] = None
         self._initialized = False
@@ -67,7 +72,7 @@ class TelegramAdapter:
 
         # Initialize Bot API client if available
         if self.config.bot_api_available:
-            self._bot_client = TelegramBotClient(self.config)
+            self._bot_client = TelegramBotClient(self.config, redis_client=self._redis)
             bot_ok = await self._bot_client.initialize()
             if not bot_ok:
                 log.warning("Bot API client initialization failed")
@@ -539,11 +544,11 @@ class TelegramAdapter:
 _adapter: Optional[TelegramAdapter] = None
 
 
-async def get_telegram_adapter() -> TelegramAdapter:
+async def get_telegram_adapter(redis_client: Optional[Any] = None) -> TelegramAdapter:
     """Get singleton Telegram adapter instance"""
     global _adapter
     if _adapter is None:
-        _adapter = TelegramAdapter()
+        _adapter = TelegramAdapter(redis_client=redis_client)
         await _adapter.initialize()
     return _adapter
 

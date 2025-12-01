@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Optional, Any, Protocol, runtime_checkable, List, Dict
 from abc import ABC, abstractmethod
 import uuid
@@ -18,8 +17,9 @@ import uuid
 from app.infra.event_bus.event_bus import EventBus
 from app.infra.event_store.kurrentdb_event_store import KurrentDBEventStore
 from app.common.base.base_model import BaseEvent
+from app.config.logging_config import get_logger
 
-log = logging.getLogger("wellwon.base_handler")
+log = get_logger("wellwon.base_handler")
 
 
 @runtime_checkable

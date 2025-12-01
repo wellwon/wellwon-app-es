@@ -54,6 +54,82 @@ export enum MessageCategory {
   SYSTEM = "WSE"
 }
 
+/**
+ * System event types that belong to WSE category (protocol/infrastructure messages)
+ * Must match backend WSE_SYSTEM_EVENT_TYPES in app/wse/core/types.py
+ */
+export const WSE_SYSTEM_EVENT_TYPES = new Set([
+  // Connection lifecycle
+  'server_ready',
+  'server_hello',
+  'client_hello',
+  'client_hello_ack',
+  'connection_state_change',
+  'connection_state_response',
+  'connection_stats',
+  'connection_quality',
+
+  // Ping/Pong heartbeat
+  'ping',
+  'PING',
+  'pong',
+  'PONG',
+  'heartbeat',
+
+  // Subscription management
+  'subscription',
+  'subscription_update',
+  'subscription_request',
+
+  // Sync/snapshot completion
+  'sync_request',
+  'sync_response',
+  'snapshot_complete',
+
+  // Health and metrics
+  'health_check',
+  'health_check_request',
+  'health_check_response',
+  'metrics_request',
+  'metrics_response',
+
+  // Configuration
+  'config_request',
+  'config_response',
+  'config_update',
+  'config_update_response',
+
+  // Security
+  'encryption_request',
+  'encryption_response',
+  'key_rotation_request',
+  'key_rotation_response',
+
+  // Batching
+  'batch',
+  'batch_message',
+  'batch_message_result',
+
+  // Debug/diagnostics
+  'debug_request',
+  'debug_response',
+  'debug_handlers',
+  'sequence_stats_request',
+  'sequence_stats_response',
+
+  // Errors and warnings
+  'error',
+  'rate_limit_warning',
+
+  // System status
+  'system_status',
+  'system_status_request',
+  'system_announcement',
+
+  // Priority messages (system routing)
+  'priority_message',
+])
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration
 // ─────────────────────────────────────────────────────────────────────────────

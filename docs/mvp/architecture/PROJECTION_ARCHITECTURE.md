@@ -83,8 +83,7 @@ WellWon uses a dual-decorator projection system implementing CQRS (Command Query
 │  │      execute_async_projections()     ← Process async handlers       │   │
 │  │              │                                                       │   │
 │  │              ▼                                                       │   │
-│  │   3. If no async handlers:                                          │   │
-│  │      handle_event() legacy fallback                                 │   │
+│  │   3. If no handlers: log.warning()   ← Missing decorator alert      │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                      │                                       │
 │                                      ▼                                       │

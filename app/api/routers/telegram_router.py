@@ -6,13 +6,30 @@
 from __future__ import annotations
 
 import logging
-import hmac
 from typing import Optional
 
 from fastapi import APIRouter, Request, HTTPException, Depends, Header, Query
 
-from app.infra.telegram.config import get_telegram_config
+from app.config.telegram_config import get_telegram_config
 from app.infra.telegram.adapter import get_telegram_adapter, TelegramAdapter
+from app.security.telegram_security import (
+    verify_webhook_secret,
+    is_telegram_ip,
+    get_client_ip,
+    MessageDeduplicator,
+    TelegramRedisDeduplicator,
+)
+from app.infra.metrics.telegram_metrics import (
+    telegram_webhook_requests_total,
+    telegram_webhook_latency_seconds,
+    telegram_webhook_messages_total,
+    telegram_dedup_checks_total,
+    telegram_security_blocked_total,
+    telegram_security_ip_checks_total,
+    record_webhook_request,
+    record_dedup_check,
+    record_security_block,
+)
 from app.api.models.telegram_api_models import (
     WebhookResponse,
     WebhookInfoResponse,
@@ -86,28 +103,43 @@ async def get_adapter() -> TelegramAdapter:
     return await get_telegram_adapter()
 
 
-def verify_webhook_secret(
-    x_telegram_bot_api_secret_token: Optional[str] = Header(None, alias="X-Telegram-Bot-Api-Secret-Token")
-) -> bool:
+# =============================================================================
+# Message Deduplicator Singleton
+# =============================================================================
+# In-memory for single instance, Redis-backed for multi-instance production
+
+_message_deduplicator: Optional[MessageDeduplicator] = None
+_redis_deduplicator: Optional[TelegramRedisDeduplicator] = None
+
+
+async def get_deduplicator(request: Request):
     """
-    Verify the webhook secret token from Telegram.
+    Get message deduplicator.
 
-    Telegram sends this header when webhook has secret_token set.
+    Uses Redis if available, falls back to in-memory.
     """
-    config = get_telegram_config()
+    global _message_deduplicator, _redis_deduplicator
 
-    # If no secret configured, skip verification
-    if not config.webhook_secret:
-        return True
+    # Try Redis first (for multi-instance production)
+    if _redis_deduplicator is None and hasattr(request.app.state, 'redis'):
+        try:
+            _redis_deduplicator = TelegramRedisDeduplicator(
+                redis_client=request.app.state.redis,
+                ttl_seconds=300,  # 5 minutes
+            )
+            log.info("Using Redis-backed message deduplication")
+        except Exception as e:
+            log.warning(f"Failed to initialize Redis deduplicator: {e}")
 
-    # If secret is configured, verify it
-    if not x_telegram_bot_api_secret_token:
-        return False
+    if _redis_deduplicator:
+        return _redis_deduplicator
 
-    return hmac.compare_digest(
-        x_telegram_bot_api_secret_token,
-        config.webhook_secret
-    )
+    # Fallback to in-memory
+    if _message_deduplicator is None:
+        _message_deduplicator = MessageDeduplicator(ttl_seconds=300)
+        log.info("Using in-memory message deduplication")
+
+    return _message_deduplicator
 
 
 @router.post("/webhook", response_model=WebhookResponse)
@@ -116,6 +148,7 @@ async def telegram_webhook(
     adapter: TelegramAdapter = Depends(get_adapter),
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
+    deduplicator=Depends(get_deduplicator),
 ) -> WebhookResponse:
     """
     Main webhook endpoint for Telegram Bot updates.
@@ -132,18 +165,53 @@ async def telegram_webhook(
     6. Return success response
 
     Security:
+    - Validates source IP is from Telegram network (149.154.160.0/20, 91.108.4.0/22)
     - Validates X-Telegram-Bot-Api-Secret-Token header if configured
+    - Deduplicates messages to prevent double processing on webhook retries
     """
-    # Verify secret token
+    config = get_telegram_config()
+
+    # Security: Verify request is from Telegram IP range
+    client_ip = get_client_ip(
+        x_forwarded_for=request.headers.get("X-Forwarded-For"),
+        x_real_ip=request.headers.get("X-Real-IP"),
+        remote_addr=request.client.host if request.client else "0.0.0.0"
+    )
+
+    # Only enforce IP check in production (skip for localhost/dev)
+    if not client_ip.startswith(("127.", "10.", "172.", "192.168.", "0.0.0.0")):
+        if not is_telegram_ip(client_ip):
+            log.warning(f"Webhook request from non-Telegram IP: {client_ip}")
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+    # Security: Verify secret token
     secret_header = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-    if not verify_webhook_secret(secret_header):
+    if not verify_webhook_secret(secret_header, config.webhook_secret):
         log.warning("Invalid webhook secret token received")
         raise HTTPException(status_code=403, detail="Invalid secret token")
 
     try:
         # Parse update data
         update_data = await request.json()
-        log.info(f"Received Telegram webhook update: {update_data.get('update_id')}, chat_id: {update_data.get('message', {}).get('chat', {}).get('id')}")
+        update_id = update_data.get('update_id')
+        message_data = update_data.get('message', {})
+        chat_id_raw = message_data.get('chat', {}).get('id')
+        message_id_raw = message_data.get('message_id')
+
+        log.info(f"Received Telegram webhook update: {update_id}, chat_id: {chat_id_raw}")
+
+        # Deduplication: Check if we've already processed this message
+        if chat_id_raw and message_id_raw:
+            if hasattr(deduplicator, 'check_and_mark'):
+                # Async Redis deduplicator
+                dedup_result = await deduplicator.check_and_mark(chat_id_raw, message_id_raw)
+            else:
+                # Sync in-memory deduplicator
+                dedup_result = deduplicator.check_and_mark(chat_id_raw, message_id_raw)
+
+            if dedup_result.is_duplicate:
+                log.info(f"Duplicate message detected: chat={chat_id_raw}, msg={message_id_raw}, skipping")
+                return WebhookResponse(ok=True, message="Duplicate message ignored")
 
         # Process through adapter
         telegram_message = await adapter.process_webhook_update(update_data)
@@ -295,6 +363,115 @@ async def remove_webhook(
         return WebhookResponse(ok=True, message="Webhook removed")
     else:
         raise HTTPException(status_code=500, detail="Failed to remove webhook")
+
+
+# =============================================================================
+# Health Check Endpoint
+# =============================================================================
+
+from pydantic import BaseModel as PydanticBaseModel
+
+
+class TelegramHealthResponse(PydanticBaseModel):
+    """Telegram health check response"""
+    status: str  # healthy, degraded, unhealthy
+    bot_api: dict
+    mtproto: dict
+    config: dict
+    message: Optional[str] = None
+
+
+@router.get("/health", response_model=TelegramHealthResponse)
+async def telegram_health_check(
+    adapter: TelegramAdapter = Depends(get_adapter),
+) -> TelegramHealthResponse:
+    """
+    Comprehensive health check for Telegram integration.
+
+    Checks:
+    - Bot API connectivity (getMe)
+    - MTProto client status
+    - Configuration validity
+    - Connection states
+
+    Returns:
+        status: healthy/degraded/unhealthy
+        bot_api: Bot API health details
+        mtproto: MTProto client health details
+        config: Configuration status
+    """
+    from app.infra.metrics.telegram_metrics import set_health_status
+
+    config = get_telegram_config()
+
+    # Check Bot API
+    bot_api_health = {
+        "configured": config.bot_api_available,
+        "connected": False,
+        "bot_username": None,
+        "error": None,
+    }
+
+    if config.bot_api_available:
+        try:
+            bot_info = await adapter.get_bot_info()
+            if bot_info:
+                bot_api_health["connected"] = True
+                bot_api_health["bot_username"] = bot_info.get("username")
+        except Exception as e:
+            bot_api_health["error"] = str(e)
+
+    # Check MTProto
+    mtproto_health = {
+        "configured": config.mtproto_available,
+        "connected": False,
+        "user_id": None,
+        "error": None,
+    }
+
+    if config.mtproto_available and adapter._mtproto_client:
+        try:
+            mtproto_health["connected"] = adapter._mtproto_client._connected
+            if adapter._mtproto_client._client:
+                me = await adapter._mtproto_client._client.get_me()
+                if me:
+                    mtproto_health["user_id"] = me.id
+        except Exception as e:
+            mtproto_health["error"] = str(e)
+
+    # Determine overall status
+    bot_ok = not config.bot_api_available or bot_api_health["connected"]
+    mtproto_ok = not config.mtproto_available or mtproto_health["connected"]
+
+    if bot_ok and mtproto_ok:
+        status = "healthy"
+        message = "All Telegram services operational"
+    elif bot_ok or mtproto_ok:
+        status = "degraded"
+        message = "Some Telegram services unavailable"
+    else:
+        status = "unhealthy"
+        message = "Telegram services unavailable"
+
+    # Update Prometheus metrics
+    set_health_status(
+        healthy=(status == "healthy"),
+        bot_api=bot_api_health["connected"],
+        mtproto=mtproto_health["connected"]
+    )
+
+    return TelegramHealthResponse(
+        status=status,
+        bot_api=bot_api_health,
+        mtproto=mtproto_health,
+        config={
+            "webhook_configured": bool(config.webhook_url),
+            "webhook_url": config.full_webhook_url or None,
+            "enable_webhook": config.enable_webhook,
+            "enable_mtproto": config.enable_mtproto,
+        },
+        message=message,
+    )
 
 
 # =============================================================================

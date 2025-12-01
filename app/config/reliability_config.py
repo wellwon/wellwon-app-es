@@ -527,6 +527,109 @@ class ReliabilityConfigs:
             distributed=True
         )
 
+    # ==========================================================================
+    # Telegram configurations
+    # ==========================================================================
+    # Official Telegram rate limits:
+    #   - Global: 30 messages/second to different chats
+    #   - Per-Chat: 1 message/second (bursts allowed, then 429)
+    #   - Per-Group: 20 messages/minute
+    # ==========================================================================
+
+    @staticmethod
+    def telegram_circuit_breaker() -> CircuitBreakerConfig:
+        """Circuit breaker for Telegram API operations"""
+        return CircuitBreakerConfig(
+            name="telegram_api",
+            failure_threshold=5,
+            success_threshold=2,
+            reset_timeout_seconds=60,
+            half_open_max_calls=3,
+            window_size=20,
+            failure_rate_threshold=0.5
+        )
+
+    @staticmethod
+    def telegram_retry() -> RetryConfig:
+        """Retry config for Telegram API (handles FloodWaitError)"""
+        return RetryConfig(
+            max_attempts=3,
+            initial_delay_ms=1000,
+            max_delay_ms=60000,  # Telegram can ask for up to 60s wait
+            backoff_factor=2.0,
+            jitter=True,
+            jitter_type="full",
+            retry_condition=lambda err: ReliabilityConfigs._should_retry_telegram(err)
+        )
+
+    @staticmethod
+    def telegram_global_rate_limiter() -> RateLimiterConfig:
+        """Global rate limiter for Telegram (30 msg/s)"""
+        return RateLimiterConfig(
+            algorithm="token_bucket",
+            capacity=60,  # 2 seconds burst
+            refill_rate=30.0,  # 30 tokens per second
+            distributed=True
+        )
+
+    @staticmethod
+    def telegram_per_chat_rate_limiter() -> RateLimiterConfig:
+        """Per-chat rate limiter (1 msg/s with burst)"""
+        return RateLimiterConfig(
+            algorithm="token_bucket",
+            capacity=3,  # Allow burst of 3
+            refill_rate=1.0,  # 1 token per second
+            distributed=False  # Local per-chat
+        )
+
+    @staticmethod
+    def telegram_per_group_rate_limiter() -> RateLimiterConfig:
+        """Per-group rate limiter (20 msg/min)"""
+        return RateLimiterConfig(
+            algorithm="sliding_window",
+            capacity=20,
+            time_window=60,  # 60 seconds
+            distributed=False
+        )
+
+    @staticmethod
+    def telegram_reliability() -> ReliabilityConfig:
+        """Complete reliability config for Telegram operations"""
+        return ReliabilityConfig(
+            circuit_breaker=ReliabilityConfigs.telegram_circuit_breaker(),
+            retry=ReliabilityConfigs.telegram_retry(),
+            rate_limiter=ReliabilityConfigs.telegram_global_rate_limiter()
+        )
+
+    @staticmethod
+    def _should_retry_telegram(error: Exception) -> bool:
+        """Telegram-specific retry logic"""
+        if error is None:
+            return False
+
+        error_str = str(error).lower()
+
+        # Don't retry on permanent errors
+        if any(term in error_str for term in [
+            "chat not found", "bot was blocked", "user is deactivated",
+            "chat_write_forbidden", "need administrator rights",
+            "message is too long", "topic_closed", "topic_deleted",
+            "invalid token", "unauthorized"
+        ]):
+            return False
+
+        # Retry on FloodWait (Telegram asks to wait)
+        if "flood" in error_str or "retry after" in error_str:
+            return True
+
+        # Retry on transient errors
+        if any(term in error_str for term in [
+            "timeout", "connection", "network", "503", "500"
+        ]):
+            return True
+
+        return ReliabilityConfigs.should_retry_error(error)
+
     # MinIO/S3 Storage configurations
     @staticmethod
     def storage_circuit_breaker() -> CircuitBreakerConfig:

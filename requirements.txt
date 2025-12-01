@@ -153,9 +153,11 @@ aioboto3>=13.0.0                  # Async S3 client
 boto3>=1.35.0                     # AWS S3 SDK (sync, used by init scripts)
 
 # =============================================================================
-# Telegram Integration (Optional)
+# Telegram Integration
 # =============================================================================
-# python-telegram-bot>=21.7       # Telegram bot API
+python-telegram-bot>=21.7         # Telegram Bot API
+telethon>=1.37.0                  # MTProto client for user-level operations
+cryptg>=0.4.0                     # C-based crypto for Telethon (10x speedup)
 
 # =============================================================================
 # Payment Processing (Optional)

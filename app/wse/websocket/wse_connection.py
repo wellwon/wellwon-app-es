@@ -33,6 +33,7 @@ from app.wse.websocket.wse_compression import CompressionManager
 from app.wse.websocket.wse_security import SecurityManager
 from app.wse.websocket.wse_queue import PriorityMessageQueue
 from app.wse.websocket.wse_event_sequencer import EventSequencer
+from app.wse.core.types import WSE_SYSTEM_EVENT_TYPES, MessageCategory
 
 log = logging.getLogger("wellwon.wse_connection")
 
@@ -436,20 +437,32 @@ class WSEConnection:
             return self._parse_text_message(data)
 
     def _parse_text_message(self, data: str) -> Optional[Dict[str, Any]]:
-        """Parse text message with special handling"""
-        # Handle PING as special case
-        if data.upper().startswith('PING'):
+        """Parse text message with Protocol v2 prefix handling"""
+        json_data = data
+        message_category = None
+
+        # Protocol v2: Strip category prefix (WSE, S, U)
+        # Format: {category}{json} e.g., WSE{"t":"ping",...}
+        if data.startswith('WSE{'):
+            message_category = 'WSE'
+            json_data = data[3:]  # Remove 'WSE' prefix
+        elif len(data) > 1 and data[0] in ('S', 'U') and data[1] == '{':
+            message_category = data[0]
+            json_data = data[1:]  # Remove single-char prefix
+
+        # Handle old format PING as special case (backward compatibility)
+        if json_data.upper().startswith('PING:') or json_data.upper() == 'PING':
             # Record packet sent by client
             self.network_analyzer.record_packet_received()
-            return {'type': 'ping', 'raw': data}
+            return {'type': 'ping', 'raw': json_data}
 
-        # Handle PONG response
-        if data.startswith('PONG:'):
+        # Handle old format PONG response (backward compatibility)
+        if json_data.startswith('PONG:'):
             try:
                 # Record packet received
                 self.network_analyzer.record_packet_received()
 
-                timestamp = int(data.split(':', 1)[1])
+                timestamp = int(json_data.split(':', 1)[1])
                 latency = int(datetime.now().timestamp() * 1000) - timestamp
                 self.metrics.record_latency(latency)
                 self.network_analyzer.record_latency(latency)
@@ -459,7 +472,10 @@ class WSEConnection:
             return None  # Don't process PONG as a regular message
 
         try:
-            parsed = json.loads(data)
+            parsed = json.loads(json_data)
+            # Store the category for reference
+            if message_category:
+                parsed['_category'] = message_category
             # Normalize format
             if 'type' in parsed and 't' not in parsed:
                 parsed['t'] = parsed.pop('type')
@@ -568,7 +584,17 @@ class WSEConnection:
 
             # Serialize to JSON with message category prefix (Protocol v2)
             # Format: {category}{json} e.g., U{"t":"user_update",...}
-            msg_cat = message.pop('_msg_cat', 'U')  # Extract and remove from message
+            # Categories: S=Snapshot, U=Update, WSE=System
+            msg_cat = message.pop('_msg_cat', None)  # Extract if explicitly set
+            if msg_cat is None:
+                # Auto-detect category based on message type
+                msg_type = message.get('t', '')
+                if 'snapshot' in msg_type.lower():
+                    msg_cat = MessageCategory.SNAPSHOT.value  # "S"
+                elif msg_type in WSE_SYSTEM_EVENT_TYPES:
+                    msg_cat = MessageCategory.SYSTEM.value  # "WSE"
+                else:
+                    msg_cat = MessageCategory.UPDATE.value  # "U" (default)
             json_data = json.dumps(message, cls=DateTimeEncoder)
             data = f"{msg_cat}{json_data}"
             data_bytes = data.encode('utf-8')
@@ -728,7 +754,8 @@ class WSEConnection:
             try:
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
 
-                # Send heartbeat
+                # Send heartbeat (includes timestamp for client-side latency calculation)
+                # Note: Client sends PING, server responds with PONG - no server-initiated PING
                 await self.send_message({
                     't': 'heartbeat',
                     'p': {
@@ -737,15 +764,8 @@ class WSEConnection:
                     }
                 }, priority=10)
 
-                # Also send PING for latency measurement
-                if self.ws and self.ws.client_state == WebSocketState.CONNECTED:
-                    try:
-                        # Record packet sent
-                        self.network_analyzer.record_packet_sent()
-                        await self.ws.send_text(f"PING:{int(datetime.now().timestamp() * 1000)}")
-                        self.metrics.messages_sent += 1
-                    except Exception as e:
-                        log.error(f"Failed to send ping: {e}")
+                # Record packet for network quality analysis
+                self.network_analyzer.record_packet_sent()
 
             except asyncio.CancelledError:
                 break

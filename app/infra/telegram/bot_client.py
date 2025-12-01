@@ -5,12 +5,14 @@
 
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from dataclasses import dataclass
 from datetime import datetime
 
 from app.config.logging_config import get_logger
-from app.infra.telegram.config import TelegramConfig
+from app.config.telegram_config import TelegramConfig
+from app.config.reliability_config import RateLimiterConfig
+from app.infra.reliability.rate_limiter import RateLimiter
 
 log = get_logger("wellwon.telegram.bot_client")
 
@@ -71,11 +73,42 @@ class TelegramBotClient:
     - Editing/deleting messages
     """
 
-    def __init__(self, config: TelegramConfig):
+    def __init__(self, config: TelegramConfig, redis_client: Optional[Any] = None):
         self.config = config
         self._bot: Optional['Bot'] = None
         self._initialized = False
-        self._rate_limiter: Dict[int, List[datetime]] = {}  # chat_id -> timestamps
+        self._redis = redis_client
+
+        # Rate limiters from reliability infrastructure
+        from app.config.reliability_config import ReliabilityConfigs
+        self._global_limiter = RateLimiter(
+            name="telegram_global",
+            config=ReliabilityConfigs.telegram_global_rate_limiter(),
+            cache_manager=redis_client,
+        )
+        self._per_chat_limiters: Dict[int, RateLimiter] = {}
+
+    def _get_chat_limiter(self, chat_id: int) -> RateLimiter:
+        """Get or create per-chat rate limiter."""
+        if chat_id not in self._per_chat_limiters:
+            from app.config.reliability_config import ReliabilityConfigs
+            is_group = chat_id < 0
+            config = (
+                ReliabilityConfigs.telegram_per_group_rate_limiter()
+                if is_group else
+                ReliabilityConfigs.telegram_per_chat_rate_limiter()
+            )
+            self._per_chat_limiters[chat_id] = RateLimiter(
+                name=f"telegram_chat_{chat_id}",
+                config=config,
+                cache_manager=self._redis,
+            )
+        return self._per_chat_limiters[chat_id]
+
+    async def _acquire_rate_limit(self, chat_id: int) -> None:
+        """Wait for rate limit tokens (global + per-chat)."""
+        await self._global_limiter.wait_and_acquire()
+        await self._get_chat_limiter(chat_id).wait_and_acquire()
 
     async def initialize(self) -> bool:
         """Initialize the bot client"""
@@ -321,9 +354,8 @@ class TelegramBotClient:
         # Normalize chat_id to Bot API format (MTProto returns positive IDs)
         normalized_chat_id = self._normalize_chat_id(chat_id)
 
-        # Rate limiting check
-        if not await self._check_rate_limit(normalized_chat_id):
-            return SendMessageResult(success=False, error="Rate limit exceeded")
+        # Wait for rate limit (uses reliability infrastructure)
+        await self._acquire_rate_limit(normalized_chat_id)
 
         try:
             msg = await self._bot.send_message(
@@ -335,7 +367,6 @@ class TelegramBotClient:
                 disable_notification=disable_notification,
             )
 
-            self._record_message(normalized_chat_id)
             return SendMessageResult(success=True, message_id=msg.message_id)
 
         except RetryAfter as e:
@@ -357,7 +388,6 @@ class TelegramBotClient:
                         parse_mode=parse_mode,
                         disable_notification=disable_notification,
                     )
-                    self._record_message(normalized_chat_id)
                     return SendMessageResult(success=True, message_id=msg.message_id)
                 except Exception as retry_e:
                     log.error(f"Retry to General also failed: {retry_e}")
@@ -375,7 +405,6 @@ class TelegramBotClient:
                         parse_mode=None,  # No parse mode
                         disable_notification=disable_notification,
                     )
-                    self._record_message(normalized_chat_id)
                     return SendMessageResult(success=True, message_id=msg.message_id)
                 except Exception as retry_e:
                     log.error(f"Retry without parse_mode also failed: {retry_e}")
@@ -403,8 +432,8 @@ class TelegramBotClient:
         # Normalize chat_id to Bot API format (MTProto returns positive IDs)
         normalized_chat_id = self._normalize_chat_id(chat_id)
 
-        if not await self._check_rate_limit(normalized_chat_id):
-            return SendMessageResult(success=False, error="Rate limit exceeded")
+        # Wait for rate limit (uses reliability infrastructure)
+        await self._acquire_rate_limit(normalized_chat_id)
 
         try:
             # Determine file type from extension
@@ -426,7 +455,6 @@ class TelegramBotClient:
                     filename=file_name,
                 )
 
-            self._record_message(normalized_chat_id)
             return SendMessageResult(success=True, message_id=msg.message_id)
 
         except Exception as e:
@@ -448,8 +476,8 @@ class TelegramBotClient:
         # Normalize chat_id to Bot API format (MTProto returns positive IDs)
         normalized_chat_id = self._normalize_chat_id(chat_id)
 
-        if not await self._check_rate_limit(normalized_chat_id):
-            return SendMessageResult(success=False, error="Rate limit exceeded")
+        # Wait for rate limit (uses reliability infrastructure)
+        await self._acquire_rate_limit(normalized_chat_id)
 
         try:
             msg = await self._bot.send_voice(
@@ -460,7 +488,6 @@ class TelegramBotClient:
                 message_thread_id=topic_id,
             )
 
-            self._record_message(normalized_chat_id)
             return SendMessageResult(success=True, message_id=msg.message_id)
 
         except Exception as e:
@@ -622,32 +649,7 @@ class TelegramBotClient:
             return None
 
     # =========================================================================
-    # Rate Limiting
+    # Rate Limiting (uses reliability infrastructure)
     # =========================================================================
-
-    async def _check_rate_limit(self, chat_id: int) -> bool:
-        """Check if we can send to this chat (rate limiting)"""
-        now = datetime.utcnow()
-        window_start = now.timestamp() - 60  # 1 minute window
-
-        if chat_id not in self._rate_limiter:
-            self._rate_limiter[chat_id] = []
-
-        # Remove old timestamps
-        self._rate_limiter[chat_id] = [
-            ts for ts in self._rate_limiter[chat_id]
-            if ts.timestamp() > window_start
-        ]
-
-        # Check limit
-        if len(self._rate_limiter[chat_id]) >= self.config.messages_per_chat_per_minute:
-            return False
-
-        return True
-
-    def _record_message(self, chat_id: int) -> None:
-        """Record that a message was sent"""
-        now = datetime.utcnow()
-        if chat_id not in self._rate_limiter:
-            self._rate_limiter[chat_id] = []
-        self._rate_limiter[chat_id].append(now)
+    # Rate limiters defined in __init__ using ReliabilityConfigs.telegram_*
+    # _acquire_rate_limit() handles both global and per-chat limiting

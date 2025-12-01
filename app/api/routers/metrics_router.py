@@ -56,6 +56,13 @@ async def prometheus_metrics():
             dlq_messages_total
         )
 
+        # Import Telegram metrics
+        from app.infra.metrics.telegram_metrics import (
+            telegram_webhook_requests_total,
+            telegram_messages_sent_total,
+            telegram_health_status,
+        )
+
         # Generate Prometheus metrics in text format
         metrics_output = generate_latest()
 
