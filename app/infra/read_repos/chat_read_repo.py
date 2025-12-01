@@ -241,6 +241,7 @@ class ChatReadRepo:
                 telegram_chat_id, telegram_topic_id
             )
         else:
+            # First try exact match: topic_id IS NULL
             row = await pg_client.fetchrow(
                 """
                 SELECT
@@ -257,6 +258,26 @@ class ChatReadRepo:
                 """,
                 telegram_chat_id
             )
+            # Fallback: find ANY chat linked to this supergroup (for General topic messages)
+            if not row:
+                row = await pg_client.fetchrow(
+                    """
+                    SELECT
+                        c.id, c.name, c.type as chat_type, c.company_id, c.created_by,
+                        c.created_at, c.updated_at, c.is_active, c.metadata,
+                        c.telegram_supergroup_id as telegram_chat_id,
+                        c.telegram_topic_id,
+                        0 as participant_count, 0 as version,
+                        NULL::timestamp as last_message_at,
+                        NULL::text as last_message_content,
+                        NULL::uuid as last_message_sender_id
+                    FROM chats c
+                    WHERE c.telegram_supergroup_id = $1 AND c.is_active = true
+                    ORDER BY c.created_at ASC
+                    LIMIT 1
+                    """,
+                    telegram_chat_id
+                )
         if not row:
             return None
         return ChatReadModel(**dict(row))

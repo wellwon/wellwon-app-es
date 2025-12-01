@@ -303,6 +303,7 @@ class LinkChatToTelegramHandler(BaseCommandHandler):
             telegram_chat_id=command.telegram_supergroup_id,
             telegram_topic_id=telegram_topic_id,  # May be None if topic creation failed
             linked_by=command.linked_by,
+            telegram_supergroup_id=command.telegram_supergroup_id,  # For frontend filtering
         )
 
         await self.publish_events(

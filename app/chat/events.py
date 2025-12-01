@@ -245,6 +245,7 @@ class TelegramChatLinked(BaseEvent):
     event_type: Literal["TelegramChatLinked"] = "TelegramChatLinked"
     chat_id: uuid.UUID
     telegram_chat_id: int
+    telegram_supergroup_id: Optional[int] = None  # Raw supergroup ID for frontend filtering
     telegram_topic_id: Optional[int] = None
     linked_by: uuid.UUID
 

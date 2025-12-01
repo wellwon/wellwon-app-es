@@ -267,25 +267,31 @@ class DeleteCompanyHandler(BaseCommandHandler):
     async def handle(self, command: DeleteCompanyCommand) -> uuid.UUID:
         log.info(f"Deleting company: {command.company_id}")
 
-        # Verify company exists
+        # Verify company exists in read model
         company = await self.query_bus.query(
             GetCompanyByIdQuery(company_id=command.company_id)
         )
         if not company:
             raise ValueError(f"Company {command.company_id} not found")
 
-        # Create aggregate
-        company_aggregate = CompanyAggregate(company_id=command.company_id)
+        # REPLAY: Load aggregate from EventStore (proper Event Sourcing)
+        events = await self.event_store.get_events(command.company_id, "Company")
+        company_aggregate = CompanyAggregate.replay_from_events(command.company_id, events)
 
         # Call aggregate command method
         # force=True bypasses permission checks for saga-initiated deletions
         company_aggregate.delete_company(deleted_by=command.deleted_by, force=command.force)
 
-        # Publish events
-        await self.publish_and_commit_events(
+        # Check if delete event was generated (idempotency - already deleted?)
+        if not company_aggregate.get_uncommitted_events():
+            log.info(f"Company {command.company_id} already deleted in EventStore")
+            return command.company_id
+
+        # Publish events with proper expected_version from replay
+        await self.publish_events(
             aggregate=company_aggregate,
-            aggregate_type="Company",
-            expected_version=None,
+            aggregate_id=command.company_id,
+            command=command
         )
 
         log.info(f"Company deleted: {command.company_id}")

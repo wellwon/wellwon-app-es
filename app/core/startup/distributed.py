@@ -314,7 +314,7 @@ async def register_sync_projections_phase(app: FastAPI) -> None:
             app.state.user_account_read_repo
         )
 
-    # Company Projector - SYNC (needed for saga to continue after CompanyCreated)
+    # Company Projector - SYNC (UserAddedToCompany needs immediate consistency)
     from app.company.projectors import CompanyProjector
     from app.infra.read_repos.company_read_repo import CompanyReadRepo
     projector_instances["company"] = CompanyProjector(CompanyReadRepo())
@@ -340,6 +340,11 @@ async def register_sync_projections_phase(app: FastAPI) -> None:
         f"{stats['handlers_registered']} handlers, "
         f"domains: {stats['domains']}"
     )
+
+    # Log async projections info
+    from app.infra.cqrs.projector_decorators import get_all_async_events
+    async_events = get_all_async_events()
+    logger.info(f"Async projections available: {len(async_events)} events")
 
     # Log validation issues if any
     validation = stats.get('validation', {})

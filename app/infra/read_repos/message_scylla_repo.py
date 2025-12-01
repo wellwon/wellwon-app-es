@@ -1097,26 +1097,28 @@ class MessageScyllaRepo:
     async def update_telegram_sync_state(
             self,
             channel_id: ChannelID,
-            telegram_chat_id: TelegramID,
+            telegram_chat_id: Optional[TelegramID],
             telegram_topic_id: Optional[TelegramID] = None,
             last_synced_message_id: Optional[MessageID] = None,
+            sync_enabled: bool = True,
     ) -> None:
         """
         Update Telegram synchronization state for a channel.
 
         Args:
             channel_id: UUID of the WellWon channel
-            telegram_chat_id: Telegram chat ID being synced
+            telegram_chat_id: Telegram chat ID being synced (None to disable)
             telegram_topic_id: Forum topic ID (for topic-based chats)
             last_synced_message_id: Snowflake ID of last synced message
+            sync_enabled: Whether sync is enabled for this channel
         """
         await self.client.execute_prepared(
             """INSERT INTO telegram_sync_state
                (channel_id, telegram_chat_id, telegram_topic_id, last_synced_message_id,
                 last_sync_at, sync_enabled)
-               VALUES (?, ?, ?, ?, ?, true)""",
+               VALUES (?, ?, ?, ?, ?, ?)""",
             (channel_id, telegram_chat_id, telegram_topic_id,
-             last_synced_message_id, datetime.now(timezone.utc)),
+             last_synced_message_id, datetime.now(timezone.utc), sync_enabled),
             execution_profile='write',
         )
 
@@ -1281,8 +1283,9 @@ class MessageScyllaRepo:
         deleted = 0
         try:
             # Get all reactions for this channel (scan is acceptable for deletion)
+            # Note: SELECT DISTINCT requires all partition key columns in SELECT list
             reactions = await self.client.execute(
-                "SELECT DISTINCT message_id FROM message_reactions WHERE channel_id = %s ALLOW FILTERING",
+                "SELECT DISTINCT channel_id, message_id FROM message_reactions WHERE channel_id = %s ALLOW FILTERING",
                 (channel_id,),
             )
             for row in reactions:

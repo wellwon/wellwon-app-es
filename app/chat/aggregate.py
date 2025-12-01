@@ -542,6 +542,7 @@ class ChatAggregate:
         telegram_chat_id: int,
         linked_by: uuid.UUID,
         telegram_topic_id: Optional[int] = None,
+        telegram_supergroup_id: Optional[int] = None,
     ) -> None:
         """Link a Telegram chat"""
         self._ensure_active()
@@ -550,6 +551,7 @@ class ChatAggregate:
         event = TelegramChatLinked(
             chat_id=self.id,
             telegram_chat_id=telegram_chat_id,
+            telegram_supergroup_id=telegram_supergroup_id or telegram_chat_id,
             telegram_topic_id=telegram_topic_id,
             linked_by=linked_by,
         )

@@ -634,10 +634,20 @@ export class EventHandlers {
 
       // Invalidate chat detail cache
       queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id] });
-      // CRITICAL: Also invalidate chat list so it re-fetches with telegram_supergroup_id
-      // This fixes the bug where chat disappears when clicking on supergroup
-      // because the filter doesn't find chats with outdated (null) telegram_supergroup_id
-      queryClient.invalidateQueries({ queryKey: ['chats'] });
+
+      // IMPORTANT: Use setQueryData to update the specific chat instead of invalidating
+      // invalidateQueries would destroy optimistic entries before projection completes
+      // This preserves any optimistically added chats while updating the linked one
+      queryClient.setQueryData(['chats'], (oldChats: any[] | undefined) => {
+        if (!oldChats) return oldChats;
+        return oldChats.map(chat =>
+          chat.id === data.chat_id
+            ? { ...chat, telegram_supergroup_id: data.telegram_supergroup_id }
+            : chat
+        );
+      });
+
+      // Safe to invalidate counts - these are separate aggregation queries
       queryClient.invalidateQueries({ queryKey: ['supergroup-chat-counts'] });
 
       window.dispatchEvent(new CustomEvent('chatTelegramLinked', { detail: data }));

@@ -224,10 +224,12 @@ class SmartRichHandler(RichHandler if RICH_AVAILABLE else logging.StreamHandler)
 
         # Enhanced message patterns for collection
         self.collection_patterns = {
-            # Persistence Layer (PostgreSQL, Redis, MinIO infrastructure)
+            # Persistence Layer (PostgreSQL, Redis, MinIO, ScyllaDB infrastructure)
             r'PostgreSQL.*pool.*initialized': ('persistence', 'PostgreSQL'),
             r'Redis.*initialized': ('persistence', 'Redis'),
             r'MinIO.*storage.*initialized': ('persistence', 'MinIO Storage'),
+            r'ScyllaDB.*client.*initialized': ('persistence', 'ScyllaDB'),
+            r'Global ScyllaDB client initialized': ('persistence', 'ScyllaDB'),
 
             # Databases (Application-specific databases)
             r'Main database.*checked|applied': ('database', 'WellWon DB'),
@@ -250,9 +252,10 @@ class SmartRichHandler(RichHandler if RICH_AVAILABLE else logging.StreamHandler)
             r'Snapshots disabled': ('messaging', 'Snapshots'),
             r'Automatic snapshot processor started': ('messaging', 'Auto Snapshots'),
 
-            # Features (CQRS, Sync Projections, etc.)
+            # Features (CQRS, Sync/Async Projections, etc.)
             r'Sync projections registered': ('features', 'Sync Projections'),
             r'Synchronous projections.*registered': ('features', 'Sync Projections'),
+            r'Async projections available': ('features', 'Async Projections'),
             r'CQRS.*initialized': ('features', 'CQRS'),
             r'Command Bus.*initialized': ('features', 'CQRS'),
             r'CQRS handlers registered': ('features', 'CQRS Handlers'),
@@ -278,6 +281,9 @@ class SmartRichHandler(RichHandler if RICH_AVAILABLE else logging.StreamHandler)
             r'Virtual Market Data Service.*initialized': ('services', 'Market Data'),
             r'Saga.*Service.*initialized|created': ('services', 'Saga Service'),
             r'STARTUP_SUBSCRIPTION.*Broker streaming initialized': ('services', 'Broker Streaming'),
+            r'Telegram.*polling.*started': ('services', 'Telegram MTProto'),
+            r'MTProto.*client.*connected': ('services', 'Telegram MTProto'),
+            r'MTProto.*user.*client.*started': ('services', 'Telegram MTProto'),
 
             # Monitoring & Admin - Workers
             # Data Integrity
@@ -435,6 +441,10 @@ class SmartRichHandler(RichHandler if RICH_AVAILABLE else logging.StreamHandler)
                 if len(numbers) >= 2:
                     details['events'] = numbers[0]
                     details['handlers'] = numbers[1]
+            # For async projections, extract events count
+            elif 'async projections available' in message.lower():
+                if len(numbers) >= 1:
+                    details['events'] = numbers[0]
             # For CQRS handlers
             elif 'cqrs handlers registered' in message.lower():
                 if len(numbers) >= 2:

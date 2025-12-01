@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
@@ -57,8 +58,8 @@ class ChatProjector:
             - telegram_supergroups, telegram_users
 
     Projection Pattern:
-        SYNC: ChatCreated, ParticipantAdded, MessageSent, TelegramMessageReceived
-        ASYNC: All others (eventual consistency via Worker)
+        SYNC: TelegramMessageReceived (Telegram polling reliability)
+        ASYNC: All others (optimistic UI + WSE notification)
     """
 
     def __init__(
@@ -81,10 +82,10 @@ class ChatProjector:
     # Chat Lifecycle Projections (PostgreSQL)
     # =========================================================================
 
-    @sync_projection("ChatCreated")
+    @async_projection("ChatCreated")
     @monitor_projection
     async def on_chat_created(self, envelope: EventEnvelope) -> None:
-        """Project ChatCreated to PostgreSQL. SYNC for saga flow."""
+        """Project ChatCreated to PostgreSQL. ASYNC - saga uses event data."""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
 
@@ -185,11 +186,11 @@ class ChatProjector:
     # Participant Projections (PostgreSQL)
     # =========================================================================
 
-    # SYNC: Saga may query participants after adding
-    @sync_projection("ParticipantAdded")
+    # ASYNC: Optimistic UI + WSE notification
+    @async_projection("ParticipantAdded")
     @monitor_projection
     async def on_participant_added(self, envelope: EventEnvelope) -> None:
-        """Project ParticipantAdded to PostgreSQL. SYNC for saga flow."""
+        """Project ParticipantAdded to PostgreSQL. ASYNC - optimistic UI."""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
         user_id = uuid.UUID(event_data['user_id'])
@@ -255,14 +256,14 @@ class ChatProjector:
     # Message Projections (ScyllaDB PRIMARY)
     # =========================================================================
 
-    # SYNC: User expects immediate message visibility
-    @sync_projection("MessageSent")
+    # ASYNC: Optimistic UI shows message immediately, Worker confirms
+    @async_projection("MessageSent")
     @monitor_projection
     async def on_message_sent(self, envelope: EventEnvelope) -> None:
         """
         Project MessageSent - ScyllaDB PRIMARY.
 
-        SYNC: User expects immediate message visibility in chat.
+        ASYNC: Frontend uses optimistic UI, WSE confirms delivery.
 
         Flow:
             1. Write message content to ScyllaDB (primary storage)
@@ -300,8 +301,8 @@ class ChatProjector:
             telegram_message_id=event_data.get('telegram_message_id'),
             telegram_chat_id=event_data.get('telegram_chat_id'),
             telegram_user_id=event_data.get('telegram_user_id'),
-            telegram_user_data=event_data.get('telegram_user_data'),
-            telegram_forward_data=event_data.get('telegram_forward_data'),
+            telegram_user_data=json.dumps(event_data['telegram_user_data']) if event_data.get('telegram_user_data') else None,
+            telegram_forward_data=json.dumps(event_data['telegram_forward_data']) if event_data.get('telegram_forward_data') else None,
             telegram_topic_id=event_data.get('telegram_topic_id'),
             sync_direction=SyncDirection.TELEGRAM_TO_WEB if source == 'telegram' else None,
             created_at=envelope.stored_at,
@@ -394,6 +395,42 @@ class ChatProjector:
             last_read_message_id=uuid.UUID(event_data['last_read_message_id']),
             last_read_at=envelope.stored_at,
         )
+
+    # =========================================================================
+    # Company Link Projections (no read model changes needed)
+    # =========================================================================
+
+    @async_projection("ChatLinkedToCompany")
+    async def on_chat_linked_to_company(self, envelope: EventEnvelope) -> None:
+        """Acknowledge ChatLinkedToCompany - company link tracked on company side."""
+        chat_id = envelope.aggregate_id
+        company_id = envelope.event_data.get('company_id')
+        log.debug(f"ChatLinkedToCompany acknowledged: chat={chat_id}, company={company_id}")
+
+    @async_projection("ChatUnlinkedFromCompany")
+    async def on_chat_unlinked_from_company(self, envelope: EventEnvelope) -> None:
+        """Acknowledge ChatUnlinkedFromCompany - company link tracked on company side."""
+        chat_id = envelope.aggregate_id
+        log.debug(f"ChatUnlinkedFromCompany acknowledged: chat={chat_id}")
+
+    # =========================================================================
+    # Ephemeral Events (UI-only, no persistence needed)
+    # =========================================================================
+
+    @async_projection("TypingStarted")
+    async def on_typing_started(self, envelope: EventEnvelope) -> None:
+        """Acknowledge TypingStarted - ephemeral UI event, no persistence."""
+        pass
+
+    @async_projection("TypingStopped")
+    async def on_typing_stopped(self, envelope: EventEnvelope) -> None:
+        """Acknowledge TypingStopped - ephemeral UI event, no persistence."""
+        pass
+
+    @async_projection("MessageReadStatusUpdated")
+    async def on_message_read_status_updated(self, envelope: EventEnvelope) -> None:
+        """Acknowledge MessageReadStatusUpdated - handled by MessagesMarkedAsRead."""
+        pass
 
     # =========================================================================
     # Telegram Integration Projections

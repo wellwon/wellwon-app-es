@@ -446,34 +446,47 @@ class DeleteChatHandler(BaseCommandHandler):
         except Exception as e:
             log.warning(f"Failed to lookup telegram IDs for chat delete: {e}")
 
-        events = await self.event_store.get_events(command.chat_id, "Chat")
-        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
-
-        chat_aggregate.hard_delete_chat(
-            deleted_by=command.deleted_by,
-            reason=command.reason,
-            telegram_supergroup_id=telegram_supergroup_id,
-            telegram_topic_id=telegram_topic_id,
-        )
-
-        # Check if any events were generated
-        has_new_events = len(chat_aggregate.get_uncommitted_events()) > 0
-
-        if has_new_events:
-            await self.publish_events(
-                aggregate=chat_aggregate,
-                aggregate_id=command.chat_id,
-                command=command
-            )
-        else:
-            # Already deleted in EventStore but maybe not in read model (previous projection failure)
-            # Force cleanup of read model
-            log.info(f"Chat {command.chat_id} already deleted in EventStore, ensuring read model cleanup")
-            from app.infra.read_repos.chat_read_repo import ChatReadRepo
+        # Retry loop for optimistic concurrency conflicts
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                await ChatReadRepo.hard_delete_chat(chat_id=command.chat_id)
+                events = await self.event_store.get_events(command.chat_id, "Chat")
+                chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+
+                chat_aggregate.hard_delete_chat(
+                    deleted_by=command.deleted_by,
+                    reason=command.reason,
+                    telegram_supergroup_id=telegram_supergroup_id,
+                    telegram_topic_id=telegram_topic_id,
+                )
+
+                # Check if any events were generated
+                has_new_events = len(chat_aggregate.get_uncommitted_events()) > 0
+
+                if has_new_events:
+                    await self.publish_events(
+                        aggregate=chat_aggregate,
+                        aggregate_id=command.chat_id,
+                        command=command
+                    )
+                else:
+                    # Already deleted in EventStore but maybe not in read model (previous projection failure)
+                    # Force cleanup of read model
+                    log.info(f"Chat {command.chat_id} already deleted in EventStore, ensuring read model cleanup")
+                    from app.infra.read_repos.chat_read_repo import ChatReadRepo
+                    try:
+                        await ChatReadRepo.hard_delete_chat(chat_id=command.chat_id)
+                    except Exception as e:
+                        log.warning(f"Read model cleanup failed (may already be deleted): {e}")
+
+                # Success - break retry loop
+                break
+
             except Exception as e:
-                log.warning(f"Read model cleanup failed (may already be deleted): {e}")
+                if "concurrency" in str(e).lower() and attempt < max_retries - 1:
+                    log.warning(f"Concurrency conflict on delete attempt {attempt + 1}, retrying...")
+                    continue
+                raise
 
         # Telegram sync handled by TelegramEventListener via EventBus (CQRS pattern)
         # Delete → delete_forum_topic() in Telegram (removes messages)

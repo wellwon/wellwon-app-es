@@ -811,19 +811,19 @@ class EventProcessor:
                             self.metrics.record_filtered_duplicate()
                             continue
 
-                    # Check if projector uses sync decorators or handle_event
-                    has_sync_decorators = False
+                    # Check if projector uses projection decorators (@sync_projection or @async_projection)
+                    has_projection_decorators = False
 
                     for attr_name in dir(domain.projector_instance):
                         try:
                             attr = getattr(domain.projector_instance, attr_name)
-                            if hasattr(attr, '_is_sync_projection'):
-                                has_sync_decorators = True
+                            if hasattr(attr, '_is_sync_projection') or hasattr(attr, '_is_async_projection'):
+                                has_projection_decorators = True
                                 break
                         except:
                             continue
 
-                    if has_sync_decorators:
+                    if has_projection_decorators:
                         # Use projection decorators (SYNC and ASYNC)
                         from app.infra.event_store.event_envelope import EventEnvelope
                         from app.infra.cqrs.projector_decorators import (
@@ -851,32 +851,41 @@ class EventProcessor:
                                 f"Enabled domains: {[d.name for d in self.domain_registry.get_enabled_domains()]}"
                             )
 
-                        # Try SYNC projections first (immediate consistency)
-                        result = await execute_sync_projections(envelope, projector_instances)
+                        # Execute BOTH sync AND async projections (TradeCore pattern)
+                        # Worker always runs both - sync for fallback, async for worker-specific
+                        sync_result = await execute_sync_projections(envelope, projector_instances)
+                        async_result = await execute_async_projections(envelope, projector_instances)
 
-                        # Check if any SYNC handlers were executed
-                        if result.get('handlers_executed', 0) == 0:
-                            # No sync handlers - try ASYNC projections (eventual consistency)
-                            async_result = await execute_async_projections(envelope, projector_instances)
-
-                            if async_result.get('handlers_executed', 0) == 0:
-                                # No handlers - event has no projection (check decorators)
-                                log.warning(
-                                    f"No projection handlers for {event_type} in domain {domain.name}. "
-                                    f"Ensure @sync_projection or @async_projection decorator is applied."
-                                )
-                            else:
-                                log.debug(
-                                    f"ASYNC projection executed for {event_type}: "
-                                    f"{async_result.get('handlers_executed', 0)} handlers"
-                                )
-                    else:
-                        # No decorators found - this should not happen with current architecture
-                        log.error(
-                            f"Domain {domain.name} projector missing decorators for {event_type}. "
-                            f"All projections must use @sync_projection or @async_projection."
+                        # Count total handlers from BOTH types
+                        total_handlers = (
+                            sync_result.get('handlers_executed', 0) +
+                            async_result.get('handlers_executed', 0)
                         )
-                        continue
+
+                        if total_handlers == 0:
+                            # No handlers - event has no projection (check decorators)
+                            log.warning(
+                                f"No projection handlers for {event_type} in domain {domain.name}. "
+                                f"Ensure @sync_projection or @async_projection decorator is applied."
+                            )
+                        else:
+                            log.debug(
+                                f"Executed {sync_result.get('handlers_executed', 0)} sync + "
+                                f"{async_result.get('handlers_executed', 0)} async projections "
+                                f"for {event_type}"
+                            )
+                    else:
+                        # No decorators found - projector may use legacy handle_event pattern
+                        # Try handle_event as fallback
+                        if hasattr(domain.projector_instance, 'handle_event'):
+                            log.debug(f"Using legacy handle_event for {event_type} in domain {domain.name}")
+                            await domain.projector_instance.handle_event(event_dict)
+                        else:
+                            log.error(
+                                f"Domain {domain.name} projector missing decorators for {event_type}. "
+                                f"All projections must use @sync_projection or @async_projection."
+                            )
+                            continue
 
                     # Calculate processing time
                     processing_time_ms = (time.time() - processing_start) * 1000

@@ -60,9 +60,9 @@ class UserAccountProjector:
             last_name=event_data.get('last_name'),
         )
 
-    @sync_projection("UserCreated")  # Legacy support
+    @async_projection("UserCreated")  # Legacy support - ASYNC OK
     async def on_user_created_legacy(self, envelope: EventEnvelope) -> None:
-        """Handle legacy UserCreated event"""
+        """Handle legacy UserCreated event (ASYNC - alias only)"""
         await self.on_user_created(envelope)
 
     @async_projection("UserPasswordChanged")
@@ -138,16 +138,16 @@ class UserAccountProjector:
         # CRITICAL: Clear all caches immediately to prevent deleted user from accessing system
         await self._clear_user_caches(user_id)
 
-    @sync_projection("UserDeleted", priority=1, timeout=3.0)  # Legacy support
+    @async_projection("UserDeleted")  # Legacy support - ASYNC OK
     async def on_user_deleted_legacy(self, envelope: EventEnvelope) -> None:
-        """Handle legacy UserDeleted event"""
+        """Handle legacy UserDeleted event (ASYNC - alias only)"""
         await self.on_user_deleted(envelope)
 
-    @sync_projection("UserHardDeleted", priority=1, timeout=3.0)
+    @async_projection("UserHardDeleted")
     async def on_user_hard_deleted(self, envelope: EventEnvelope) -> None:
         """
         Project UserHardDeleted event - final hard delete after saga completion.
-        This event is published by UserDeletionSaga after VB cleanup is complete.
+        ASYNC: Cleanup can be eventual, saga already completed.
         """
         event_data = envelope.event_data
         user_id_str = event_data.get('user_id')

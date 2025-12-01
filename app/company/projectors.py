@@ -43,14 +43,14 @@ class CompanyProjector:
     # Company Lifecycle Projections
     # =========================================================================
 
-    # SYNC: Frontend queries company immediately after receiving WSE event
-    @sync_projection("CompanyCreated")
+    # ASYNC: Testing Worker projection processing
+    @async_projection("CompanyCreated")
     @monitor_projection
     async def on_company_created(self, envelope: EventEnvelope) -> None:
         """
         Project CompanyCreated event to read model.
 
-        SYNC: Frontend receives WSE event and queries /companies/{id} immediately.
+        ASYNC: Worker processes via RedPanda (testing).
         """
         event_data = envelope.event_data
         company_id = envelope.aggregate_id
@@ -163,18 +163,30 @@ class CompanyProjector:
             log.error(f"CompanyDeleted projection FAILED: company_id={company_id}, error={e}", exc_info=True)
             raise
 
+    # Saga trigger event - no projection needed, just acknowledge
+    @async_projection("CompanyDeleteRequested")
+    async def on_company_delete_requested(self, envelope: EventEnvelope) -> None:
+        """
+        Acknowledge CompanyDeleteRequested event.
+
+        This is a saga trigger event - GroupDeletionSaga handles the actual deletion.
+        No read model update needed here.
+        """
+        company_id = envelope.aggregate_id
+        log.debug(f"CompanyDeleteRequested acknowledged: company_id={company_id} (saga will handle deletion)")
+
     # =========================================================================
     # User-Company Relationship Projections
     # =========================================================================
 
-    # SYNC: Frontend queries company members immediately after receiving WSE event
-    @sync_projection("UserAddedToCompany")
+    # ASYNC: Frontend uses optimistic UI + WSE notification
+    @async_projection("UserAddedToCompany")
     @monitor_projection
     async def on_user_added_to_company(self, envelope: EventEnvelope) -> None:
         """
         Project UserAddedToCompany event.
 
-        SYNC: Frontend receives WSE event and queries company data immediately.
+        ASYNC: Frontend uses optimistic UI, WSE notifies when ready.
         """
         event_data = envelope.event_data
         company_id = envelope.aggregate_id

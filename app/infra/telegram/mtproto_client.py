@@ -9,9 +9,8 @@ import logging
 import asyncio
 import random
 import time
-from functools import wraps
 from typing import Optional, List, Dict, Any, Callable, TypeVar, Tuple
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from app.config.telegram_config import TelegramConfig
 
@@ -87,7 +86,7 @@ async def _retry_with_backoff(
 
             if is_flood_error:
                 # FloodWaitError - must wait the specified time
-                wait_time = e.seconds + 1  # Add 1 second buffer
+                wait_time = getattr(e, 'seconds', 60) + 1  # Add 1 second buffer
                 if attempt < max_retries:
                     log.warning(
                         f"[{operation_name}] FloodWaitError: waiting {wait_time}s "
@@ -119,6 +118,7 @@ async def _retry_with_backoff(
     # Should not reach here, but just in case
     if last_exception:
         raise last_exception
+    raise RuntimeError(f"Retry logic failed unexpectedly for {operation_name}")
 
 # Lazy import telethon to avoid import errors when not installed
 try:
@@ -149,12 +149,35 @@ try:
     from telethon.tl.types import ChatAdminRights, ChatBannedRights
     from telethon.errors import FloodWaitError, ChannelPrivateError, ChannelInvalidError
     TELETHON_AVAILABLE = True
-except ImportError as e:
+except ImportError as import_err:
     TELETHON_AVAILABLE = False
-    TelegramClient = None
-    StringSession = None
-    events = None
-    log.warning(f"telethon not installed or import error: {e}. MTProto features will be disabled.")
+    TelegramClient = None  # type: ignore
+    StringSession = None  # type: ignore
+    events = None  # type: ignore
+    CreateChannelRequest = None  # type: ignore
+    EditAdminRequest = None  # type: ignore
+    InviteToChannelRequest = None  # type: ignore
+    EditTitleRequest = None  # type: ignore
+    EditPhotoRequest = None  # type: ignore
+    EditBannedRequest = None  # type: ignore
+    ToggleForumRequest = None  # type: ignore
+    GetParticipantsRequest = None  # type: ignore
+    ChannelParticipantsSearch = None  # type: ignore
+    ExportChatInviteRequest = None  # type: ignore
+    EditChatDefaultBannedRightsRequest = None  # type: ignore
+    EditChatAboutRequest = None  # type: ignore
+    CreateForumTopicRequest = None  # type: ignore
+    EditForumTopicRequest = None  # type: ignore
+    DeleteTopicHistoryRequest = None  # type: ignore
+    GetForumTopicsRequest = None  # type: ignore
+    UpdatePinnedForumTopicRequest = None  # type: ignore
+    ResolveUsernameRequest = None  # type: ignore
+    ChatAdminRights = None  # type: ignore
+    ChatBannedRights = None  # type: ignore
+    FloodWaitError = Exception  # type: ignore
+    ChannelPrivateError = Exception  # type: ignore
+    ChannelInvalidError = Exception  # type: ignore
+    log.warning(f"telethon not installed or import error: {import_err}. MTProto features will be disabled.")
 
 
 # Emoji ID mapping for forum topics
@@ -295,7 +318,7 @@ class TelegramMTProtoClient:
         self._client: Optional['TelegramClient'] = None
         self._connected = False
         self._bots_config = DEFAULT_BOTS_CONFIG
-        self._message_callback: Optional[callable] = None
+        self._message_callback: Optional[Callable] = None
         self._update_task: Optional[asyncio.Task] = None
         self._polling_task: Optional[asyncio.Task] = None
         self._monitored_chats: Dict[int, int] = {}  # telegram_chat_id -> last_message_id
@@ -342,19 +365,19 @@ class TelegramMTProtoClient:
             self._client.flood_sleep_threshold = flood_threshold
             log.info(f"MTProto flood_sleep_threshold set to {flood_threshold}s")
 
-            await self._client.connect()
+            await self._client.connect()  # type: ignore[union-attr]
 
             # Validate session - check if session is authorized
-            if not await self._client.is_user_authorized():
+            if not await self._client.is_user_authorized():  # type: ignore[union-attr]
                 if self.config.admin_phone:
                     log.info(f"Starting MTProto authorization for {self.config.admin_phone}")
-                    await self._client.start(phone=self.config.admin_phone)
+                    await self._client.start(phone=self.config.admin_phone)  # type: ignore[union-attr]
                 else:
                     log.error("MTProto not authorized and no phone number provided")
                     return False
 
             # Session validation - verify we can get user info
-            me = await self._client.get_me()
+            me = await self._client.get_me()  # type: ignore[union-attr]
             if not me:
                 log.error("MTProto session invalid - cannot get user info")
                 return False
@@ -492,7 +515,7 @@ class TelegramMTProtoClient:
             return await self.connect()
         return True
 
-    def set_message_callback(self, callback: callable) -> None:
+    def set_message_callback(self, callback: Callable) -> None:
         """Set callback for incoming messages"""
         self._message_callback = callback
         log.info("MTProto message callback registered")
@@ -652,16 +675,18 @@ class TelegramMTProtoClient:
         if not self._connected or not self._client:
             return
 
+        entity: Any = None  # Initialize to avoid "referenced before assignment"
+
         try:
             # Convert to Telegram peer ID format
-            peer_id = self._to_telegram_peer_id(chat_id)
+            peer_id = TelegramMTProtoClient._to_telegram_peer_id(chat_id)
 
             # Try to get entity - may fail if not in cache
             try:
                 entity = await self._client.get_entity(peer_id)
-            except ValueError as e:
+            except ValueError as val_err:
                 # Entity not found in cache - try to resolve via dialogs
-                if "Could not find the input entity" in str(e):
+                if "Could not find the input entity" in str(val_err):
                     log.warning(f"Entity {peer_id} not in cache, trying to resolve via dialogs...")
 
                     # Iterate dialogs to populate entity cache
@@ -709,7 +734,7 @@ class TelegramMTProtoClient:
                         # Only fetch sender if not cached
                         try:
                             sender = await msg.get_sender()
-                        except Exception:
+                        except (ValueError, AttributeError, RuntimeError):
                             sender = None
                     if sender and getattr(sender, 'bot', False):
                         continue
@@ -794,7 +819,7 @@ class TelegramMTProtoClient:
                         file_type = 'document'
 
             # Use full Telegram chat ID with -100 prefix for supergroups
-            full_chat_id = self._to_telegram_peer_id(chat_id)
+            full_chat_id = TelegramMTProtoClient._to_telegram_peer_id(chat_id)
 
             incoming_msg = IncomingMessage(
                 message_id=msg.id,
@@ -821,13 +846,13 @@ class TelegramMTProtoClient:
             print(f"[MTPROTO] [POLLING] Message from {sender_username or sender_id}: {text[:30] if text else '[no text]'}...")
 
             # Forward to callback if registered
-            if self._message_callback:
+            if self._message_callback is not None:
                 await self._message_callback(incoming_msg)
             else:
                 log.warning("No message callback registered, incoming message ignored")
 
-        except Exception as e:
-            log.error(f"[POLLING] Error processing message: {e}", exc_info=True)
+        except (AttributeError, TypeError, ValueError) as proc_err:
+            log.error(f"[POLLING] Error processing message: {proc_err}", exc_info=True)
 
     async def _handle_new_message(self, event) -> None:
         """
@@ -947,15 +972,16 @@ class TelegramMTProtoClient:
             log.info(f"MTProto message details: has_reply_to={hasattr(message, 'reply_to') and message.reply_to is not None}")
 
             # Forward to callback if registered
-            if self._message_callback:
+            if self._message_callback is not None:
                 await self._message_callback(incoming_msg)
             else:
                 log.warning("No message callback registered, incoming message ignored")
 
-        except Exception as e:
-            log.error(f"Error handling incoming message: {e}", exc_info=True)
+        except (AttributeError, TypeError, ValueError) as msg_err:
+            log.error(f"Error handling incoming message: {msg_err}", exc_info=True)
 
-    def _to_telegram_peer_id(self, group_id: int) -> int:
+    @staticmethod
+    def _to_telegram_peer_id(group_id: int) -> int:
         """
         Convert a stored group ID to the full Telegram peer ID format.
 
@@ -1040,7 +1066,7 @@ class TelegramMTProtoClient:
             log.error(f"Failed to create supergroup: {e}", exc_info=True)
             return None
 
-    async def _find_group_by_title(self, title: str):
+    async def _find_group_by_title(self, title: str) -> Any:
         """Find existing group by title"""
         try:
             async for dialog in self._client.iter_dialogs():
@@ -1048,7 +1074,7 @@ class TelegramMTProtoClient:
                 if getattr(entity, 'megagroup', False) and getattr(entity, 'title', '') == title:
                     return entity
             return None
-        except Exception:
+        except (ValueError, AttributeError, ConnectionError, OSError):
             return None
 
     async def update_group_title(self, group_id: int, new_title: str) -> bool:
@@ -1057,7 +1083,7 @@ class TelegramMTProtoClient:
             return False
 
         try:
-            group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+            group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
             await self._client(EditTitleRequest(channel=group, title=new_title))
             log.info(f"Group {group_id} title updated to: {new_title}")
             return True
@@ -1071,7 +1097,7 @@ class TelegramMTProtoClient:
             return False
 
         try:
-            group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+            group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
             await self._client(EditChatAboutRequest(peer=group, about=description))
             log.info(f"Group {group_id} description updated")
             return True
@@ -1103,7 +1129,7 @@ class TelegramMTProtoClient:
                 tmp_file_path = tmp_file.name
 
             try:
-                group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+                group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
                 uploaded_file = await self._client.upload_file(tmp_file_path)
                 await self._client(EditPhotoRequest(channel=group, photo=uploaded_file))
                 log.info(f"Group {group_id} photo set")
@@ -1122,7 +1148,7 @@ class TelegramMTProtoClient:
             return False
 
         try:
-            group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+            group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
 
             banned_rights = ChatBannedRights(
                 until_date=None,
@@ -1163,7 +1189,7 @@ class TelegramMTProtoClient:
             return None
 
         try:
-            group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+            group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
             invite = await self._client(ExportChatInviteRequest(group.id))
             return invite.link
         except Exception as e:
@@ -1176,7 +1202,7 @@ class TelegramMTProtoClient:
             return None
 
         try:
-            group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+            group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
             invite_link = await self.get_invite_link(group_id)
 
             return GroupInfo(
@@ -1217,21 +1243,41 @@ class TelegramMTProtoClient:
 
         try:
             # Convert stored ID to Telegram peer format
-            peer_id = self._to_telegram_peer_id(group_id)
+            peer_id = TelegramMTProtoClient._to_telegram_peer_id(group_id)
             log.debug(f"Converting group_id {group_id} to peer_id {peer_id}")
-            group = await self._client.get_entity(peer_id)
+            group = await self._client.get_entity(peer_id)  # type: ignore[union-attr]
 
-            # Convert emoji to ID
+            # Convert emoji to ID (only works with Telegram Premium)
             icon_emoji_id = EMOJI_MAP.get(icon_emoji) if icon_emoji else None
 
             import random
-            result = await self._client(CreateForumTopicRequest(
-                peer=group,
-                title=title,
-                icon_emoji_id=icon_emoji_id,
-                send_as=None,
-                random_id=random.randint(1, 2**63 - 1)
-            ))
+            random_id = random.randint(1, 2**63 - 1)
+
+            # Try with custom emoji first, fall back to no emoji if premium required
+            try:
+                result = await self._client(CreateForumTopicRequest(  # type: ignore[union-attr]
+                    peer=group,
+                    title=title,
+                    icon_emoji_id=icon_emoji_id,
+                    send_as=None,
+                    random_id=random_id
+                ))
+            except Exception as emoji_err:
+                # Check if it's a premium requirement error
+                if "premium" in str(emoji_err).lower():
+                    log.warning(f"Custom emoji requires premium, creating topic without emoji: {title}")
+                    # Retry without custom emoji
+                    result = await self._client(CreateForumTopicRequest(  # type: ignore[union-attr]
+                        peer=group,
+                        title=title,
+                        icon_emoji_id=None,  # No custom emoji
+                        send_as=None,
+                        random_id=random_id
+                    ))
+                    icon_emoji_id = None
+                    icon_emoji = None
+                else:
+                    raise
 
             # Extract topic_id from result
             topic_id = None
@@ -1252,8 +1298,8 @@ class TelegramMTProtoClient:
                 emoji_id=icon_emoji_id
             )
 
-        except Exception as e:
-            log.error(f"Failed to create forum topic: {e}", exc_info=True)
+        except Exception as create_err:
+            log.error(f"Failed to create forum topic: {create_err}", exc_info=True)
             return None
 
     async def update_forum_topic(
@@ -1279,7 +1325,7 @@ class TelegramMTProtoClient:
             return False
 
         try:
-            group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+            group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
 
             # Convert emoji to ID
             icon_emoji_id = EMOJI_MAP.get(new_emoji) if new_emoji else None
@@ -1308,7 +1354,7 @@ class TelegramMTProtoClient:
             return False
 
         try:
-            group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+            group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
             await self._client(DeleteTopicHistoryRequest(
                 peer=group,
                 top_msg_id=topic_id
@@ -1325,7 +1371,7 @@ class TelegramMTProtoClient:
             return False
 
         try:
-            group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+            group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
             await self._client(UpdatePinnedForumTopicRequest(
                 peer=group,
                 topic_id=topic_id,
@@ -1360,7 +1406,7 @@ class TelegramMTProtoClient:
             return False
 
         try:
-            group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+            group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
             await self._client(EditForumTopicRequest(
                 peer=group,
                 topic_id=topic_id,
@@ -1444,7 +1490,7 @@ class TelegramMTProtoClient:
             return False
 
         try:
-            group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+            group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
 
             # Resolve bot username
             resolved = await self._client(ResolveUsernameRequest(bot_username))
@@ -1532,7 +1578,7 @@ class TelegramMTProtoClient:
             return False
 
         try:
-            group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+            group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
             user = await self._client.get_entity(username)
             await self._client(InviteToChannelRequest(channel=group, users=[user]))
             log.info(f"User @{username} invited to group {group_id}")
@@ -1547,7 +1593,7 @@ class TelegramMTProtoClient:
             return False
 
         try:
-            group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+            group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
             user = await self._client.get_entity(username)
             await self._client(EditBannedRequest(
                 channel=group,
@@ -1566,7 +1612,7 @@ class TelegramMTProtoClient:
             return []
 
         try:
-            group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+            group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
             result = await self._client(GetParticipantsRequest(
                 channel=group,
                 filter=ChannelParticipantsSearch(''),
@@ -1614,7 +1660,7 @@ class TelegramMTProtoClient:
             return False
 
         try:
-            group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+            group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
             user = await self._client.get_entity(user_id)
 
             if admin:
@@ -1653,7 +1699,7 @@ class TelegramMTProtoClient:
             return False
 
         try:
-            group = await self._client.get_entity(self._to_telegram_peer_id(group_id))
+            group = await self._client.get_entity(TelegramMTProtoClient._to_telegram_peer_id(group_id))
             user = await self._client.get_entity(user_id)
 
             if restricted:

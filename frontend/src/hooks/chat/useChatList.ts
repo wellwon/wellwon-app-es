@@ -70,7 +70,8 @@ export function useChatList(options: UseChatListOptions = {}) {
         is_active: true,
         created_at: newChatData.created_at || new Date().toISOString(),
         company_id: newChatData.company_id || null,
-        telegram_chat_id: newChatData.telegram_chat_id || newChatData.telegram_supergroup_id || null,
+        telegram_chat_id: newChatData.telegram_chat_id || null,
+        telegram_supergroup_id: newChatData.telegram_supergroup_id || null, // Important for filtering
         telegram_topic_id: newChatData.telegram_topic_id || null,
         last_message_at: newChatData.created_at || new Date().toISOString(),
         last_message_content: null,
@@ -216,12 +217,43 @@ export function useChatList(options: UseChatListOptions = {}) {
       );
     };
 
+    // CRITICAL: Update telegram_supergroup_id when chat is linked to telegram
+    // This enables the chat to appear in the correct supergroup filter
+    const handleChatTelegramLinked = (event: CustomEvent) => {
+      const data = event.detail;
+      const chatId = data.chat_id || data.id;
+      const telegramSupergroupId = data.telegram_supergroup_id;
+
+      logger.info('WSE: Chat telegram linked, updating telegram_supergroup_id', {
+        chatId,
+        telegramSupergroupId
+      });
+
+      queryClient.setQueryData(
+        chatKeys.list({ includeArchived, limit }),
+        (oldData: ChatListItem[] | undefined) => {
+          if (!oldData) return oldData;
+          return oldData.map((chat) =>
+            chat.id === chatId
+              ? {
+                  ...chat,
+                  telegram_supergroup_id: telegramSupergroupId,
+                  telegram_chat_id: data.telegram_chat_id || chat.telegram_chat_id,
+                  _isOptimistic: false, // No longer optimistic after linking
+                }
+              : chat
+          );
+        }
+      );
+    };
+
     // Subscribe to WSE events
     window.addEventListener('chatCreated', handleChatCreated as EventListener);
     window.addEventListener('chatUpdated', handleChatUpdated as EventListener);
     window.addEventListener('chatArchived', handleChatArchived as EventListener);
     window.addEventListener('chatDeleted', handleChatDeleted as EventListener);
     window.addEventListener('messageCreated', handleMessageCreated as EventListener);
+    window.addEventListener('chatTelegramLinked', handleChatTelegramLinked as EventListener);
 
     return () => {
       window.removeEventListener('chatCreated', handleChatCreated as EventListener);
@@ -229,6 +261,7 @@ export function useChatList(options: UseChatListOptions = {}) {
       window.removeEventListener('chatArchived', handleChatArchived as EventListener);
       window.removeEventListener('chatDeleted', handleChatDeleted as EventListener);
       window.removeEventListener('messageCreated', handleMessageCreated as EventListener);
+      window.removeEventListener('chatTelegramLinked', handleChatTelegramLinked as EventListener);
     };
   }, [queryClient, includeArchived, limit]);
 

@@ -73,40 +73,131 @@ export function useCompany(companyId: string | null) {
 
 // -----------------------------------------------------------------------------
 // useMyCompanies - Current user's companies with WSE
+// PATTERN: Optimistic updates via setQueryData, NOT invalidateQueries
 // -----------------------------------------------------------------------------
 
 export function useMyCompanies(options?: { includeArchived?: boolean }) {
   const queryClient = useQueryClient();
   const includeArchived = options?.includeArchived ?? false;
 
-  // WSE event handlers
+  // WSE event handlers with optimistic updates
   useEffect(() => {
-    const handleCompanyChange = () => {
-      logger.debug('WSE: Company change, invalidating my companies');
-      queryClient.invalidateQueries({ queryKey: companyKeys.myCompanies() });
+    const queryKey = [...companyKeys.myCompanies(), { includeArchived }];
+
+    // OPTIMISTIC CREATE: Add new company to cache immediately
+    const handleCreated = (event: CustomEvent) => {
+      const data = event.detail;
+      logger.info('WSE: Company created, adding optimistically to my companies', { data });
+
+      const newCompany: CompanySummary = {
+        id: data.company_id || data.id,
+        name: data.name || 'New Company',
+        company_type: data.company_type || 'company',
+        is_active: true,
+        user_count: 1,
+        created_at: data.created_at || new Date().toISOString(),
+        logo_url: data.logo_url || null,
+        _isOptimistic: true, // Mark as optimistic
+      };
+
+      queryClient.setQueryData(queryKey, (oldData: CompanySummary[] | undefined) => {
+        if (!oldData) return [newCompany];
+        // Avoid duplicates
+        const exists = oldData.some((c) => c.id === newCompany.id);
+        if (exists) return oldData;
+        return [newCompany, ...oldData];
+      });
     };
 
-    window.addEventListener('companyCreated', handleCompanyChange);
-    window.addEventListener('companyUpdated', handleCompanyChange);
-    window.addEventListener('companyArchived', handleCompanyChange);
-    window.addEventListener('companyRestored', handleCompanyChange);
-    window.addEventListener('companyUserAdded', handleCompanyChange);
-    window.addEventListener('companyUserRemoved', handleCompanyChange);
+    // OPTIMISTIC UPDATE: Update company in cache
+    const handleUpdated = (event: CustomEvent) => {
+      const data = event.detail;
+      const companyId = data.company_id || data.id;
+      logger.debug('WSE: Company updated, updating in my companies', { companyId });
+
+      queryClient.setQueryData(queryKey, (oldData: CompanySummary[] | undefined) => {
+        if (!oldData) return oldData;
+        return oldData.map((c) =>
+          c.id === companyId ? { ...c, name: data.name ?? c.name } : c
+        );
+      });
+    };
+
+    // OPTIMISTIC DELETE: Remove from cache
+    const handleDeleted = (event: CustomEvent) => {
+      const data = event.detail;
+      const companyId = data.company_id || data.id;
+      logger.debug('WSE: Company deleted, removing from my companies', { companyId });
+
+      queryClient.setQueryData(queryKey, (oldData: CompanySummary[] | undefined) => {
+        if (!oldData) return oldData;
+        return oldData.filter((c) => c.id !== companyId);
+      });
+    };
+
+    // OPTIMISTIC ARCHIVE: Remove from active list (if not includeArchived)
+    const handleArchived = (event: CustomEvent) => {
+      if (includeArchived) return; // Keep archived companies if includeArchived
+      const data = event.detail;
+      const companyId = data.company_id || data.id;
+      logger.debug('WSE: Company archived, removing from my companies', { companyId });
+
+      queryClient.setQueryData(queryKey, (oldData: CompanySummary[] | undefined) => {
+        if (!oldData) return oldData;
+        return oldData.filter((c) => c.id !== companyId);
+      });
+    };
+
+    // For restore/user changes - delay invalidate to allow projection
+    const handleNeedsRefetchDelayed = () => {
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: companyKeys.myCompanies() });
+      }, 300);
+    };
+
+    window.addEventListener('companyCreated', handleCreated as EventListener);
+    window.addEventListener('companyUpdated', handleUpdated as EventListener);
+    window.addEventListener('companyDeleted', handleDeleted as EventListener);
+    window.addEventListener('companyArchived', handleArchived as EventListener);
+    window.addEventListener('companyRestored', handleNeedsRefetchDelayed);
+    window.addEventListener('companyUserAdded', handleNeedsRefetchDelayed);
+    window.addEventListener('companyUserRemoved', handleNeedsRefetchDelayed);
 
     return () => {
-      window.removeEventListener('companyCreated', handleCompanyChange);
-      window.removeEventListener('companyUpdated', handleCompanyChange);
-      window.removeEventListener('companyArchived', handleCompanyChange);
-      window.removeEventListener('companyRestored', handleCompanyChange);
-      window.removeEventListener('companyUserAdded', handleCompanyChange);
-      window.removeEventListener('companyUserRemoved', handleCompanyChange);
+      window.removeEventListener('companyCreated', handleCreated as EventListener);
+      window.removeEventListener('companyUpdated', handleUpdated as EventListener);
+      window.removeEventListener('companyDeleted', handleDeleted as EventListener);
+      window.removeEventListener('companyArchived', handleArchived as EventListener);
+      window.removeEventListener('companyRestored', handleNeedsRefetchDelayed);
+      window.removeEventListener('companyUserAdded', handleNeedsRefetchDelayed);
+      window.removeEventListener('companyUserRemoved', handleNeedsRefetchDelayed);
     };
-  }, [queryClient]);
+  }, [queryClient, includeArchived]);
 
   const query = useQuery({
     queryKey: [...companyKeys.myCompanies(), { includeArchived }],
-    queryFn: () => companyApi.getMyCompanies(includeArchived),
-    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const apiData = await companyApi.getMyCompanies(includeArchived);
+
+      // CRITICAL: Preserve optimistic entries during refetch
+      const existingData = queryClient.getQueryData<CompanySummary[]>(
+        [...companyKeys.myCompanies(), { includeArchived }]
+      );
+      if (existingData && Array.isArray(existingData)) {
+        const optimisticEntries = existingData.filter((c: any) => c._isOptimistic);
+        if (optimisticEntries.length > 0) {
+          logger.info('useMyCompanies: Preserving optimistic entries', {
+            optimisticCount: optimisticEntries.length,
+            apiCount: apiData.length,
+          });
+          const apiIds = new Set(apiData.map((a) => a.id));
+          const uniqueOptimistic = optimisticEntries.filter((o) => !apiIds.has(o.id));
+          return [...uniqueOptimistic, ...apiData];
+        }
+      }
+      return apiData;
+    },
+    staleTime: Infinity, // WSE handles updates
   });
 
   return {
@@ -120,6 +211,7 @@ export function useMyCompanies(options?: { includeArchived?: boolean }) {
 
 // -----------------------------------------------------------------------------
 // useCompanies - All companies list with WSE
+// PATTERN: Optimistic updates via setQueryData (TkDodo best practice)
 // -----------------------------------------------------------------------------
 
 export function useCompanies(options?: { includeArchived?: boolean; limit?: number }) {
@@ -128,27 +220,110 @@ export function useCompanies(options?: { includeArchived?: boolean; limit?: numb
   const limit = options?.limit ?? 50;
 
   useEffect(() => {
-    const handleCompanyChange = () => {
-      queryClient.invalidateQueries({ queryKey: companyKeys.lists() });
+    const queryKey = companyKeys.list({ includeArchived, limit });
+
+    // OPTIMISTIC CREATE
+    const handleCreated = (event: CustomEvent) => {
+      const data = event.detail;
+      logger.debug('WSE: Company created, adding to companies list', { data });
+
+      const newCompany: CompanySummary = {
+        id: data.company_id || data.id,
+        name: data.name || 'New Company',
+        company_type: data.company_type || 'company',
+        is_active: true,
+        user_count: 1,
+        created_at: data.created_at || new Date().toISOString(),
+        logo_url: data.logo_url || null,
+        _isOptimistic: true,
+      };
+
+      queryClient.setQueryData(queryKey, (oldData: CompanySummary[] | undefined) => {
+        if (!oldData) return [newCompany];
+        const exists = oldData.some((c) => c.id === newCompany.id);
+        if (exists) return oldData;
+        return [newCompany, ...oldData];
+      });
     };
 
-    window.addEventListener('companyCreated', handleCompanyChange);
-    window.addEventListener('companyUpdated', handleCompanyChange);
-    window.addEventListener('companyArchived', handleCompanyChange);
-    window.addEventListener('companyRestored', handleCompanyChange);
+    // OPTIMISTIC UPDATE
+    const handleUpdated = (event: CustomEvent) => {
+      const data = event.detail;
+      const companyId = data.company_id || data.id;
+
+      queryClient.setQueryData(queryKey, (oldData: CompanySummary[] | undefined) => {
+        if (!oldData) return oldData;
+        return oldData.map((c) =>
+          c.id === companyId ? { ...c, name: data.name ?? c.name } : c
+        );
+      });
+    };
+
+    // OPTIMISTIC DELETE
+    const handleDeleted = (event: CustomEvent) => {
+      const data = event.detail;
+      const companyId = data.company_id || data.id;
+
+      queryClient.setQueryData(queryKey, (oldData: CompanySummary[] | undefined) => {
+        if (!oldData) return oldData;
+        return oldData.filter((c) => c.id !== companyId);
+      });
+    };
+
+    // OPTIMISTIC ARCHIVE
+    const handleArchived = (event: CustomEvent) => {
+      if (includeArchived) return;
+      const data = event.detail;
+      const companyId = data.company_id || data.id;
+
+      queryClient.setQueryData(queryKey, (oldData: CompanySummary[] | undefined) => {
+        if (!oldData) return oldData;
+        return oldData.filter((c) => c.id !== companyId);
+      });
+    };
+
+    // For restore - delay to allow projection
+    const handleNeedsRefetchDelayed = () => {
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: companyKeys.lists() });
+      }, 300);
+    };
+
+    window.addEventListener('companyCreated', handleCreated as EventListener);
+    window.addEventListener('companyUpdated', handleUpdated as EventListener);
+    window.addEventListener('companyDeleted', handleDeleted as EventListener);
+    window.addEventListener('companyArchived', handleArchived as EventListener);
+    window.addEventListener('companyRestored', handleNeedsRefetchDelayed);
 
     return () => {
-      window.removeEventListener('companyCreated', handleCompanyChange);
-      window.removeEventListener('companyUpdated', handleCompanyChange);
-      window.removeEventListener('companyArchived', handleCompanyChange);
-      window.removeEventListener('companyRestored', handleCompanyChange);
+      window.removeEventListener('companyCreated', handleCreated as EventListener);
+      window.removeEventListener('companyUpdated', handleUpdated as EventListener);
+      window.removeEventListener('companyDeleted', handleDeleted as EventListener);
+      window.removeEventListener('companyArchived', handleArchived as EventListener);
+      window.removeEventListener('companyRestored', handleNeedsRefetchDelayed);
     };
-  }, [queryClient]);
+  }, [queryClient, includeArchived, limit]);
 
   const query = useQuery({
     queryKey: companyKeys.list({ includeArchived, limit }),
-    queryFn: () => companyApi.getCompanies(includeArchived, limit),
-    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const apiData = await companyApi.getCompanies(includeArchived, limit);
+
+      // Preserve optimistic entries during refetch
+      const existingData = queryClient.getQueryData<CompanySummary[]>(
+        companyKeys.list({ includeArchived, limit })
+      );
+      if (existingData && Array.isArray(existingData)) {
+        const optimisticEntries = existingData.filter((c: any) => c._isOptimistic);
+        if (optimisticEntries.length > 0) {
+          const apiIds = new Set(apiData.map((a) => a.id));
+          const uniqueOptimistic = optimisticEntries.filter((o) => !apiIds.has(o.id));
+          return [...uniqueOptimistic, ...apiData];
+        }
+      }
+      return apiData;
+    },
+    staleTime: Infinity, // WSE handles updates
   });
 
   return {
@@ -246,17 +421,21 @@ export function useCompanyBalance(companyId: string | null) {
 
 // -----------------------------------------------------------------------------
 // Mutations
+// PATTERN: TkDodo - Don't invalidate on success, WSE handles cache updates
+// https://tkdodo.eu/blog/using-web-sockets-with-react-query
 // -----------------------------------------------------------------------------
 
 export function useCreateCompany() {
-  const queryClient = useQueryClient();
+  // NOTE: Do NOT invalidate queries on success!
+  // WSE sends company_created event which triggers:
+  // 1. EventHandlers.handleCompanyCreated -> dispatches 'companyCreated' CustomEvent
+  // 2. useMyCompanies/useCompanies listen to event and add company via setQueryData
+  // 3. useSupergroups also listens and adds to supergroups cache
+  // Invalidating would cause a refetch that returns stale data (projection not yet complete)
 
   return useMutation({
     mutationFn: companyApi.createCompany,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: companyKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: companyKeys.myCompanies() });
-    },
+    // onSuccess intentionally empty - WSE handles cache updates
   });
 }
 
@@ -267,8 +446,8 @@ export function useUpdateCompany() {
     mutationFn: ({ companyId, data }: { companyId: string; data: companyApi.UpdateCompanyRequest }) =>
       companyApi.updateCompany(companyId, data),
     onSuccess: (_, { companyId }) => {
+      // Only invalidate detail cache - lists are updated via WSE events
       queryClient.invalidateQueries({ queryKey: companyKeys.detail(companyId) });
-      queryClient.invalidateQueries({ queryKey: companyKeys.lists() });
     },
   });
 }
@@ -280,9 +459,27 @@ export function useArchiveCompany() {
     mutationFn: ({ companyId, reason }: { companyId: string; reason?: string }) =>
       companyApi.archiveCompany(companyId, reason),
     onSuccess: (_, { companyId }) => {
+      // Only invalidate detail cache - lists are updated via WSE events
       queryClient.invalidateQueries({ queryKey: companyKeys.detail(companyId) });
-      queryClient.invalidateQueries({ queryKey: companyKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: companyKeys.myCompanies() });
+    },
+  });
+}
+
+export function useDeleteCompany() {
+  return useMutation({
+    mutationFn: (companyId: string) => companyApi.deleteCompany(companyId),
+    // WSE sends company_deleted event which updates caches optimistically
+  });
+}
+
+export function useRestoreCompany() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (companyId: string) => companyApi.restoreCompany(companyId),
+    onSuccess: (_, companyId) => {
+      // Only invalidate detail cache - lists are updated via WSE events
+      queryClient.invalidateQueries({ queryKey: companyKeys.detail(companyId) });
     },
   });
 }
