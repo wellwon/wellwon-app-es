@@ -517,8 +517,10 @@ class TelegramMTProtoClient:
     async def start_polling(self) -> None:
         """Start the message polling task."""
         if self._polling_task is None or self._polling_task.done():
-            # Pre-populate entity cache by iterating dialogs once
-            await self._populate_entity_cache()
+            # Entity cache is populated in connect() as background task
+            # Don't await here - avoids blocking startup with FloodWait (29s+ delays)
+            if not self._entity_cache_populated:
+                asyncio.create_task(self._populate_entity_cache())
 
             self._polling_task = asyncio.create_task(self._run_polling_loop())
             log.info("MTProto polling task started")

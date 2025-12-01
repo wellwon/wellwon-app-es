@@ -224,9 +224,10 @@ class SmartRichHandler(RichHandler if RICH_AVAILABLE else logging.StreamHandler)
 
         # Enhanced message patterns for collection
         self.collection_patterns = {
-            # Persistence Layer (PostgreSQL and Redis infrastructure)
+            # Persistence Layer (PostgreSQL, Redis, MinIO infrastructure)
             r'PostgreSQL.*pool.*initialized': ('persistence', 'PostgreSQL'),
             r'Redis.*initialized': ('persistence', 'Redis'),
+            r'MinIO.*storage.*initialized': ('persistence', 'MinIO Storage'),
 
             # Databases (Application-specific databases)
             r'Main database.*checked|applied': ('database', 'WellWon DB'),

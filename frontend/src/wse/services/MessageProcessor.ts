@@ -576,7 +576,7 @@ export class MessageProcessor {
     this.messageHandlers.set('connection_quality', (msg) => this.handleConnectionQuality(msg));
     this.messageHandlers.set('snapshot_complete', (msg) => this.handleSnapshotComplete(msg));
     this.messageHandlers.set('heartbeat', () => this.handleHeartbeat());
-    this.messageHandlers.set('PONG', () => {}); // PONG is handled in processTextMessage
+    this.messageHandlers.set('PONG', (msg) => this.handlePong(msg));
 
     // Debug handlers
     this.messageHandlers.set('debug_response', (msg) => this.handleDebugResponse(msg));
@@ -1034,6 +1034,19 @@ export class MessageProcessor {
   private handleHeartbeat(): void {
     const store = useWSEStore.getState();
     store.updateMetrics({ lastHealthCheck: Date.now() });
+  }
+
+  private handlePong(message: WSMessage): void {
+    // JSON PONG format: {"t":"PONG","p":{"client_timestamp":123,"server_timestamp":456}}
+    const payload = message.p || {};
+    const clientTimestamp = payload.client_timestamp || payload.timestamp;
+
+    if (clientTimestamp) {
+      const latency = Date.now() - clientTimestamp;
+      const store = useWSEStore.getState();
+      store.recordLatency(latency);
+      logger.debug(`PONG latency: ${latency}ms`);
+    }
   }
 
   private handleDebugResponse(message: WSMessage): void {

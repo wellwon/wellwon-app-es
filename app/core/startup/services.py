@@ -31,6 +31,30 @@ async def initialize_read_repositories(app: FastAPI) -> None:
     logger.info("Read repositories initialized.")
 
 
+async def initialize_storage(app: FastAPI) -> None:
+    """Initialize MinIO storage and ensure buckets exist."""
+    logger.info("Initializing MinIO storage...")
+
+    try:
+        from app.infra.storage.minio_provider import get_storage_provider
+
+        storage = get_storage_provider()
+
+        # Ensure main bucket exists
+        bucket_ok = await storage.ensure_bucket_exists()
+        if bucket_ok:
+            logger.info("MinIO storage initialized - bucket ready")
+        else:
+            logger.warning("MinIO storage initialization failed - uploads may not work")
+
+        app.state.storage_provider = storage
+
+    except Exception as e:
+        logger.error(f"Failed to initialize MinIO storage: {e}", exc_info=True)
+        logger.warning("Continuing without MinIO storage - file uploads will fail")
+        app.state.storage_provider = None
+
+
 async def initialize_services(app: FastAPI) -> None:
     """Initialize all application services"""
     logger.info("Starting service initialization...")
@@ -41,6 +65,9 @@ async def initialize_services(app: FastAPI) -> None:
 
     if not hasattr(app.state, 'command_bus'):
         logger.warning("Command Bus not initialized - some features may be limited")
+
+    # Initialize MinIO storage
+    await initialize_storage(app)
 
     # User authentication service
     app.state.user_auth_service = UserAuthenticationService()
@@ -215,12 +242,9 @@ async def _setup_telegram_polling(app: FastAPI, telegram_adapter) -> None:
         linked_chats = await app.state.query_bus.query(GetLinkedTelegramChatsQuery())
         logger.info(f"Found {len(linked_chats)} linked Telegram chats in database")
 
-        # If no linked chats found, add the known WellWon supergroup for testing
+        # Only add linked chats from database - no hardcoded defaults
         if not linked_chats:
-            # The WellWon supergroup ID (fallback for development/testing)
-            WELLWON_SUPERGROUP_ID = 3327943931
-            logger.info(f"No linked chats found, adding default supergroup {WELLWON_SUPERGROUP_ID}")
-            mtproto_client.add_monitored_chat(WELLWON_SUPERGROUP_ID, last_message_id=0)
+            logger.info("No linked Telegram chats found in database")
         else:
             # Add all linked chats to the polling monitor
             for chat in linked_chats:

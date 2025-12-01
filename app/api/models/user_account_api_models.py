@@ -380,3 +380,10 @@ class ProfileWithTelegramResponse(BaseModel):
 class LinkTelegramRequest(BaseModel):
     """Request to link Telegram user ID to WellWon account."""
     telegram_user_id: int = Field(..., description="Telegram user ID (bigint)")
+
+
+class AvatarUploadResponse(BaseModel):
+    """Response for avatar upload."""
+    success: bool
+    avatar_url: Optional[str] = None
+    error: Optional[str] = None

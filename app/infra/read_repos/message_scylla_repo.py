@@ -1253,7 +1253,7 @@ class MessageScyllaRepo:
                 if result:
                     # Delete all messages in this bucket
                     await self.client.execute(
-                        "DELETE FROM messages WHERE channel_id = ? AND bucket = ?",
+                        "DELETE FROM messages WHERE channel_id = %s AND bucket = %s",
                         (channel_id, bucket),
                         execution_profile='write',
                     )
@@ -1282,20 +1282,20 @@ class MessageScyllaRepo:
         try:
             # Get all reactions for this channel (scan is acceptable for deletion)
             reactions = await self.client.execute(
-                "SELECT DISTINCT message_id FROM message_reactions WHERE channel_id = ? ALLOW FILTERING",
+                "SELECT DISTINCT message_id FROM message_reactions WHERE channel_id = %s ALLOW FILTERING",
                 (channel_id,),
             )
             for row in reactions:
                 message_id = row['message_id']
                 # Delete reactions
                 await self.client.execute(
-                    "DELETE FROM message_reactions WHERE channel_id = ? AND message_id = ?",
+                    "DELETE FROM message_reactions WHERE channel_id = %s AND message_id = %s",
                     (channel_id, message_id),
                     execution_profile='write',
                 )
                 # Delete reaction counts
                 await self.client.execute(
-                    "DELETE FROM message_reaction_counts WHERE channel_id = ? AND message_id = ?",
+                    "DELETE FROM message_reaction_counts WHERE channel_id = %s AND message_id = %s",
                     (channel_id, message_id),
                     execution_profile='write',
                 )
@@ -1326,7 +1326,7 @@ class MessageScyllaRepo:
 
             # Delete all pinned for this channel
             await self.client.execute(
-                "DELETE FROM pinned_messages WHERE channel_id = ?",
+                "DELETE FROM pinned_messages WHERE channel_id = %s",
                 (channel_id,),
                 execution_profile='write',
             )
@@ -1349,13 +1349,13 @@ class MessageScyllaRepo:
         try:
             # Get all user read positions for this channel
             positions = await self.client.execute(
-                "SELECT user_id FROM message_read_positions WHERE channel_id = ? ALLOW FILTERING",
+                "SELECT user_id FROM message_read_positions WHERE channel_id = %s ALLOW FILTERING",
                 (channel_id,),
             )
             count = 0
             for row in positions:
                 await self.client.execute(
-                    "DELETE FROM message_read_positions WHERE channel_id = ? AND user_id = ?",
+                    "DELETE FROM message_read_positions WHERE channel_id = %s AND user_id = %s",
                     (channel_id, row['user_id']),
                     execution_profile='write',
                 )
@@ -1379,7 +1379,7 @@ class MessageScyllaRepo:
         """
         try:
             await self.client.execute(
-                "DELETE FROM telegram_sync_state WHERE channel_id = ?",
+                "DELETE FROM telegram_sync_state WHERE channel_id = %s",
                 (channel_id,),
                 execution_profile='write',
             )
@@ -1405,13 +1405,13 @@ class MessageScyllaRepo:
         try:
             # Scan mappings for this channel (acceptable for deletion)
             mappings = await self.client.execute(
-                "SELECT telegram_message_id, telegram_chat_id FROM telegram_message_mapping WHERE channel_id = ? ALLOW FILTERING",
+                "SELECT telegram_message_id, telegram_chat_id FROM telegram_message_mapping WHERE channel_id = %s ALLOW FILTERING",
                 (channel_id,),
             )
             count = 0
             for row in mappings:
                 await self.client.execute(
-                    "DELETE FROM telegram_message_mapping WHERE telegram_message_id = ? AND telegram_chat_id = ?",
+                    "DELETE FROM telegram_message_mapping WHERE telegram_message_id = %s AND telegram_chat_id = %s",
                     (row['telegram_message_id'], row['telegram_chat_id']),
                     execution_profile='write',
                 )

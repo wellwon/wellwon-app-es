@@ -30,8 +30,10 @@ class CompanyProjector:
     company_balance_transactions).
 
     SYNC vs ASYNC projections:
-    - SYNC: CompanyBalanceUpdated only (financial integrity requires immediate consistency)
-    - ASYNC: All others (UI uses optimistic updates, Worker processes via eventual consistency)
+    - SYNC: CompanyCreated, UserAddedToCompany, CompanyBalanceUpdated
+            (Frontend queries immediately after WSE events)
+    - ASYNC: CompanyUpdated, CompanyArchived, CompanyRestored, Telegram events
+            (Not time-critical, eventual consistency OK)
     """
 
     def __init__(self, company_read_repo: 'CompanyReadRepo'):
@@ -41,14 +43,14 @@ class CompanyProjector:
     # Company Lifecycle Projections
     # =========================================================================
 
-    # ASYNC: Saga reads company data from event enrichment, not from read model
-    @async_projection("CompanyCreated")
+    # SYNC: Frontend queries company immediately after receiving WSE event
+    @sync_projection("CompanyCreated")
     @monitor_projection
     async def on_company_created(self, envelope: EventEnvelope) -> None:
         """
         Project CompanyCreated event to read model.
 
-        ASYNC: Saga reads company_name, created_by from event context, not projection.
+        SYNC: Frontend receives WSE event and queries /companies/{id} immediately.
         """
         event_data = envelope.event_data
         company_id = envelope.aggregate_id
@@ -165,14 +167,14 @@ class CompanyProjector:
     # User-Company Relationship Projections
     # =========================================================================
 
-    # ASYNC: Saga doesn't query user_companies, Worker handles via eventual consistency
-    @async_projection("UserAddedToCompany")
+    # SYNC: Frontend queries company members immediately after receiving WSE event
+    @sync_projection("UserAddedToCompany")
     @monitor_projection
     async def on_user_added_to_company(self, envelope: EventEnvelope) -> None:
         """
         Project UserAddedToCompany event.
 
-        ASYNC: Saga uses user_id directly from event, doesn't query user_companies table.
+        SYNC: Frontend receives WSE event and queries company data immediately.
         """
         event_data = envelope.event_data
         company_id = envelope.aggregate_id

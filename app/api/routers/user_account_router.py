@@ -21,6 +21,8 @@ from fastapi import (
     Request,
     Response,
     status,
+    File,
+    UploadFile,
 )
 from fastapi.security import HTTPBearer
 
@@ -44,6 +46,7 @@ from app.api.models.user_account_api_models import (
     TerminateSessionRequest,
     ProfileWithTelegramResponse,
     LinkTelegramRequest,
+    AvatarUploadResponse,
 )
 
 # Security - USE EXISTING SECURITY UTILITIES
@@ -507,6 +510,120 @@ async def update_profile(
 
     # Return current profile
     return await get_me(current_user, request, query_bus)
+
+
+# =============================================================================
+# Avatar Upload
+# =============================================================================
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+MAX_AVATAR_SIZE = 5 * 1024 * 1024  # 5MB
+
+
+@router.post("/avatar", response_model=AvatarUploadResponse)
+async def upload_avatar(
+    current_user: Annotated[dict, Depends(get_current_user)],
+    command_bus=Depends(get_command_bus),
+    file: UploadFile = File(...),
+) -> AvatarUploadResponse:
+    """
+    Upload user avatar image.
+    Accepts JPEG, PNG, GIF, WebP up to 5MB.
+    """
+    try:
+        # Validate content type
+        content_type = file.content_type or "application/octet-stream"
+        if content_type not in ALLOWED_IMAGE_TYPES:
+            return AvatarUploadResponse(
+                success=False,
+                error=f"Image type {content_type} not allowed. Use JPEG, PNG, GIF, or WebP."
+            )
+
+        # Read file content
+        content = await file.read()
+
+        # Check file size
+        if len(content) > MAX_AVATAR_SIZE:
+            return AvatarUploadResponse(
+                success=False,
+                error=f"File too large. Maximum size is {MAX_AVATAR_SIZE // (1024*1024)}MB"
+            )
+
+        # Upload to MinIO storage
+        from app.infra.storage.minio_provider import get_storage_provider
+
+        storage = get_storage_provider()
+        result = await storage.upload_file(
+            bucket="user-avatars",
+            file_content=content,
+            content_type=content_type,
+            original_filename=file.filename,
+        )
+
+        if not result.success:
+            return AvatarUploadResponse(success=False, error=result.error)
+
+        # Update user profile with new avatar URL
+        user_uuid = current_user["user_id"]
+        from app.user_account.commands import UpdateUserProfileCommand
+
+        command = UpdateUserProfileCommand(
+            user_id=user_uuid,
+            avatar_url=result.public_url,
+        )
+        await command_bus.send(command)
+
+        log.info(f"Avatar uploaded for user {user_uuid}: {result.public_url}")
+
+        return AvatarUploadResponse(
+            success=True,
+            avatar_url=result.public_url,
+        )
+
+    except Exception as e:
+        log.error(f"Failed to upload avatar: {e}", exc_info=True)
+        return AvatarUploadResponse(success=False, error="Failed to upload avatar")
+
+
+@router.delete("/avatar", response_model=AvatarUploadResponse)
+async def delete_avatar(
+    current_user: Annotated[dict, Depends(get_current_user)],
+    command_bus=Depends(get_command_bus),
+    query_bus=Depends(get_query_bus),
+) -> AvatarUploadResponse:
+    """Delete user avatar."""
+    try:
+        user_uuid = current_user["user_id"]
+
+        # Get current avatar URL
+        query = GetUserProfileQuery(user_id=user_uuid)
+        profile = await query_bus.query(query)
+
+        if not profile or not profile.avatar_url:
+            return AvatarUploadResponse(success=True, avatar_url=None)
+
+        # Delete from storage
+        from app.infra.storage.minio_provider import get_storage_provider
+
+        storage = get_storage_provider()
+        await storage.delete_by_url(profile.avatar_url)
+
+        # Update profile to remove avatar URL
+        from app.user_account.commands import UpdateUserProfileCommand
+
+        command = UpdateUserProfileCommand(
+            user_id=user_uuid,
+            avatar_url=None,
+        )
+        await command_bus.send(command)
+
+        log.info(f"Avatar deleted for user {user_uuid}")
+
+        return AvatarUploadResponse(success=True, avatar_url=None)
+
+    except Exception as e:
+        log.error(f"Failed to delete avatar: {e}", exc_info=True)
+        return AvatarUploadResponse(success=False, error="Failed to delete avatar")
 
 
 @router.post("/verify-password", response_model=StatusResponse)

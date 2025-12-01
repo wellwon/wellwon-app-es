@@ -528,8 +528,11 @@ export function useWSE(
       let parsed: any;
 
       if (typeof data === 'string') {
-        // Skip PING/PONG messages
-        if (data.toUpperCase().startsWith('PING') || data.startsWith('PONG:')) {
+        // Handle PING/PONG messages (both plain text and JSON with WSE prefix)
+        const isPingPong = data.toUpperCase().startsWith('PING') ||
+                           data.startsWith('PONG:') ||
+                           (data.startsWith('WSE{') && data.includes('"PONG"'));
+        if (isPingPong) {
           processor.processIncoming(data).catch(error => {
             logger.error('Failed to process ping/pong:', error);
           });

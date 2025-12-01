@@ -915,11 +915,34 @@ export class ConnectionManager {
     ws.onmessage = (event) => {
       if (this.isDestroyed) return;
 
-      // Record latency for PONG messages
-      if (typeof event.data === 'string' && event.data.startsWith('PONG:')) {
-        try {
-          const timestamp = parseInt(event.data.substring(5), 10);
-          const latency = Date.now() - timestamp;
+      // Record latency for PONG messages (JSON format with WSE prefix)
+      if (typeof event.data === 'string') {
+        let latency: number | null = null;
+
+        // JSON PONG with WSE prefix: WSE{"t":"PONG","p":{"client_timestamp":123,...}}
+        if (event.data.startsWith('WSE{') && event.data.includes('"PONG"')) {
+          try {
+            const parsed = JSON.parse(event.data.substring(3));
+            if (parsed.t === 'PONG' && parsed.p?.client_timestamp) {
+              latency = Date.now() - parsed.p.client_timestamp;
+            }
+          } catch (error) {
+            // Will be handled by MessageProcessor
+          }
+        }
+        // Legacy plain text format: PONG:timestamp
+        else if (event.data.startsWith('PONG:')) {
+          try {
+            const timestamp = parseInt(event.data.substring(5), 10);
+            latency = Date.now() - timestamp;
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logger.warn('[ConnectionManager] Failed to parse PONG timestamp:', errorMessage);
+          }
+        }
+
+        // Update connection pool and adaptive quality if we got latency
+        if (latency !== null) {
           this.connectionPool.recordSuccess(endpoint, latency);
 
           // Update adaptive quality based on latency (industry thresholds)
@@ -930,9 +953,7 @@ export class ConnectionManager {
           else quality = 'poor';
 
           this.adaptiveQuality.updateQuality(quality, { latency });
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          logger.warn('[ConnectionManager] Failed to parse PONG timestamp:', errorMessage);
+          logger.debug(`[ConnectionManager] PONG latency: ${latency}ms, quality: ${quality}`);
         }
       }
 
