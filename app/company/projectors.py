@@ -41,14 +41,14 @@ class CompanyProjector:
     # Company Lifecycle Projections
     # =========================================================================
 
-    # SYNC: Saga creates chat immediately after company - must exist in read model
-    @sync_projection("CompanyCreated")
+    # ASYNC: Saga reads company data from event enrichment, not from read model
+    @async_projection("CompanyCreated")
     @monitor_projection
     async def on_company_created(self, envelope: EventEnvelope) -> None:
         """
         Project CompanyCreated event to read model.
 
-        SYNC: GroupCreationSaga creates chat immediately after.
+        ASYNC: Saga reads company_name, created_by from event context, not projection.
         """
         event_data = envelope.event_data
         company_id = envelope.aggregate_id
@@ -228,14 +228,14 @@ class CompanyProjector:
     # Telegram Supergroup Projections
     # =========================================================================
 
-    # SYNC: Saga links chat to telegram immediately after - must exist in read model
-    @sync_projection("TelegramSupergroupCreated")
+    # ASYNC: Saga reads telegram_group_id from context, has retry logic for FK
+    @async_projection("TelegramSupergroupCreated")
     @monitor_projection
     async def on_telegram_supergroup_created(self, envelope: EventEnvelope) -> None:
         """
         Project TelegramSupergroupCreated event.
 
-        SYNC: GroupCreationSaga links chat to telegram immediately after.
+        ASYNC: Saga reads telegram_group_id from context, RetriableProjectionError handles FK delays.
         """
         event_data = envelope.event_data
         company_id = envelope.aggregate_id

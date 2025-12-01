@@ -233,8 +233,8 @@ EXECUTE FUNCTION emit_external_change('UserRoleChangedExternally');
 
 | Metric | Count |
 |--------|-------|
-| SYNC projections | 8 |
-| ASYNC projections | 15 |
+| SYNC projections | 7 |
+| ASYNC projections | 16 |
 | Total projections | 23 |
 | Commands | 12 |
 | Queries | 10 |

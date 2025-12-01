@@ -376,10 +376,10 @@ class UserAccountProjector:
     # WellWon Platform Projection Handlers
     # -------------------------------------------------------------------------
 
-    # SYNC: User expects immediate profile update visibility
-    @sync_projection("UserProfileUpdated")
+    # ASYNC: UI uses optimistic update, no saga dependency
+    @async_projection("UserProfileUpdated")
     async def on_user_profile_updated(self, envelope: EventEnvelope) -> None:
-        """Project UserProfileUpdated event for WellWon platform (SYNC)"""
+        """Project UserProfileUpdated event for WellWon platform (ASYNC - UI optimistic)"""
         event_data = envelope.event_data
         user_id = envelope.aggregate_id
 

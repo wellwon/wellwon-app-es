@@ -138,10 +138,12 @@ WellWon uses a dual-decorator projection system implementing CQRS (Command Query
 
 | Domain | SYNC | ASYNC | Total | Kafka Topic |
 |--------|------|-------|-------|-------------|
-| User Account | 8 | 15 | 23 | `transport.user-account-events` |
-| Company | 2 | 12 | 14 | `transport.company-events` |
+| User Account | 7 | 16 | 23 | `transport.user-account-events` |
+| Company | 0 | 14 | 14 | `transport.company-events` |
 | Chat | 4 | 12 | 16 | `transport.chat-events` |
-| **TOTAL** | **14** | **39** | **53** | - |
+| **TOTAL** | **11** | **42** | **53** | - |
+
+**SYNC Ratio:** 21% (industry standard: 10-20%)
 
 ## Key Components
 
