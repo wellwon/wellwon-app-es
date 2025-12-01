@@ -1347,8 +1347,8 @@ Use this checklist to ensure your domain is complete:
 - [ ] Domain registered in `domain_registry.py`
 - [ ] Events registered in event models dict
 - [ ] Projector factory configured
-- [ ] Topics configured correctly
-- [ ] Sync events loaded from `sync_events.py`
+- [ ] TopicConfig added in `eventbus_transport_config.py`
+- [ ] Consumer group set to `event-processor-workers`
 
 ### Database
 - [ ] Alembic migration created
@@ -1530,9 +1530,9 @@ After creating your domain:
 5. **Deploy** - Test in staging before production
 
 **Recommended Reading:**
-- `/Users/silvermpx/PycharmProjects/TradeCore/docs/cqrs.md`
-- `/Users/silvermpx/PycharmProjects/TradeCore/docs/mvp/DOMAIN_IMPLEMENTATION_BEST_PRACTICES.md`
-- `/Users/silvermpx/PycharmProjects/TradeCore/docs/redpanda_comprehensive_architecture_v06.md`
+- `/docs/reference/PROJECTION_DECORATORS.md` - Projection decorator patterns
+- `/docs/mvp/architecture/PROJECTION_ARCHITECTURE.md` - Full architecture overview
+- `/docs/mvp/domains/` - Example domain documentation (User Account, Company, Chat)
 
 ---
 
@@ -1541,24 +1541,24 @@ After creating your domain:
 If you encounter issues:
 
 1. Check exemplar domains for reference:
-   - **Simple:** `app/broker_account/`
-   - **Medium:** `app/broker_connection/`
-   - **Complex:** `app/automation/`
+   - **Simple:** `app/user_account/` (23 projections)
+   - **Medium:** `app/company/` (14 projections)
+   - **Complex:** `app/chat/` (16 projections with ScyllaDB)
 
 2. Review existing patterns in codebase
 
 3. Check logs for errors:
    ```bash
-   tail -f logs/tradecore.log
+   tail -f logs/wellwon.log
    ```
 
 4. Use debugging tools:
    - Redpanda Console: http://localhost:8080
-   - API Docs: http://localhost:5001/docs
+   - API Docs: http://localhost:5002/docs
 
 ---
 
-**Version:** 1.0
-**Last Updated:** November 10, 2025
-**Author:** TradeCore Team
+**Version:** 2.0
+**Last Updated:** December 1, 2025
+**Author:** WellWon Team
 **Status:** Production Ready
