@@ -109,6 +109,7 @@ def create_user_account_domain() -> DomainRegistration:
             "UserProfileUpdated": UserProfileUpdated,
             "UserAuthenticationSucceeded": UserAuthenticationSucceeded,
             "UserPasswordChanged": UserPasswordChanged,
+            "UserLoggedOut": UserLoggedOut,
             # CES Events (Compensating Event System - External Change Detection)
             # Pattern: Greg Young's Compensating Events via PostgreSQL triggers
             # These don't have dedicated models - use None for pass-through processing
