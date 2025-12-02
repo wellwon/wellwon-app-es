@@ -567,9 +567,14 @@ export function MessageBubble({
     // Message status (WhatsApp/Telegram style):
     // ✓  (gray)  - Sent to WellWon server (waiting for Telegram delivery)
     // ✓✓ (gray)  - Delivered to Telegram (has telegram_message_id)
-    // ✓✓ (blue)  - Read (by WellWon user or on Telegram)
+    // ✓✓ (blue)  - Read by RECIPIENT (not by the sender themselves!)
 
-    const isReadByWeb = (message.read_by?.length ?? 0) > 0;
+    // IMPORTANT: Only count as "read" if someone OTHER than the sender read it
+    // The sender marking their own message as "seen" doesn't count as a read receipt
+    const readByOthers = message.read_by?.filter(
+      (r: any) => String(r.user_id) !== String(message.sender_id)
+    ) ?? [];
+    const isReadByWeb = readByOthers.length > 0;
     const isReadOnTelegram = !!message.telegram_read_at;
     const isRead = isReadByWeb || isReadOnTelegram;
 

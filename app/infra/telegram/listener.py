@@ -190,6 +190,7 @@ class TelegramEventListener:
         handler_map = {
             "MessageSent": self.on_message_sent,
             "MessageDeleted": self.on_message_deleted,
+            "MessagesMarkedAsRead": self.on_messages_marked_as_read,  # Web -> Telegram read sync
             "ChatCreated": self.on_chat_created,
             "ChatUpdated": self.on_chat_updated,
             "ChatArchived": self.on_chat_archived,
@@ -690,6 +691,94 @@ class TelegramEventListener:
 
         except Exception as e:
             log.error(f"Error handling MessageDeleted event: {e}", exc_info=True)
+
+    async def on_messages_marked_as_read(self, event: dict) -> None:
+        """
+        Handle MessagesMarkedAsRead event - sync read status to Telegram.
+
+        When user reads messages on WellWon (web), we mark them as read on Telegram too.
+        This enables bidirectional read sync:
+        - WellWon -> Telegram: This handler
+        - Telegram -> WellWon: incoming_handler.handle_read_event
+
+        Event payload:
+        {
+            "chat_id": UUID,
+            "user_id": UUID,
+            "last_read_message_id": UUID,
+            "read_count": int,
+            "read_at": datetime,
+            "source": str  # 'web' or 'telegram'
+        }
+        """
+        if not self._initialized or not self._telegram:
+            log.warning("Listener not initialized, skipping read sync")
+            return
+
+        # CRITICAL: Only sync reads from WEB to Telegram
+        # If source is 'telegram', the read already came from Telegram - don't loop back
+        source = event.get("source", "web")
+        if source == "telegram":
+            log.debug("Skipping read sync - already from Telegram")
+            return
+
+        try:
+            chat_id = event.get("chat_id")
+
+            if not chat_id:
+                log.debug("No chat_id in MessagesMarkedAsRead event")
+                return
+
+            # Lookup chat to get telegram_chat_id and telegram_topic_id
+            from app.chat.queries import GetChatByIdQuery
+            chat = await self._query_bus.query(
+                GetChatByIdQuery(
+                    chat_id=UUID(chat_id) if isinstance(chat_id, str) else chat_id
+                )
+            )
+
+            if not chat:
+                log.debug(f"Chat {chat_id} not found for read sync")
+                return
+
+            telegram_chat_id = getattr(chat, 'telegram_chat_id', None) or getattr(chat, 'telegram_supergroup_id', None)
+            telegram_topic_id = getattr(chat, 'telegram_topic_id', None)
+
+            if not telegram_chat_id:
+                log.debug(f"Chat {chat_id} not linked to Telegram, skipping read sync")
+                return
+
+            # Mark all messages as read on Telegram (max_id=0 means all messages)
+            # This is the standard behavior when opening a chat - mark everything as read
+            # Future optimization: track specific telegram_message_id for granular read tracking
+            max_id = 0
+
+            if telegram_topic_id:
+                # Forum topic - use topic-specific read method
+                success = await self._telegram.mark_topic_messages_read(
+                    group_id=telegram_chat_id,
+                    topic_id=telegram_topic_id,
+                    max_id=max_id
+                )
+            else:
+                # Regular chat/group
+                success = await self._telegram.mark_messages_read(
+                    chat_id=telegram_chat_id,
+                    max_id=max_id
+                )
+
+            if success:
+                log.info(
+                    f"Synced read status to Telegram: chat={telegram_chat_id}, "
+                    f"topic={telegram_topic_id}, max_id={max_id}"
+                )
+            else:
+                log.warning(
+                    f"Failed to sync read status to Telegram: chat={telegram_chat_id}"
+                )
+
+        except Exception as e:
+            log.error(f"Error handling MessagesMarkedAsRead event: {e}", exc_info=True)
 
     async def on_chat_created(self, event: dict) -> None:
         """

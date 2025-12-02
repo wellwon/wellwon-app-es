@@ -310,12 +310,50 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
       );
     };
 
+    // Handle messages read on Telegram - blue checkmarks from Telegram read receipts
+    const handleMessagesReadOnTelegram = (event: CustomEvent) => {
+      const data = event.detail;
+      if (String(data.chat_id) !== String(chatId)) return;
+
+      const telegramReadAt = data.telegram_read_at;
+
+      logger.debug('WSE: Messages read on Telegram (blue checkmarks)', {
+        chatId,
+        telegramReadAt,
+      });
+
+      queryClient.setQueryData(
+        chatKeys.messages(chatId),
+        (oldData: any) => {
+          if (!oldData) return oldData;
+
+          // Update all messages that have telegram_message_id but no telegram_read_at
+          const newPages = oldData.pages.map((page: any) => ({
+            ...page,
+            messages: page.messages.map((m: Message) => {
+              // Only update messages that were delivered to Telegram
+              if (m.telegram_message_id && !m.telegram_read_at) {
+                return {
+                  ...m,
+                  telegram_read_at: telegramReadAt,
+                };
+              }
+              return m;
+            }),
+          }));
+
+          return { ...oldData, pages: newPages };
+        }
+      );
+    };
+
     // Subscribe to WSE events
     window.addEventListener('messageCreated', handleMessageCreated as EventListener);
     window.addEventListener('messageUpdated', handleMessageUpdated as EventListener);
     window.addEventListener('messageDeleted', handleMessageDeleted as EventListener);
     window.addEventListener('messageSyncedToTelegram', handleMessageSyncedToTelegram as EventListener);
     window.addEventListener('messagesRead', handleMessagesRead as EventListener);
+    window.addEventListener('messagesReadOnTelegram', handleMessagesReadOnTelegram as EventListener);
 
     return () => {
       window.removeEventListener('messageCreated', handleMessageCreated as EventListener);
@@ -323,6 +361,7 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
       window.removeEventListener('messageDeleted', handleMessageDeleted as EventListener);
       window.removeEventListener('messageSyncedToTelegram', handleMessageSyncedToTelegram as EventListener);
       window.removeEventListener('messagesRead', handleMessagesRead as EventListener);
+      window.removeEventListener('messagesReadOnTelegram', handleMessagesReadOnTelegram as EventListener);
     };
   }, [chatId, queryClient]);
 

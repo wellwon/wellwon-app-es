@@ -213,6 +213,7 @@ class MessagesMarkedAsRead(BaseEvent):
     last_read_message_id: uuid.UUID
     read_count: int
     read_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    source: str = "web"  # 'web' or 'telegram' - prevents bidirectional sync loop
 
 
 @domain_event(category="domain")
@@ -222,7 +223,7 @@ class MessageSyncedToTelegram(BaseEvent):
     This enables bidirectional delivery tracking:
     - Single checkmark: Message sent to WellWon server
     - Double checkmark: Message delivered to Telegram (this event)
-    - Blue double checkmark: Message read on Telegram (MessagesMarkedAsRead with telegram_read_at)
+    - Blue double checkmark: Message read on Telegram (MessagesReadOnTelegram)
     """
     event_type: Literal["MessageSyncedToTelegram"] = "MessageSyncedToTelegram"
     message_id: uuid.UUID
@@ -230,6 +231,21 @@ class MessageSyncedToTelegram(BaseEvent):
     telegram_message_id: int  # Telegram's message ID
     telegram_chat_id: int  # Telegram chat/supergroup ID
     synced_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@domain_event(category="domain")
+class MessagesReadOnTelegram(BaseEvent):
+    """Event emitted when recipient reads messages on Telegram.
+
+    This triggers blue double checkmarks for messages YOU sent.
+    The Telegram MTProto client receives MessageRead events with is_outbox=True,
+    which means "others read messages you sent".
+    """
+    event_type: Literal["MessagesReadOnTelegram"] = "MessagesReadOnTelegram"
+    chat_id: uuid.UUID
+    last_read_message_id: uuid.UUID  # WellWon message ID
+    last_read_telegram_message_id: int  # Telegram's max_id
+    telegram_read_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # =============================================================================
@@ -313,6 +329,7 @@ CHAT_EVENT_TYPES = {
     "MessageReadStatusUpdated": MessageReadStatusUpdated,
     "MessagesMarkedAsRead": MessagesMarkedAsRead,
     "MessageSyncedToTelegram": MessageSyncedToTelegram,
+    "MessagesReadOnTelegram": MessagesReadOnTelegram,
     "TypingStarted": TypingStarted,
     "TypingStopped": TypingStopped,
     "TelegramChatLinked": TelegramChatLinked,

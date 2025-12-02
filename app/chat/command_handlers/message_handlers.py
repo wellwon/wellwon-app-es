@@ -392,6 +392,7 @@ class MarkMessagesAsReadHandler(BaseCommandHandler):
             user_id=command.user_id,
             last_read_message_id=command.last_read_message_id,
             read_count=read_count,
+            source=command.source,
         )
 
         # Check if events were actually emitted (idempotency check passed)

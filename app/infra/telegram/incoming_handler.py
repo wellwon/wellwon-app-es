@@ -468,8 +468,9 @@ class TelegramIncomingHandler:
         """
         Handle incoming read event from Telegram MTProto.
 
-        When a user reads messages in Telegram, sync the read status to WellWon.
-        This is called by the MTProto client's read callback.
+        Two cases:
+        1. is_outbox=True: Others read YOUR messages -> Set telegram_read_at (blue checkmarks)
+        2. is_outbox=False: YOU read messages on Telegram -> Sync your read status to WellWon
 
         Args:
             read_event: Read event info from Telegram (chat_id, max_id, is_outbox)
@@ -477,12 +478,80 @@ class TelegramIncomingHandler:
         Returns:
             True if handled successfully
         """
-        # Skip outbox events (others reading your messages)
-        # We only care about inbox (you reading messages)
-        if read_event.is_outbox:
-            log.debug(f"Skipping outbox read event for chat {read_event.chat_id}")
+        try:
+            if read_event.is_outbox:
+                # OUTBOX: Others read messages YOU sent -> Blue checkmarks!
+                return await self._handle_outbox_read_event(read_event)
+            else:
+                # INBOX: YOU read messages on Telegram -> Sync to WellWon
+                return await self._handle_inbox_read_event(read_event)
+        except Exception as e:
+            log.error(f"Error handling Telegram read event: {e}", exc_info=True)
+            return False
+
+    async def _handle_outbox_read_event(self, read_event: 'ReadEventInfo') -> bool:
+        """
+        Handle when others read YOUR messages on Telegram.
+        This triggers blue checkmarks (telegram_read_at).
+        """
+        log.info(
+            f"Telegram read receipt: others read messages up to {read_event.max_id} "
+            f"in chat {read_event.chat_id}"
+        )
+
+        try:
+            # 1. Lookup WellWon chat by Telegram chat_id
+            chat_id = await self._lookup_chat_by_telegram_id(read_event.chat_id)
+
+            if not chat_id:
+                log.debug(f"No WellWon chat found for Telegram chat {read_event.chat_id}")
+                return False
+
+            # 2. Find the WellWon message that corresponds to the Telegram max_id
+            wellwon_message_id = await self._find_message_by_telegram_id(
+                chat_id,
+                read_event.chat_id,
+                read_event.max_id
+            )
+
+            if not wellwon_message_id:
+                log.debug(
+                    f"No WellWon message found for Telegram message {read_event.max_id} "
+                    f"in chat {read_event.chat_id}"
+                )
+                return False
+
+            # 3. Emit event to set telegram_read_at (blue checkmarks)
+            from datetime import datetime, timezone
+            from app.chat.events import MessagesReadOnTelegram
+
+            # Dispatch event directly to event bus (no aggregate needed)
+            event = MessagesReadOnTelegram(
+                chat_id=chat_id,
+                last_read_telegram_message_id=read_event.max_id,
+                last_read_message_id=wellwon_message_id,
+                telegram_read_at=datetime.now(timezone.utc),
+            )
+
+            # Publish to event bus for projection and WSE
+            await self._event_bus.publish(event)
+
+            log.info(
+                f"Blue checkmark: messages up to {wellwon_message_id} read on Telegram "
+                f"(telegram_max_id={read_event.max_id}, chat={chat_id})"
+            )
+
             return True
 
+        except Exception as e:
+            log.error(f"Error handling outbox read event: {e}", exc_info=True)
+            return False
+
+    async def _handle_inbox_read_event(self, read_event: 'ReadEventInfo') -> bool:
+        """
+        Handle when YOU read messages on Telegram.
+        Syncs your read status to WellWon.
+        """
         try:
             # 1. Lookup WellWon chat by Telegram chat_id
             chat_id = await self._lookup_chat_by_telegram_id(read_event.chat_id)

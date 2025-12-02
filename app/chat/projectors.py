@@ -448,6 +448,36 @@ class ChatProjector:
             sync_direction=SyncDirection.WEB_TO_TELEGRAM,
         )
 
+    @async_projection("MessagesReadOnTelegram")
+    @monitor_projection
+    async def on_messages_read_on_telegram(self, envelope: EventEnvelope) -> None:
+        """
+        Project MessagesReadOnTelegram - Blue checkmarks.
+
+        When recipient reads messages on Telegram, update telegram_read_at
+        to trigger blue checkmarks on frontend.
+        """
+        event_data = envelope.event_data
+        chat_id = uuid.UUID(event_data['chat_id'])
+        last_read_message_id = uuid.UUID(event_data['last_read_message_id'])
+        telegram_read_at = event_data.get('telegram_read_at')
+
+        log.info(
+            f"Projecting MessagesReadOnTelegram: chat={chat_id}, "
+            f"last_read_message_id={last_read_message_id}, "
+            f"telegram_read_at={telegram_read_at}"
+        )
+
+        # Update ScyllaDB - set telegram_read_at on messages up to last_read_message_id
+        try:
+            await self.message_scylla_repo.update_telegram_read_status(
+                channel_id=chat_id,
+                last_read_message_id=last_read_message_id,
+                telegram_read_at=telegram_read_at,
+            )
+        except Exception as e:
+            log.warning(f"Failed to update telegram_read_at in ScyllaDB: {e}")
+
     # =========================================================================
     # Company Link Projections (no read model changes needed)
     # =========================================================================

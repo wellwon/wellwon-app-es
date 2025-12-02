@@ -522,8 +522,16 @@ class ChatAggregate:
         user_id: uuid.UUID,
         last_read_message_id: uuid.UUID,
         read_count: int,
+        source: str = "web",
     ) -> None:
-        """Mark all messages up to a point as read"""
+        """Mark all messages up to a point as read
+
+        Args:
+            user_id: User who read the messages
+            last_read_message_id: Mark messages up to this ID as read
+            read_count: Number of messages marked as read
+            source: Origin of read event ('web', 'telegram') - prevents sync loops
+        """
         # Soft check - don't fail if participant not in aggregate state
         # (may happen with snapshot loading issues or legacy data)
         if not self.is_participant(user_id):
@@ -547,6 +555,7 @@ class ChatAggregate:
             user_id=user_id,
             last_read_message_id=last_read_message_id,
             read_count=read_count,
+            source=source,
         )
         self._apply_and_record(event)
 

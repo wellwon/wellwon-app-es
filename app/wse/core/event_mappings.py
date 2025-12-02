@@ -89,6 +89,7 @@ INTERNAL_TO_WS_EVENT_TYPE_MAP = {
     'UserStoppedTyping': 'user_stopped_typing',
     'MessagesRead': 'messages_read',
     'MessagesMarkedAsRead': 'messages_read',  # Actual event type from domain
+    'MessagesReadOnTelegram': 'messages_read_on_telegram',  # Blue checkmarks from Telegram
     'TelegramChatLinked': 'chat_telegram_linked',
     'TelegramChatUnlinked': 'chat_telegram_unlinked',
     'TelegramMessageReceived': 'message_created',  # Telegram message → same as regular message

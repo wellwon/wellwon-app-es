@@ -667,6 +667,26 @@ export class EventHandlers {
     }
   }
 
+  static handleMessagesReadOnTelegram(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Messages read on Telegram (blue checkmarks):', {
+        chat_id: data.chat_id,
+        telegram_read_at: data.telegram_read_at,
+        last_read_message_id: data.last_read_message_id,
+      });
+
+      // NOTE: Do NOT invalidate messages query here!
+      // The CustomEvent below triggers useChatMessages to update telegram_read_at via setQueryData.
+      // This follows TkDodo's best practice: for frequent updates, directly update state.
+
+      // Dispatch event for useChatMessages to update telegram_read_at (blue checkmarks)
+      window.dispatchEvent(new CustomEvent('messagesReadOnTelegram', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling messages read on telegram:', error);
+    }
+  }
+
   static handleChatTelegramLinked(message: WSMessage): void {
     try {
       const data = message.p;
@@ -949,6 +969,7 @@ export class EventHandlers {
         'user_typing': this.handleUserTyping,
         'user_stopped_typing': this.handleUserStoppedTyping,
         'messages_read': this.handleMessagesRead,
+        'messages_read_on_telegram': this.handleMessagesReadOnTelegram,
         'chat_telegram_linked': this.handleChatTelegramLinked,
         'chat_telegram_unlinked': this.handleChatTelegramUnlinked,
 
