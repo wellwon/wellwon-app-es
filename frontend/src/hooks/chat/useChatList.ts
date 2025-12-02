@@ -6,9 +6,10 @@
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as chatApi from '@/api/chat';
-import type { ChatListItem, ChatDetail } from '@/api/chat';
+import type { ChatListItem } from '@/api/chat';
 import { chatKeys } from './useChatMessages';
 import { logger } from '@/utils/logger';
+import { useChatsStore } from '@/stores/useChatsStore';
 
 // -----------------------------------------------------------------------------
 // useChatList - Fetch all user's chats
@@ -27,6 +28,11 @@ export function useChatList(options: UseChatListOptions = {}) {
   const queryClient = useQueryClient();
   const { includeArchived = false, limit = 100, enabled = true } = options;
 
+  // Zustand cache for instant page refresh (TkDodo pattern)
+  const cachedChats = useChatsStore((s) => s.cachedChats);
+  const cachedUpdatedAt = useChatsStore((s) => s.cachedUpdatedAt);
+  const setCachedChats = useChatsStore((s) => s.setCachedChats);
+
   const query = useQuery({
     queryKey: chatKeys.list({ includeArchived, limit }),
     queryFn: async () => {
@@ -44,22 +50,36 @@ export function useChatList(options: UseChatListOptions = {}) {
           // Merge: keep optimistic entries that aren't in API response yet
           const apiIds = new Set(apiChats.map(c => c.id));
           const uniqueOptimistic = optimisticEntries.filter(o => !apiIds.has(o.id));
-          return [...uniqueOptimistic, ...apiChats];
+          const result = [...uniqueOptimistic, ...apiChats];
+          setCachedChats(result); // Save to Zustand for instant refresh
+          return result;
         }
       }
+
+      setCachedChats(apiChats); // Save to Zustand for instant refresh
       return apiChats;
     },
     enabled,
+    // TkDodo: staleTime: Infinity when WSE handles all updates
+    staleTime: Infinity,
+    // TkDodo: initialData from Zustand cache for instant render on page refresh
+    initialData: cachedChats ?? undefined,
+    initialDataUpdatedAt: cachedUpdatedAt ?? 0,
   });
 
   // WSE event handlers
   useEffect(() => {
     // OPTIMISTIC CREATE: Immediately add chat to cache from WSE event data
-    const handleChatCreated = (event: CustomEvent) => {
+    const handleChatCreated = async (event: CustomEvent) => {
       const newChatData = event.detail;
       const chatId = newChatData.chat_id || newChatData.id;
 
       logger.info('WSE: Chat created, adding optimistically', { chatId, newChatData });
+
+      // TanStack best practice: Cancel any in-flight refetches to prevent race conditions
+      await queryClient.cancelQueries({
+        queryKey: chatKeys.list({ includeArchived, limit })
+      });
 
       // Create optimistic chat entry from WSE event data
       // Mark as optimistic so queryFn can preserve it during race conditions
@@ -78,6 +98,7 @@ export function useChatList(options: UseChatListOptions = {}) {
         last_message_sender_id: null,
         unread_count: 0,
         participant_count: 1,
+        other_participant_name: null,
         _isOptimistic: true, // Marker for queryFn to preserve during fetch
       };
 
@@ -97,23 +118,52 @@ export function useChatList(options: UseChatListOptions = {}) {
         }
       );
 
-      // After delay, refetch to get full data from projection
-      setTimeout(async () => {
-        try {
-          const fullChat = await chatApi.getChatById(chatId);
-          if (fullChat) {
-            queryClient.setQueryData(
-              chatKeys.list({ includeArchived, limit }),
-              (oldData: ChatListItem[] | undefined) => {
-                if (!oldData) return [fullChat];
-                return oldData.map((c) => (c.id === chatId ? fullChat : c));
-              }
-            );
+      // Also update Zustand cache immediately
+      const currentChats = queryClient.getQueryData<ChatListItem[]>(
+        chatKeys.list({ includeArchived, limit })
+      );
+      if (currentChats) {
+        setCachedChats(currentChats);
+      }
+
+      // Retry logic with exponential backoff (TkDodo pattern for projection delays)
+      const fetchWithRetry = async (attempts = 3, baseDelay = 1000) => {
+        for (let i = 0; i < attempts; i++) {
+          const delay = baseDelay * Math.pow(2, i); // 1s, 2s, 4s
+          await new Promise(r => setTimeout(r, delay));
+
+          try {
+            const fullChat = await chatApi.getChatById(chatId);
+            if (fullChat) {
+              queryClient.setQueryData(
+                chatKeys.list({ includeArchived, limit }),
+                (oldData: ChatListItem[] | undefined) => {
+                  if (!oldData) return [fullChat];
+                  const updated = oldData.map((c) =>
+                    c.id === chatId ? { ...fullChat, _isOptimistic: false } : c
+                  );
+                  setCachedChats(updated); // Sync Zustand cache
+                  return updated;
+                }
+              );
+              logger.info('WSE: Full chat fetched after retry', { chatId, attempt: i + 1 });
+              return;
+            }
+          } catch (error) {
+            if (i === attempts - 1) {
+              logger.warn('WSE: Failed to fetch full chat after all retries, keeping optimistic', {
+                chatId,
+                attempts,
+                error
+              });
+            } else {
+              logger.debug('WSE: Chat fetch attempt failed, retrying...', { chatId, attempt: i + 1 });
+            }
           }
-        } catch (error) {
-          logger.warn('Failed to fetch full chat data, keeping optimistic', { chatId });
         }
-      }, 1000);
+      };
+
+      fetchWithRetry();
     };
 
     const handleChatUpdated = (event: CustomEvent) => {
@@ -140,6 +190,12 @@ export function useChatList(options: UseChatListOptions = {}) {
           );
         }
       );
+
+      // Sync Zustand cache after update
+      const currentChats = queryClient.getQueryData<ChatListItem[]>(
+        chatKeys.list({ includeArchived, limit })
+      );
+      if (currentChats) setCachedChats(currentChats);
     };
 
     const handleChatArchived = (event: CustomEvent) => {
@@ -169,6 +225,12 @@ export function useChatList(options: UseChatListOptions = {}) {
           }
         );
       }
+
+      // Sync Zustand cache
+      const currentChats = queryClient.getQueryData<ChatListItem[]>(
+        chatKeys.list({ includeArchived, limit })
+      );
+      if (currentChats) setCachedChats(currentChats);
     };
 
     const handleChatDeleted = (event: CustomEvent) => {
@@ -188,6 +250,12 @@ export function useChatList(options: UseChatListOptions = {}) {
 
       // Also remove detail cache
       queryClient.removeQueries({ queryKey: chatKeys.detail(chatId) });
+
+      // Sync Zustand cache
+      const currentChats = queryClient.getQueryData<ChatListItem[]>(
+        chatKeys.list({ includeArchived, limit })
+      );
+      if (currentChats) setCachedChats(currentChats);
     };
 
     // OPTIMISTIC UPDATE: Update last_message when message is created
@@ -215,6 +283,12 @@ export function useChatList(options: UseChatListOptions = {}) {
           );
         }
       );
+
+      // Sync Zustand cache
+      const currentChats = queryClient.getQueryData<ChatListItem[]>(
+        chatKeys.list({ includeArchived, limit })
+      );
+      if (currentChats) setCachedChats(currentChats);
     };
 
     // CRITICAL: Update telegram_supergroup_id when chat is linked to telegram
@@ -245,6 +319,12 @@ export function useChatList(options: UseChatListOptions = {}) {
           );
         }
       );
+
+      // Sync Zustand cache
+      const currentChats = queryClient.getQueryData<ChatListItem[]>(
+        chatKeys.list({ includeArchived, limit })
+      );
+      if (currentChats) setCachedChats(currentChats);
     };
 
     // Subscribe to WSE events
@@ -263,7 +343,7 @@ export function useChatList(options: UseChatListOptions = {}) {
       window.removeEventListener('messageCreated', handleMessageCreated as EventListener);
       window.removeEventListener('chatTelegramLinked', handleChatTelegramLinked as EventListener);
     };
-  }, [queryClient, includeArchived, limit]);
+  }, [queryClient, includeArchived, limit, setCachedChats]);
 
   return {
     chats: query.data ?? [],

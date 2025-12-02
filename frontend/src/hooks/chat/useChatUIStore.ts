@@ -258,16 +258,19 @@ export const useChatUIStore = create<ChatUIState>()(
           groupsPanelCollapsed: get().groupsPanelCollapsed,
           selectedSupergroupId: get().selectedSupergroupId,
           displayOptions: get().displayOptions,
+          chatScope: get().chatScope, // Preserve chatScope on reset
         }),
       }),
       {
         name: 'wellwon-chat-ui',
         // Only persist specific fields (TkDodo pattern - partialize)
+        // CRITICAL: chatScope MUST be persisted to sync with selectedSupergroupId
         partialize: (state) => ({
           sidebarMode: state.sidebarMode,
           groupsPanelCollapsed: state.groupsPanelCollapsed,
           selectedSupergroupId: state.selectedSupergroupId,
           displayOptions: state.displayOptions,
+          chatScope: state.chatScope, // Persisted to prevent timing issues on page reload
         }),
       }
     )

@@ -61,7 +61,7 @@ function getStoredAuth(): { token: string | null; refreshToken: string | null; e
 API.interceptors.request.use(
   (config: InternalAxiosRequestConfig): InternalAxiosRequestConfig => {
     // Skip auth header for refresh endpoint
-    if (config.url?.includes('/auth/refresh')) {
+    if (config.url?.includes('/user/refresh')) {
       return config;
     }
 
@@ -87,7 +87,7 @@ API.interceptors.response.use(
     };
 
     // If refresh endpoint itself returns 401, clear auth and redirect
-    if (originalRequest?.url?.includes('/auth/refresh')) {
+    if (originalRequest?.url?.includes('/user/refresh')) {
       console.error('Refresh token is invalid or expired');
       localStorage.removeItem(AUTH_STORAGE_KEY);
       window.location.href = '/login?reason=session_expired';
@@ -117,8 +117,9 @@ API.interceptors.response.use(
           console.log('[API] Starting token refresh...');
 
           // Make refresh request directly without using the intercepted client
+          // Note: Backend auth router is mounted at /user, so refresh endpoint is /user/refresh
           const refreshResponse = await axios.post(
-            `${import.meta.env?.VITE_API_URL || "http://localhost:5002"}/auth/refresh`,
+            `${import.meta.env?.VITE_API_URL || "http://localhost:5002"}/user/refresh`,
             { refresh_token: refreshToken },
             {
               headers: {

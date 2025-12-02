@@ -807,7 +807,7 @@ class EventProcessor:
                             continue
 
                         except DuplicateEventError as e:
-                            log.debug(f"Duplicate event: {e}")
+                            log.warning(f"Duplicate event skipped: {e}")
                             self.metrics.record_filtered_duplicate()
                             continue
 

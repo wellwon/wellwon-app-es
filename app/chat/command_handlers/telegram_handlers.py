@@ -146,31 +146,10 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
             log.warning(f"Failed to bootstrap aggregate from read model: {e}")
 
     async def handle(self, command: ProcessTelegramMessageCommand) -> uuid.UUID:
-        log.error(
-            f"=== ProcessTelegramMessageHandler START === "
-            f"msg_id={command.telegram_message_id} chat_id={command.chat_id}"
-        )
+        log.debug(f"Processing Telegram message {command.telegram_message_id} for chat {command.chat_id}")
 
         events = await self.event_store.get_events(command.chat_id, "Chat")
-        log.error(f"EVENTS: Got {len(events)} events from event store for chat {command.chat_id}")
-
-        if events:
-            for i, e in enumerate(events):
-                # Log event details including telegram_chat_id if present
-                event_data = e.event_data if hasattr(e, 'event_data') else {}
-                tg_chat_id = event_data.get('telegram_chat_id', 'N/A') if isinstance(event_data, dict) else 'N/A'
-                log.info(f"  Event {i}: type={e.event_type}, telegram_chat_id={tg_chat_id}")
-        else:
-            log.info("  No events found - will bootstrap from read model")
-
         chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
-        log.info(
-            f"AGGREGATE STATE after replay: "
-            f"version={chat_aggregate.version}, "
-            f"is_active={chat_aggregate.state.is_active}, "
-            f"telegram_chat_id={chat_aggregate.state.telegram_chat_id}, "
-            f"telegram_topic_id={chat_aggregate.state.telegram_topic_id}"
-        )
 
         # Track if this is a bootstrapped aggregate (no event history)
         is_bootstrapped = not events

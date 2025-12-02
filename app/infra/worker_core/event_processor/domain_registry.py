@@ -275,7 +275,8 @@ def create_chat_domain() -> DomainRegistration:
             "aggregate_type": "Chat",
             "transport_topic": CHAT_EVENTS_TOPIC
         },
-        enable_sequence_tracking=True
+        # Chat messages use Snowflake IDs for ordering in ScyllaDB - no sequence tracking needed
+        enable_sequence_tracking=False
     )
 
 
