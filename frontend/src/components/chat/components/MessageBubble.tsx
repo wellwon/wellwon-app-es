@@ -564,28 +564,64 @@ export function MessageBubble({
       </span>
     );
 
-    // Show double checkmark if message is read by WellWon users OR read on Telegram
-    const isRead = (message.read_by?.length ?? 0) > 0 || !!message.telegram_read_at;
+    // Message status (WhatsApp/Telegram style):
+    // ✓  (gray)  - Sent (server confirmed, has ID)
+    // ✓✓ (gray)  - Delivered (reached server/recipient)
+    // ✓✓ (blue)  - Read (by WellWon user or on Telegram)
 
+    const isReadByWeb = (message.read_by?.length ?? 0) > 0;
+    const isReadOnTelegram = !!message.telegram_read_at;
+    const isRead = isReadByWeb || isReadOnTelegram;
+
+    // Message is "delivered" when it has an ID (server confirmed) and is not sending
+    const isDelivered = !isSending && !!message.id;
+
+    // Status element with WhatsApp/Telegram-style checkmarks
     const statusEl = isOwn ? (
       isSending ? (
-        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+        // Sending - single gray checkmark (or spinner for long sends)
+        <Check
+          size={16}
+          className="text-gray-500 opacity-60"
+          strokeWidth={2}
+        />
+      ) : isRead ? (
+        // Read - double BLUE checkmark with animation
+        <CheckCheck
+          size={16}
+          className={`
+            animate-checkmark-read
+            ${isReadOnTelegram
+              ? 'text-[#34B7F1]'  // Telegram blue for Telegram reads
+              : 'text-blue-400'   // Regular blue for WellWon reads
+            }
+          `}
+          strokeWidth={2.5}
+        />
+      ) : isDelivered ? (
+        // Delivered - double GRAY checkmark
+        <CheckCheck
+          size={16}
+          className="text-gray-400"
+          strokeWidth={2}
+        />
       ) : (
-        isRead ? (
-          <CheckCheck size={14} className="text-blue-400" />
-        ) : (
-          <Check size={14} />
-        )
+        // Sent (fallback) - single gray checkmark
+        <Check
+          size={16}
+          className="text-gray-400"
+          strokeWidth={2}
+        />
       )
     ) : null;
 
     const editedEl = message.is_edited ? (
-      <span className="text-xs italic">изм.</span>
+      <span className="text-xs italic opacity-70">изм.</span>
     ) : null;
 
     if (overlay) {
       return (
-        <div className="absolute bottom-2 right-2 bg-black/50 text-white px-1.5 py-0.5 rounded-md flex items-center gap-1 text-xs">
+        <div className="absolute bottom-2 right-2 bg-black/60 backdrop-blur-sm text-white px-1.5 py-0.5 rounded-md flex items-center gap-1 text-xs">
           {editedEl}
           {timeEl}
           {statusEl}

@@ -622,11 +622,23 @@ export class EventHandlers {
   static handleMessagesRead(message: WSMessage): void {
     try {
       const data = message.p;
-      logger.debug('Messages read:', data);
+      logger.debug('Messages read (bidirectional):', {
+        chat_id: data.chat_id,
+        message_ids: data.message_ids,
+        read_by: data.read_by,
+        telegram_read_at: data.telegram_read_at,
+        source: data.source,
+      });
 
-      void queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id, 'messages'] });
+      // NOTE: Do NOT invalidate messages query here!
+      // The CustomEvent below triggers useChatMessages to update read status via setQueryData.
+      // Invalidating would cause a full refetch, disrupting the smooth checkmark animation.
+      // This follows TkDodo's best practice: for frequent updates, directly update state.
+
+      // Only invalidate unread count (separate aggregation query)
       void queryClient.invalidateQueries({ queryKey: ['unread-count'] });
 
+      // Dispatch event for useChatMessages to update message read status directly
       window.dispatchEvent(new CustomEvent('messagesRead', { detail: data }));
     } catch (error) {
       logger.error('Error handling messages read:', error);

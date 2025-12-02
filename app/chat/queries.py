@@ -109,6 +109,25 @@ class SearchMessagesQuery(Query):
     limit: int = Field(default=20, ge=1, le=50)
 
 
+class GetMessageByTelegramIdQuery(Query):
+    """
+    Get WellWon message by Telegram message ID.
+
+    Used for bidirectional sync to find the WellWon message
+    corresponding to a Telegram message.
+    """
+    chat_id: uuid.UUID
+    telegram_chat_id: int
+    telegram_message_id: int
+
+
+class MessageByTelegramIdResult(BaseModel):
+    """Result of GetMessageByTelegramIdQuery"""
+    message_id: uuid.UUID
+    snowflake_id: int
+    chat_id: uuid.UUID
+
+
 # =============================================================================
 # Result Types
 # =============================================================================

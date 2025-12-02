@@ -202,15 +202,77 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
       );
     };
 
+    // Handle messages read - bidirectional (Web ↔ Telegram)
+    const handleMessagesRead = (event: CustomEvent) => {
+      const data = event.detail;
+      if (data.chat_id !== chatId) return;
+
+      logger.debug('WSE: Messages read event received', {
+        chatId,
+        messageIds: data.message_ids,
+        readBy: data.read_by,
+        telegramReadAt: data.telegram_read_at,
+      });
+
+      queryClient.setQueryData(
+        chatKeys.messages(chatId),
+        (oldData: any) => {
+          if (!oldData) return oldData;
+
+          // Get the message IDs that were read
+          const readMessageIds = data.message_ids || (data.message_id ? [data.message_id] : []);
+          const readByEntry = data.read_by;
+          const telegramReadAt = data.telegram_read_at;
+
+          const newPages = oldData.pages.map((page: any) => ({
+            ...page,
+            messages: page.messages.map((m: Message) => {
+              // Check if this message should be marked as read
+              const shouldUpdate = readMessageIds.includes(m.id) ||
+                                   (data.last_read_message_id &&
+                                    new Date(m.created_at) <= new Date(data.last_read_at));
+
+              if (!shouldUpdate) return m;
+
+              // Update read status
+              const updatedMessage = { ...m };
+
+              // Add read_by entry if provided (WellWon user read)
+              if (readByEntry) {
+                const existingReadBy = m.read_by || [];
+                const alreadyRead = existingReadBy.some(
+                  (r: any) => r.user_id === readByEntry.user_id
+                );
+                if (!alreadyRead) {
+                  updatedMessage.read_by = [...existingReadBy, readByEntry];
+                }
+              }
+
+              // Update telegram_read_at if provided (Telegram read)
+              if (telegramReadAt) {
+                updatedMessage.telegram_read_at = telegramReadAt;
+              }
+
+              return updatedMessage;
+            }),
+          }));
+
+          return { ...oldData, pages: newPages };
+        }
+      );
+    };
+
     // Subscribe to WSE events
     window.addEventListener('messageCreated', handleMessageCreated as EventListener);
     window.addEventListener('messageUpdated', handleMessageUpdated as EventListener);
     window.addEventListener('messageDeleted', handleMessageDeleted as EventListener);
+    window.addEventListener('messagesRead', handleMessagesRead as EventListener);
 
     return () => {
       window.removeEventListener('messageCreated', handleMessageCreated as EventListener);
       window.removeEventListener('messageUpdated', handleMessageUpdated as EventListener);
       window.removeEventListener('messageDeleted', handleMessageDeleted as EventListener);
+      window.removeEventListener('messagesRead', handleMessagesRead as EventListener);
     };
   }, [chatId, queryClient]);
 

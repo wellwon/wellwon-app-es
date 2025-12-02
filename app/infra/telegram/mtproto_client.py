@@ -485,6 +485,23 @@ class TelegramMTProtoClient:
             self._connected = False
             log.info("MTProto disconnected")
 
+    async def get_me_id(self) -> Optional[int]:
+        """
+        Get the Telegram user ID of the logged-in session.
+
+        Returns:
+            Telegram user ID, or None if not connected
+        """
+        if not self._client or not self._connected:
+            return None
+
+        try:
+            me = await self._client.get_me()
+            return me.id if me else None
+        except Exception as e:
+            log.warning(f"Failed to get me ID: {e}")
+            return None
+
     async def _attempt_reconnect(self) -> bool:
         """
         Attempt to reconnect to Telegram with exponential backoff.

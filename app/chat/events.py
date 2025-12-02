@@ -215,6 +215,23 @@ class MessagesMarkedAsRead(BaseEvent):
     read_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+@domain_event(category="domain")
+class MessageSyncedToTelegram(BaseEvent):
+    """Event emitted when a WellWon message is successfully delivered to Telegram.
+
+    This enables bidirectional delivery tracking:
+    - Single checkmark: Message sent to WellWon server
+    - Double checkmark: Message delivered to Telegram (this event)
+    - Blue double checkmark: Message read on Telegram (MessagesMarkedAsRead with telegram_read_at)
+    """
+    event_type: Literal["MessageSyncedToTelegram"] = "MessageSyncedToTelegram"
+    message_id: uuid.UUID
+    chat_id: uuid.UUID
+    telegram_message_id: int  # Telegram's message ID
+    telegram_chat_id: int  # Telegram chat/supergroup ID
+    synced_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 # =============================================================================
 # Typing Events (ephemeral, not stored in event store)
 # =============================================================================
@@ -295,6 +312,7 @@ CHAT_EVENT_TYPES = {
     "MessageDeleted": MessageDeleted,
     "MessageReadStatusUpdated": MessageReadStatusUpdated,
     "MessagesMarkedAsRead": MessagesMarkedAsRead,
+    "MessageSyncedToTelegram": MessageSyncedToTelegram,
     "TypingStarted": TypingStarted,
     "TypingStopped": TypingStopped,
     "TelegramChatLinked": TelegramChatLinked,

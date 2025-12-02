@@ -132,8 +132,24 @@ class SendMessageHandler(BaseCommandHandler):
                 log.warning(f"Unsupported message type for Telegram sync: {command.message_type}")
                 return
 
-            if result and result.success:
-                log.info(f"Message synced to Telegram: message_id={result.message_id}")
+            if result and result.success and result.message_id:
+                log.info(f"Message synced to Telegram: telegram_message_id={result.message_id}")
+
+                # Emit MessageSyncedToTelegram event for real-time delivery status
+                from app.chat.events import MessageSyncedToTelegram
+                sync_event = MessageSyncedToTelegram(
+                    message_id=command.message_id,
+                    chat_id=command.chat_id,
+                    telegram_message_id=result.message_id,
+                    telegram_chat_id=telegram_chat_id,
+                )
+
+                # Publish directly to transport (no aggregate needed for this event)
+                await self.event_bus.publish(
+                    topic="transport.chat-events",
+                    event=sync_event.model_dump(),
+                )
+                log.debug(f"Published MessageSyncedToTelegram event for message {command.message_id}")
             else:
                 log.warning(f"Failed to sync message to Telegram: {result.error if result else 'unknown error'}")
 
