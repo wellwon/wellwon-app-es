@@ -827,8 +827,8 @@ const ChatInterface = React.memo(() => {
       {/* min-h-24 = 96px для выравнивания с соседними секциями */}
       <div className={`border-t ${theme.border} ${theme.main} flex-shrink-0 min-h-24 flex items-center`}>
         {/* py-4 = 16px сверху и снизу - отступы до бордеров */}
-        <div className="flex items-center justify-center px-6 py-4">
-          <div className="max-w-4xl mx-auto w-full">
+        <div className="flex items-center justify-center px-6 py-4 w-full">
+          <div className="w-full">
             <div className={`flex items-center gap-2 ${theme.input.bg} ${theme.input.border} rounded-[24px] px-3 py-2`}>
               {/* Иконки прикреплений */}
               <div className="flex gap-1">
