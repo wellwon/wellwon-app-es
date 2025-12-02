@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "shadcn": {
+      "command": "npx",
+      "args": [
+        "shadcn@latest",
+        "mcp"
+      ]
+    },
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://wellwon:n6TefPPN5gw6gtR6chUbAhfpIMeIRu@localhost/wellwon"
+      ]
+    }
+  }
+}

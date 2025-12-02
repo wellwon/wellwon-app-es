@@ -1,0 +1,3 @@
+[granian]
+reload-paths = ["app"]
+exclude-paths = ["frontend", "reference", "docs", ".venv", "__pycache__", "*.pyc"]
