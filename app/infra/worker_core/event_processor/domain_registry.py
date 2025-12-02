@@ -78,6 +78,7 @@ def create_user_account_domain() -> DomainRegistration:
         UserProfileUpdated,
         UserAuthenticationSucceeded,
         UserPasswordChanged,
+        UserLoggedOut,
     )
 
     def user_projector_factory():
