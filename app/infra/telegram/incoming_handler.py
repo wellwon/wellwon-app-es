@@ -35,6 +35,7 @@ except ImportError:
 if TYPE_CHECKING:
     from app.infra.cqrs.command_bus import CommandBus
     from app.infra.cqrs.query_bus import QueryBus
+    from app.infra.event_bus.redpanda_event_bus import RedpandaEventBus
     from app.infra.telegram.mtproto_client import ReadEventInfo
 
 log = get_logger("wellwon.telegram.incoming")
@@ -91,6 +92,7 @@ class TelegramIncomingHandler:
         self,
         command_bus: 'CommandBus',
         query_bus: 'QueryBus',
+        event_bus: Optional['RedpandaEventBus'] = None,
         redis_client: Optional[Any] = None,
         dedup_ttl: int = 300,  # 5 minutes
     ):
@@ -100,11 +102,13 @@ class TelegramIncomingHandler:
         Args:
             command_bus: CQRS command bus for dispatching commands
             query_bus: CQRS query bus for lookups
+            event_bus: Event bus for publishing domain events (read receipts)
             redis_client: Redis for distributed deduplication
             dedup_ttl: Deduplication TTL in seconds
         """
         self._command_bus = command_bus
         self._query_bus = query_bus
+        self._event_bus = event_bus
 
         # Deduplication
         if redis_client:
@@ -350,7 +354,7 @@ class TelegramIncomingHandler:
                 },
             )
 
-            result = await self._command_bus.dispatch(command)
+            result = await self._command_bus.send(command)
 
             log.info(
                 f"Processed Telegram message {message.telegram_message_id} "
@@ -493,7 +497,16 @@ class TelegramIncomingHandler:
         """
         Handle when others read YOUR messages on Telegram.
         This triggers blue checkmarks (telegram_read_at).
+
+        Publishes MessagesReadOnTelegram event to the event bus, which:
+        1. Gets picked up by WSE DomainPublisher
+        2. Broadcasts to WebSocket clients
+        3. Frontend updates message with telegram_read_at -> blue checkmarks
         """
+        if not self._event_bus:
+            log.warning("Event bus not available - cannot publish MessagesReadOnTelegram")
+            return False
+
         log.info(
             f"Telegram read receipt: others read messages up to {read_event.max_id} "
             f"in chat {read_event.chat_id}"
@@ -514,31 +527,32 @@ class TelegramIncomingHandler:
                 read_event.max_id
             )
 
+            # If we can't find the specific message, still emit the event with chat_id only
             if not wellwon_message_id:
                 log.debug(
                     f"No WellWon message found for Telegram message {read_event.max_id} "
-                    f"in chat {read_event.chat_id}"
+                    f"in chat {read_event.chat_id} - emitting event anyway"
                 )
-                return False
 
-            # 3. Emit event to set telegram_read_at (blue checkmarks)
-            from datetime import datetime, timezone
-            from app.chat.events import MessagesReadOnTelegram
+            # 3. Publish MessagesReadOnTelegram event to trigger blue checkmarks
+            telegram_read_at = datetime.now(timezone.utc)
+            event_dict = {
+                "event_id": str(uuid4()),
+                "event_type": "MessagesReadOnTelegram",
+                "aggregate_id": str(chat_id),
+                "aggregate_type": "Chat",
+                "chat_id": str(chat_id),
+                "last_read_message_id": str(wellwon_message_id) if wellwon_message_id else None,
+                "last_read_telegram_message_id": read_event.max_id,
+                "telegram_read_at": telegram_read_at.isoformat(),
+                "timestamp": telegram_read_at.isoformat(),
+            }
 
-            # Dispatch event directly to event bus (no aggregate needed)
-            event = MessagesReadOnTelegram(
-                chat_id=chat_id,
-                last_read_telegram_message_id=read_event.max_id,
-                last_read_message_id=wellwon_message_id,
-                telegram_read_at=datetime.now(timezone.utc),
-            )
-
-            # Publish to event bus for projection and WSE
-            await self._event_bus.publish(event)
+            await self._event_bus.publish("transport.chat-events", event_dict)
 
             log.info(
-                f"Blue checkmark: messages up to {wellwon_message_id} read on Telegram "
-                f"(telegram_max_id={read_event.max_id}, chat={chat_id})"
+                f"Blue checkmark event published: chat={chat_id}, "
+                f"telegram_max_id={read_event.max_id}, wellwon_message_id={wellwon_message_id}"
             )
 
             return True
@@ -590,7 +604,7 @@ class TelegramIncomingHandler:
                 source="telegram",  # Prevents sync loop back to Telegram
             )
 
-            await self._command_bus.dispatch(command)
+            await self._command_bus.send(command)
 
             log.info(
                 f"Synced read status from Telegram: chat={read_event.chat_id}, "
@@ -611,7 +625,7 @@ class TelegramIncomingHandler:
             result = await self._query_bus.query(
                 GetChatByTelegramIdQuery(telegram_chat_id=telegram_chat_id)
             )
-            return result.chat_id if result else None
+            return result.id if result else None  # ChatDetail has 'id' not 'chat_id'
 
         except Exception as e:
             log.debug(f"Chat lookup by telegram_id failed: {e}")
@@ -687,6 +701,7 @@ _incoming_handler: Optional[TelegramIncomingHandler] = None
 async def get_incoming_handler(
     command_bus: 'CommandBus',
     query_bus: 'QueryBus',
+    event_bus: Optional['RedpandaEventBus'] = None,
     redis_client: Optional[Any] = None,
 ) -> TelegramIncomingHandler:
     """Get or create incoming handler singleton."""
@@ -695,6 +710,7 @@ async def get_incoming_handler(
         _incoming_handler = TelegramIncomingHandler(
             command_bus=command_bus,
             query_bus=query_bus,
+            event_bus=event_bus,
             redis_client=redis_client,
         )
         await _incoming_handler.initialize()

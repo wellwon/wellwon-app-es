@@ -87,11 +87,32 @@ try:
         calculate_message_bucket,
         get_bucket_range,
         SnowflakeIDParser,
+        WELLWON_EPOCH,
     )
     SCYLLA_AVAILABLE: bool = True
 except ImportError:
     SCYLLA_AVAILABLE = False
+    WELLWON_EPOCH = 1704067200000  # Fallback for type checking
     log.warning("ScyllaDB client not available - install cassandra-driver")
+
+
+def calculate_current_bucket(bucket_size_days: int = 10) -> int:
+    """
+    Calculate the current bucket number for ScyllaDB partitioning.
+
+    Uses the same calculation as calculate_message_bucket but for current time.
+    This ensures consistency with how messages are stored.
+
+    Args:
+        bucket_size_days: Number of days per bucket (default 10)
+
+    Returns:
+        Current bucket number (integer)
+    """
+    now = datetime.now(timezone.utc)
+    timestamp_ms = int(now.timestamp() * 1000)
+    days_since_epoch = timestamp_ms // (1000 * 60 * 60 * 24)
+    return days_since_epoch // bucket_size_days
 
 # =============================================================================
 # Constants
@@ -1400,10 +1421,8 @@ class MessageScyllaRepo:
         Returns:
             Number of buckets deleted from (approximate message count not available)
         """
-        from datetime import datetime, timezone
-
         buckets_to_delete: set[int] = set()
-        log.debug(f"Starting delete_messages_for_channel for channel_id={channel_id}")
+        log.info(f"Starting delete_messages_for_channel for channel_id={channel_id}")
 
         # ---------------------------------------------------------------------
         # 1. Get buckets from telegram_message_mapping (for Telegram messages)
@@ -1417,28 +1436,28 @@ class MessageScyllaRepo:
             for row in telegram_mappings:
                 if row.get('bucket') is not None:
                     buckets_to_delete.add(row['bucket'])
-            if telegram_mappings:
-                log.debug(f"Found {len(telegram_mappings)} telegram mappings with buckets: {buckets_to_delete}")
+            log.info(f"Found {len(telegram_mappings)} telegram mappings with buckets: {list(buckets_to_delete)}")
         except Exception as e:
             log.warning(f"Error querying telegram_message_mapping for buckets: {e}")
 
         # ---------------------------------------------------------------------
         # 2. Also scan recent time-based buckets for non-Telegram messages
+        # Use calculate_current_bucket for consistency with message storage
         # Start from current bucket and go back 100 buckets (~3 years)
         # ---------------------------------------------------------------------
-        now = datetime.now(timezone.utc)
-        current_bucket = int(now.timestamp() * 1000) // (1000 * 60 * 60 * 24 * 10)
-        log.debug(f"Current time-based bucket: {current_bucket}")
+        current_bucket = calculate_current_bucket()
+        log.info(f"Current bucket: {current_bucket}")
 
         for bucket in range(current_bucket, max(0, current_bucket - 100), -1):
             buckets_to_delete.add(bucket)
 
-        log.debug(f"Total buckets to check: {len(buckets_to_delete)}")
+        log.info(f"Total buckets to check: {len(buckets_to_delete)} (range: {min(buckets_to_delete)}-{max(buckets_to_delete)})")
 
         # ---------------------------------------------------------------------
         # 3. Delete from all identified buckets
         # ---------------------------------------------------------------------
         buckets_deleted = 0
+        messages_found = 0
         for bucket in buckets_to_delete:
             try:
                 # Check if bucket has any messages
@@ -1447,6 +1466,7 @@ class MessageScyllaRepo:
                     (channel_id, bucket),
                 )
                 if result:
+                    messages_found += 1
                     # Delete all messages in this bucket
                     await self.client.execute(
                         "DELETE FROM messages WHERE channel_id = %s AND bucket = %s",
@@ -1454,9 +1474,46 @@ class MessageScyllaRepo:
                         execution_profile='write',
                     )
                     buckets_deleted += 1
-                    log.debug(f"Deleted messages from channel {channel_id} bucket {bucket}")
+                    log.info(f"Deleted messages from channel {channel_id} bucket {bucket}")
             except Exception as e:
                 log.warning(f"Error deleting messages from bucket {bucket}: {e}")
+
+        # ---------------------------------------------------------------------
+        # 4. Fallback: If no messages found in expected buckets, try ALLOW FILTERING
+        # This handles edge cases where bucket calculation differs
+        # ---------------------------------------------------------------------
+        if messages_found == 0:
+            log.warning(f"No messages found in expected buckets for channel {channel_id}, trying direct query")
+            try:
+                # Direct query with ALLOW FILTERING (expensive but comprehensive)
+                all_messages = await self.client.execute(
+                    "SELECT bucket, message_id FROM messages WHERE channel_id = %s ALLOW FILTERING LIMIT 1000",
+                    (channel_id,),
+                )
+                if all_messages:
+                    # Group by bucket and delete
+                    found_buckets: set[int] = set()
+                    for row in all_messages:
+                        if row.get('bucket') is not None:
+                            found_buckets.add(row['bucket'])
+
+                    log.info(f"Direct query found {len(all_messages)} messages in buckets: {list(found_buckets)}")
+
+                    for bucket in found_buckets:
+                        try:
+                            await self.client.execute(
+                                "DELETE FROM messages WHERE channel_id = %s AND bucket = %s",
+                                (channel_id, bucket),
+                                execution_profile='write',
+                            )
+                            buckets_deleted += 1
+                            log.info(f"Deleted messages from channel {channel_id} bucket {bucket} (fallback)")
+                        except Exception as e:
+                            log.warning(f"Error deleting messages from bucket {bucket} (fallback): {e}")
+                else:
+                    log.info(f"No messages found for channel {channel_id} (channel may have no messages)")
+            except Exception as e:
+                log.warning(f"Error in fallback message query for channel {channel_id}: {e}")
 
         log.info(f"Deleted messages from {buckets_deleted} buckets for channel {channel_id}")
         return buckets_deleted
@@ -1726,4 +1783,6 @@ __all__ = [
     "UserID",
     "MessageID",
     "TelegramID",
+    # Utilities
+    "calculate_current_bucket",
 ]
