@@ -54,14 +54,25 @@ const AutoResizeTextarea = React.forwardRef<HTMLTextAreaElement, AutoResizeTexta
       }
     };
 
+    // Calculate vertical padding to center single line of text
+    // text-sm = 14px, leading-5 = 20px line-height, so padding = (minHeight - 20) / 2
+    // For minHeight=36: (36-20)/2 = 8px padding top and bottom
+    const lineHeight = 20;
+    const verticalPadding = Math.max(4, (minHeight - lineHeight) / 2);
+
     return (
       <textarea
         ref={combinedRef}
         className={cn(
-          "flex w-full rounded-md border border-input bg-background px-2 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 resize-none overflow-y-auto transition-all duration-200",
+          "flex w-full rounded-md border border-input bg-background px-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 resize-none overflow-y-auto scrollbar-hide transition-all duration-200",
           className
         )}
-        style={{ minHeight: `${minHeight}px`, maxHeight: `${maxHeight}px` }}
+        style={{
+          minHeight: `${minHeight}px`,
+          maxHeight: `${maxHeight}px`,
+          paddingTop: `${verticalPadding}px`,
+          paddingBottom: `${verticalPadding}px`
+        }}
         onChange={handleChange}
         rows={1}
         {...props}

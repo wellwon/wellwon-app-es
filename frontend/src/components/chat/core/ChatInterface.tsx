@@ -823,18 +823,20 @@ const ChatInterface = React.memo(() => {
       </div>
 
 
-      {/* Input Area - зафиксировано внизу экрана */}
-      <div className={`border-t ${theme.border} ${theme.main} flex-shrink-0 min-h-24`}>
-        <div className="flex items-center justify-center px-6 h-full">
+      {/* Input Area - зафиксировано внизу экрана, как в Telegram/WhatsApp */}
+      {/* min-h-24 = 96px для выравнивания с соседними секциями */}
+      <div className={`border-t ${theme.border} ${theme.main} flex-shrink-0 min-h-24 flex items-center`}>
+        {/* py-4 = 16px сверху и снизу - отступы до бордеров */}
+        <div className="flex items-center justify-center px-6 py-4">
           <div className="max-w-4xl mx-auto w-full">
             <div className={`flex items-center gap-2 ${theme.input.bg} ${theme.input.border} rounded-[24px] px-3 py-2`}>
               {/* Иконки прикреплений */}
-              <div className="flex gap-1 self-center">
+              <div className="flex gap-1">
                 <FileUploadButton disabled={!activeChat} />
               </div>
 
               {/* Поле ввода */}
-              <div ref={inputContainerRef} className="flex-1 flex items-center justify-center relative">
+              <div ref={inputContainerRef} className="flex-1 relative flex items-center">
                 <AutoResizeTextarea
                   ref={textareaRef}
                   value={inputValue}
@@ -843,9 +845,9 @@ const ChatInterface = React.memo(() => {
                   onBlur={handleInputBlur}
                   onHeightChange={setTextareaHeight}
                   placeholder="Напишите запрос"
-                  className={`flex-1 border-0 bg-transparent ${theme.input.text} ${theme.input.placeholder} outline-none focus:outline-none focus-visible:outline-none resize-none text-sm focus:placeholder:opacity-0 placeholder:transition-opacity py-1`}
-                  minHeight={32}
-                  maxHeight={120}
+                  className={`flex-1 border-0 bg-transparent ${theme.input.text} ${theme.input.placeholder} outline-none focus:outline-none focus-visible:outline-none resize-none text-sm focus:placeholder:opacity-0 placeholder:transition-opacity leading-5`}
+                  minHeight={36}
+                  maxHeight={108}
                 />
                 
                 {/* Mentions Dropdown */}
