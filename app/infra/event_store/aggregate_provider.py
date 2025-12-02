@@ -8,8 +8,8 @@ import uuid
 import logging
 from datetime import datetime, timezone
 
-# Import event registry for deserialization
-from app.infra.event_bus.event_registry import EVENT_TYPE_TO_PYDANTIC_MODEL
+# LATE BINDING: Import function instead of dict to ensure auto-registered events are included
+from app.infra.event_bus.event_registry import get_event_model
 
 # Cache Manager for centralized caching
 from app.infra.persistence.cache_manager import CacheManager
@@ -267,8 +267,8 @@ class DefaultAggregateProvider(AggregateSnapshotProvider):
             # Replay events (only events AFTER snapshot)
             for envelope in events:
                 try:
-                    # Get event class from registry
-                    event_class = EVENT_TYPE_TO_PYDANTIC_MODEL.get(envelope.event_type)
+                    # Get event class from registry (late binding for auto-registered events)
+                    event_class = get_event_model(envelope.event_type)
                     if not event_class:
                         log.warning(
                             f"Unknown event type '{envelope.event_type}' "

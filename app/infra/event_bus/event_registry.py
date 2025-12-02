@@ -185,13 +185,26 @@ def get_event_model(event_type: str) -> Optional[Type[BaseModel]]:
     """
     Get Pydantic model class for an event type.
 
+    This function uses LATE BINDING to ensure auto-registered events are included
+    even if they were registered after this module was first imported.
+
     Args:
         event_type: The event type string (e.g., "UserAccountCreated")
 
     Returns:
         Pydantic model class or None if not found
     """
-    return EVENT_TYPE_TO_PYDANTIC_MODEL.get(event_type)
+    # First check merged registry (fast path)
+    if event_type in EVENT_TYPE_TO_PYDANTIC_MODEL:
+        return EVENT_TYPE_TO_PYDANTIC_MODEL[event_type]
+
+    # Late binding: check auto-registered events for events registered after import
+    if _AUTO_REGISTRATION_AVAILABLE and get_auto_registered_events:
+        auto_events = get_auto_registered_events()
+        if event_type in auto_events:
+            return auto_events[event_type]
+
+    return None
 
 
 def is_registered_event(event_type: str) -> bool:

@@ -24,7 +24,8 @@ import time
 
 from app.infra.event_bus.transport_adapter import TransportAdapter
 from app.common.base.base_model import BaseEvent as CommonBaseEvent
-from app.infra.event_bus.event_registry import EVENT_TYPE_TO_PYDANTIC_MODEL
+# LATE BINDING: Import function for proper auto-registration support
+from app.infra.event_bus.event_registry import get_event_model
 
 # Import NEW reliability patterns from /app/infra/reliability/
 from app.infra.reliability.circuit_breaker import (
@@ -202,13 +203,8 @@ class EventBus:
             log.error(f"Event validation failed: 'event_type' field missing. ID: {event_payload_dict.get('event_id')}")
             return False
 
-        pydantic_model_class = EVENT_TYPE_TO_PYDANTIC_MODEL.get(str(event_type_str))
-
-        # Fallback to auto-registered events if not in merged registry
-        if not pydantic_model_class:
-            from app.infra.event_bus.event_decorators import get_auto_registered_events
-            auto_events = get_auto_registered_events()
-            pydantic_model_class = auto_events.get(str(event_type_str))
+        # get_event_model handles late binding for auto-registered events
+        pydantic_model_class = get_event_model(str(event_type_str))
 
         if not pydantic_model_class:
             log.warning(

@@ -20,7 +20,8 @@ from app.infra.event_store.kurrentdb_event_store import (
 )
 from app.infra.event_store.event_envelope import EventEnvelope
 
-from app.infra.event_bus.event_registry import EVENT_TYPE_TO_PYDANTIC_MODEL
+# LATE BINDING: Import function instead of dict to ensure auto-registered events are included
+from app.infra.event_bus.event_registry import get_event_model
 from app.common.base.base_model import BaseEvent
 
 # Import our new components
@@ -229,8 +230,8 @@ class AggregateRepository:
             # Apply events to aggregate
             for envelope in events:
                 try:
-                    # Get the event class from registry
-                    event_class = EVENT_TYPE_TO_PYDANTIC_MODEL.get(envelope.event_type)
+                    # Get event class from registry (late binding for auto-registered events)
+                    event_class = get_event_model(envelope.event_type)
                     if not event_class:
                         log.error(
                             f"Unknown event type '{envelope.event_type}' "
@@ -723,9 +724,9 @@ class AggregateRepository:
             if not events:
                 return None
 
-            # Apply events
+            # Apply events (late binding for auto-registered events)
             for envelope in events:
-                event_class = EVENT_TYPE_TO_PYDANTIC_MODEL.get(envelope.event_type)
+                event_class = get_event_model(envelope.event_type)
                 if event_class:
                     domain_event = event_class(**envelope.event_data)
                     aggregate._apply(domain_event)

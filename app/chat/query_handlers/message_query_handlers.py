@@ -32,6 +32,32 @@ if TYPE_CHECKING:
 log = get_logger("wellwon.chat.query_handlers.message")
 
 
+# -----------------------------------------------------------------------------
+# Helper Functions
+# -----------------------------------------------------------------------------
+
+def parse_json_field(value):
+    """Parse JSON string to dict, return None if invalid.
+
+    ScyllaDB stores JSON fields as strings, this helper converts them to dicts.
+    """
+    import json
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
+# -----------------------------------------------------------------------------
+# Query Handlers
+# -----------------------------------------------------------------------------
+
 @query_handler(GetChatMessagesQuery)
 class GetChatMessagesQueryHandler(BaseQueryHandler[GetChatMessagesQuery, List[MessageDetail]]):
     """
@@ -46,27 +72,12 @@ class GetChatMessagesQueryHandler(BaseQueryHandler[GetChatMessagesQuery, List[Me
 
     async def handle(self, query: GetChatMessagesQuery) -> List[MessageDetail]:
         """Fetch messages from ScyllaDB with pagination."""
-        import json
-
         messages = await self.message_scylla_repo.get_messages(
             channel_id=query.chat_id,
             limit=query.limit,
             before_id=query.before_id,  # Snowflake ID
             after_id=query.after_id,    # Snowflake ID
         )
-
-        def parse_json_field(value):
-            """Parse JSON string to dict, return None if invalid."""
-            if value is None:
-                return None
-            if isinstance(value, dict):
-                return value
-            if isinstance(value, str):
-                try:
-                    return json.loads(value)
-                except (json.JSONDecodeError, TypeError):
-                    return None
-            return None
 
         return [
             MessageDetail(
@@ -141,8 +152,8 @@ class GetMessageByIdQueryHandler(BaseQueryHandler[GetMessageByIdQuery, Optional[
             source=message.get('source', 'web'),
             telegram_message_id=message.get('telegram_message_id'),
             telegram_user_id=message.get('telegram_user_id'),
-            telegram_user_data=message.get('telegram_user_data'),
-            telegram_forward_data=message.get('telegram_forward_data'),
+            telegram_user_data=parse_json_field(message.get('telegram_user_data')),
+            telegram_forward_data=parse_json_field(message.get('telegram_forward_data')),
             telegram_topic_id=message.get('telegram_topic_id'),
             sync_direction=message.get('sync_direction'),
         )
@@ -228,8 +239,8 @@ class SearchMessagesQueryHandler(BaseQueryHandler[SearchMessagesQuery, List[Mess
                 source=m.get('source', 'web'),
                 telegram_message_id=m.get('telegram_message_id'),
                 telegram_user_id=m.get('telegram_user_id'),
-                telegram_user_data=m.get('telegram_user_data'),
-                telegram_forward_data=m.get('telegram_forward_data'),
+                telegram_user_data=parse_json_field(m.get('telegram_user_data')),
+                telegram_forward_data=parse_json_field(m.get('telegram_forward_data')),
                 telegram_topic_id=m.get('telegram_topic_id'),
                 sync_direction=m.get('sync_direction'),
             )
