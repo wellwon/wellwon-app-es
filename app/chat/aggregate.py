@@ -54,7 +54,7 @@ class ParticipantState(BaseModel):
     role: str = "member"
     joined_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     is_active: bool = True
-    last_read_message_id: Optional[uuid.UUID] = None  # For idempotency
+    last_read_message_id: Optional[int] = None  # Snowflake ID for idempotency
 
 
 # =============================================================================
@@ -520,7 +520,7 @@ class ChatAggregate:
     def mark_messages_as_read(
         self,
         user_id: uuid.UUID,
-        last_read_message_id: uuid.UUID,
+        last_read_message_id: int,  # Snowflake ID (bigint)
         read_count: int,
         source: str = "web",
     ) -> None:
@@ -528,7 +528,7 @@ class ChatAggregate:
 
         Args:
             user_id: User who read the messages
-            last_read_message_id: Mark messages up to this ID as read
+            last_read_message_id: Snowflake ID of the last read message (bigint)
             read_count: Number of messages marked as read
             source: Origin of read event ('web', 'telegram') - prevents sync loops
         """

@@ -388,23 +388,24 @@ class ChatProjector:
         event_data = envelope.event_data
         chat_id = uuid.UUID(event_data['chat_id'])
         user_id = uuid.UUID(event_data['user_id'])
-        last_read_snowflake_id = event_data.get('last_read_snowflake_id')
+        # last_read_message_id is now Snowflake ID (int)
+        last_read_message_id = event_data.get('last_read_message_id')
 
-        log.debug(f"Projecting MessagesMarkedAsRead: chat={chat_id}, user={user_id}")
+        log.debug(f"Projecting MessagesMarkedAsRead: chat={chat_id}, user={user_id}, snowflake={last_read_message_id}")
 
-        # ScyllaDB - read position (if snowflake_id available)
-        if last_read_snowflake_id:
+        # ScyllaDB - read position (Snowflake ID)
+        if last_read_message_id:
             await self.message_scylla_repo.update_read_position(
                 channel_id=chat_id,
                 user_id=user_id,
-                last_read_message_id=last_read_snowflake_id,
+                last_read_message_id=last_read_message_id,
             )
 
-        # PostgreSQL - participant last_read_at
+        # PostgreSQL - participant last_read_at (store Snowflake as bigint)
         await self.chat_read_repo.update_participant_last_read(
             chat_id=chat_id,
             user_id=user_id,
-            last_read_message_id=uuid.UUID(event_data['last_read_message_id']),
+            last_read_message_id=last_read_message_id,
             last_read_at=envelope.stored_at,
         )
 

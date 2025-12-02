@@ -167,18 +167,26 @@ class SendMessageCommand(Command):
 
 
 class EditMessageCommand(Command):
-    """Edit an existing message"""
+    """Edit an existing message.
+
+    telegram_message_id should be enriched by the caller (router) before sending.
+    """
     message_id: uuid.UUID
     chat_id: uuid.UUID
     edited_by: uuid.UUID
     new_content: str = Field(..., max_length=10000)
+    telegram_message_id: Optional[int] = None  # Enriched by router for Telegram sync
 
 
 class DeleteMessageCommand(Command):
-    """Soft-delete a message"""
+    """Soft-delete a message.
+
+    telegram_message_id should be enriched by the caller (router) before sending.
+    """
     message_id: uuid.UUID
     chat_id: uuid.UUID
     deleted_by: uuid.UUID
+    telegram_message_id: Optional[int] = None  # Enriched by router for Telegram sync
 
 
 class MarkMessageAsReadCommand(Command):
@@ -195,13 +203,15 @@ class MarkMessagesAsReadCommand(Command):
     Attributes:
         chat_id: Chat to mark as read
         user_id: User who is reading
-        last_read_message_id: Mark messages up to this ID as read
+        last_read_message_id: Snowflake ID of the last read message (bigint)
         source: Origin of read event (web, telegram, api) - prevents sync loops
+        telegram_message_id: Telegram message ID for syncing (enriched by router)
     """
     chat_id: uuid.UUID
     user_id: uuid.UUID
-    last_read_message_id: uuid.UUID
+    last_read_message_id: int  # Snowflake ID (bigint) - matches ScyllaDB schema
     source: str = Field(default="web", description="web, telegram, api - prevents sync loops")
+    telegram_message_id: Optional[int] = None  # Enriched by router for Telegram sync
 
 
 # =============================================================================

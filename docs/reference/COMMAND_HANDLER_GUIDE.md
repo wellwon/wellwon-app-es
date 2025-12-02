@@ -1,7 +1,7 @@
 # Command Handler Implementation Guide
 
-**TradeCore v0.5 - CQRS Write Side**
-**Last Updated:** 2025-01-10
+**WellWon Platform - CQRS Write Side**
+**Last Updated:** 2025-12-02
 **Status:** Production Reference
 
 ---
@@ -9,19 +9,20 @@
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Purpose and When to Use](#purpose-and-when-to-use)
-3. [Architecture](#architecture)
-4. [Step-by-Step Implementation](#step-by-step-implementation)
-5. [Code Examples from TradeCore](#code-examples-from-tradecore)
-6. [Testing Strategies](#testing-strategies)
-7. [Performance Tips](#performance-tips)
-8. [Common Mistakes](#common-mistakes)
+2. [CRITICAL: Pure CQRS Pattern](#critical-pure-cqrs-pattern)
+3. [Purpose and When to Use](#purpose-and-when-to-use)
+4. [Architecture](#architecture)
+5. [Step-by-Step Implementation](#step-by-step-implementation)
+6. [Code Examples](#code-examples)
+7. [Testing Strategies](#testing-strategies)
+8. [Performance Tips](#performance-tips)
+9. [Common Mistakes](#common-mistakes)
 
 ---
 
 ## Overview
 
-Command handlers are the **write side** of TradeCore's CQRS architecture. They:
+Command handlers are the **write side** of WellWon's CQRS architecture. They:
 - Execute business logic via domain aggregates
 - Emit domain events through event sourcing
 - Coordinate with sagas for distributed transactions
@@ -34,6 +35,119 @@ Command handlers are the **write side** of TradeCore's CQRS architecture. They:
 3. **All state changes emit events** - Event Sourcing
 4. **Handlers are stateless** - No instance state between calls
 5. **Use BaseCommandHandler** - Provides event publishing infrastructure
+6. **NEVER use QueryBus for reads** - Load aggregate from Event Store instead
+
+---
+
+## CRITICAL: Pure CQRS Pattern
+
+### The Core Rule
+
+**Command Handlers must NEVER use QueryBus for reads.** This is the fundamental principle of CQRS:
+
+```
+CQRS = Command Query Responsibility SEGREGATION
+       ↑ Commands are SEPARATE from Queries
+```
+
+### Why QueryBus in Commands is Wrong
+
+1. **Eventual Consistency Race Conditions**:
+   ```
+   T1: Command Handler queries read model (stale data)
+   T2: Another command updates aggregate
+   T3: Projector updates read model
+   T4: Command Handler uses stale data → WRONG DECISION
+   ```
+
+2. **Violates Segregation**: Commands and Queries should be completely separate paths
+3. **Event Store is Source of Truth**: Commands must work with aggregates, not projections
+
+### The Correct Pattern
+
+```python
+# ✅ CORRECT - Pure Event Sourcing
+async def handle(self, command: UpdateEntityCommand) -> None:
+    # 1. Load aggregate from Event Store
+    aggregate = await self.load_aggregate(
+        command.entity_id,
+        "EntityType",
+        EntityAggregate
+    )
+
+    # 2. Check existence via version (version == 0 means no events = not found)
+    if aggregate.version == 0:
+        raise ValueError("Entity not found")
+
+    # 3. Execute business logic (aggregate validates and emits events)
+    aggregate.update(field=command.field_value)
+
+    # 4. Publish events
+    await self.publish_events(
+        aggregate=aggregate,
+        aggregate_id=command.entity_id,
+        command=command
+    )
+```
+
+```python
+# ❌ WRONG - Query in Command Handler (NEVER DO THIS)
+async def handle(self, command: UpdateEntityCommand) -> None:
+    # DON'T query read model!
+    entity = await self.query_bus.query(GetEntityByIdQuery(id=command.entity_id))
+    if not entity:
+        raise ValueError("Entity not found")
+
+    # This is WRONG - mixing command and query sides
+```
+
+### Command Enrichment Pattern
+
+If a command needs additional data (e.g., telegram_message_id for editing a message), the **caller enriches the command BEFORE sending**:
+
+```python
+# Router/Service enriches command before sending
+async def edit_message_endpoint(request: EditMessageRequest):
+    # Query for telegram_message_id at API layer (query side)
+    message = await query_bus.query(GetMessageQuery(message_id=request.message_id))
+
+    # Enrich command with required data
+    command = EditMessageCommand(
+        message_id=request.message_id,
+        chat_id=request.chat_id,
+        new_content=request.new_content,
+        telegram_message_id=message.telegram_message_id  # Enriched!
+    )
+
+    # Command handler receives everything it needs
+    await command_bus.send(command)
+```
+
+### Documented Exceptions
+
+Some handlers legitimately need QueryBus. These are **documented exceptions**, not the rule:
+
+1. **Authentication Handlers**: Must lookup user by email/username to find aggregate ID
+   ```python
+   # EXCEPTION: Auth lookup by email/username
+   user = await self.query_bus.query(GetUserByEmailQuery(email=command.username))
+   ```
+
+2. **Password/Security Handlers**: Must validate credentials via query
+   ```python
+   # EXCEPTION: Password validation (security requirement)
+   credentials_result = await self.query_bus.query(
+       ValidateUserCredentialsQuery(user_id=command.user_id, password=command.password)
+   )
+   ```
+
+3. **Saga Enrichment Handlers**: Must query data to enrich event for saga
+   ```python
+   # EXCEPTION: Saga needs enriched data for coordination
+   company = await self.query_bus.query(GetCompanyDetailsQuery(company_id=command.company_id))
+   ```
+
+**All exceptions MUST be clearly documented in the handler docstring!**
 
 ---
 
@@ -87,41 +201,52 @@ Sagas React to Events (distributed orchestration)
 ### Handler Structure
 
 ```python
-@command_handler(CreateOrderCommand)
-class CreateOrderHandler(BaseCommandHandler):
+@command_handler(UpdateCompanyCommand)
+class UpdateCompanyHandler(BaseCommandHandler):
     """
-    Handle CreateOrderCommand
+    Handle UpdateCompanyCommand - Pure Event Sourcing
 
-    1. Validate command
-    2. Load/create aggregate
+    1. Load aggregate from Event Store
+    2. Verify existence via version
     3. Execute business logic
     4. Publish events
     """
 
     def __init__(self, deps: HandlerDependencies):
-        # Initialize base with event infrastructure
+        # Initialize base with event infrastructure ONLY
         super().__init__(
             event_bus=deps.event_bus,
-            transport_topic="order_events",  # Where events go
+            transport_topic="transport.company-events",
             event_store=deps.event_store
         )
-        # Store additional dependencies
-        self.query_bus = deps.query_bus
-        self.command_bus = deps.command_bus
+        # NO query_bus! Pure Event Sourcing handler
 
-    async def handle(self, command: CreateOrderCommand) -> UUID:
-        # 1. Create aggregate (new)
-        aggregate = Order.create(...)
-
-        # 2. Publish events (automatic from aggregate.uncommitted_events)
-        await self.publish_and_commit_events(
-            aggregate=aggregate,
-            aggregate_type="order",
-            expected_version=None,  # New aggregate
-            saga_id=command.saga_id
+    async def handle(self, command: UpdateCompanyCommand) -> UUID:
+        # 1. Load aggregate from Event Store
+        company_aggregate = await self.load_aggregate(
+            command.company_id,
+            "Company",
+            CompanyAggregate
         )
 
-        return aggregate.id
+        # 2. Verify existence via version
+        if company_aggregate.version == 0:
+            raise ValueError(f"Company {command.company_id} not found")
+
+        # 3. Execute business logic (aggregate emits events)
+        company_aggregate.update(
+            name=command.name,
+            description=command.description
+        )
+
+        # 4. Publish events with version tracking
+        await self.publish_events(
+            aggregate=company_aggregate,
+            aggregate_id=command.company_id,
+            command=command
+        )
+
+        return command.company_id
 ```
 
 ---
@@ -183,46 +308,43 @@ Handlers inherit from `BaseCommandHandler`:
 
 ```python
 import logging
-from uuid import UUID, uuid4
+from uuid import UUID
 from typing import TYPE_CHECKING
 
 from app.common.base.base_command_handler import BaseCommandHandler
-from app.infra.cqrs.decorators import command_handler
+from app.infra.cqrs.cqrs_decorators import command_handler
 
 if TYPE_CHECKING:
     from app.infra.cqrs.handler_dependencies import HandlerDependencies
 
-log = logging.getLogger("tradecore.order.command_handlers.lifecycle")
+log = logging.getLogger("wellwon.company.command_handlers")
 
-@command_handler(CreateOrderCommand)
-class CreateOrderHandler(BaseCommandHandler):
+@command_handler(UpdateCompanyCommand)
+class UpdateCompanyHandler(BaseCommandHandler):
     """
-    Handle CreateOrderCommand
+    Handle UpdateCompanyCommand - Pure Event Sourcing
 
-    Creates new order aggregate and emits OrderCreatedEvent.
+    Loads company aggregate from Event Store and updates it.
+    NO QueryBus - this is a pure Event Sourcing handler.
     """
 
     def __init__(self, deps: 'HandlerDependencies'):
-        # Store dependencies
-        self.event_bus = deps.event_bus
-        self.event_store = deps.event_store
-        self.query_bus = deps.query_bus
-
-        # Initialize base handler
+        # Initialize base handler with event infrastructure ONLY
         super().__init__(
-            event_bus=self.event_bus,
-            transport_topic="order_events",
-            event_store=self.event_store
+            event_bus=deps.event_bus,
+            transport_topic="transport.company-events",
+            event_store=deps.event_store
         )
+        # NO query_bus! Pure handlers don't need it
 
-    async def handle(self, command: CreateOrderCommand) -> UUID:
+    async def handle(self, command: UpdateCompanyCommand) -> UUID:
         """
-        Create new order
+        Update company
 
         Returns:
-            order_id: UUID of created order
+            company_id: UUID of updated company
         """
-        log.info(f"Creating order for {command.symbol}")
+        log.info(f"Updating company {command.company_id}")
 
         # Business logic implementation...
 ```
@@ -231,7 +353,7 @@ class CreateOrderHandler(BaseCommandHandler):
 - Use `@command_handler(CommandClass)` decorator
 - Inherit from `BaseCommandHandler`
 - Initialize base with `event_bus`, `transport_topic`, `event_store`
-- Store additional dependencies (query_bus, command_bus, repos)
+- **DO NOT store query_bus** unless handler is a documented exception
 
 ---
 
@@ -240,97 +362,75 @@ class CreateOrderHandler(BaseCommandHandler):
 **For NEW aggregates:**
 
 ```python
-async def handle(self, command: CreateOrderCommand) -> UUID:
-    """Create new order"""
-
-    # Validate prerequisites via query bus
-    automation = await self.query_bus.query(
-        GetAutomationQuery(automation_id=command.automation_id)
-    )
-
-    if not automation.is_active:
-        raise AutomationInactiveError("Automation must be active")
+async def handle(self, command: CreateCompanyCommand) -> UUID:
+    """Create new company - Pure Event Sourcing"""
 
     # Create aggregate (calls factory method)
-    order = Order.create(
-        user_id=command.user_id,
-        automation_id=command.automation_id,
-        symbol=command.symbol,
-        side=command.side,
-        quantity=command.quantity,
-        order_type=command.order_type,
-        limit_price=command.limit_price
+    # NO query_bus validation! If validation needed, command should be enriched by caller
+    company = CompanyAggregate(company_id=command.company_id)
+
+    # Call aggregate create method (emits CompanyCreated event)
+    company.create_new_company(
+        name=command.name,
+        owner_id=command.owner_id,
+        description=command.description
     )
 
     # Aggregate has uncommitted events now
-    log.info(f"Order created: {order.id}")
+    log.info(f"Company created: {company.id}")
 
     # Publish events
     await self.publish_and_commit_events(
-        aggregate=order,
-        aggregate_type="order",
+        aggregate=company,
+        aggregate_type="Company",
         expected_version=None,  # New aggregate (no version)
-        saga_id=command.saga_id
     )
 
-    return order.id
+    return company.id
 ```
+
+**Important:** If you need to validate prerequisites (e.g., user is active), the **caller (router/service) should validate before sending the command**. Don't query in the handler.
 
 **For EXISTING aggregates (update/delete):**
 
 ```python
-async def handle(self, command: CancelOrderCommand) -> None:
-    """Cancel existing order"""
+async def handle(self, command: UpdateCompanyCommand) -> None:
+    """Update existing company - Pure Event Sourcing"""
 
-    # Load aggregate from event store
-    order = await self._load_aggregate(command.order_id)
+    # Load aggregate from Event Store using BaseCommandHandler method
+    company_aggregate = await self.load_aggregate(
+        command.company_id,
+        "Company",
+        CompanyAggregate
+    )
 
-    # Store ORIGINAL version BEFORE mutations
-    original_version = order.version
+    # Check existence via version (version == 0 means no events = not found)
+    if company_aggregate.version == 0:
+        raise ValueError(f"Company {command.company_id} not found")
 
-    # Validate ownership
-    if order.user_id != command.user_id:
-        raise PermissionError("Not your order")
+    # Validate ownership (from aggregate state, not from query!)
+    if company_aggregate.state.owner_id != command.user_id:
+        raise PermissionError("Not your company")
 
     # Execute business logic (emits events)
-    order.cancel(reason=command.reason)
-
-    # Publish events with concurrency control
-    await self.publish_and_commit_events(
-        aggregate=order,
-        aggregate_type="order",
-        expected_version=original_version,  # For optimistic locking
-        saga_id=command.saga_id
+    company_aggregate.update(
+        name=command.name,
+        description=command.description
     )
 
-async def _load_aggregate(self, order_id: UUID) -> Order:
-    """Load order from event store"""
-    events = await self.event_store.get_events(
-        aggregate_id=order_id,
-        aggregate_type="order"
+    # Publish events with version tracking
+    await self.publish_events(
+        aggregate=company_aggregate,
+        aggregate_id=command.company_id,
+        command=command
     )
-
-    if not events:
-        raise OrderNotFoundError(f"Order {order_id} not found")
-
-    # Initialize aggregate
-    order = Order(id=order_id, ...)  # Minimal initialization
-
-    # Replay events to rebuild state
-    from app.infra.event_bus.event_registry import EVENT_TYPE_TO_PYDANTIC_MODEL
-
-    for envelope in events:
-        event_class = EVENT_TYPE_TO_PYDANTIC_MODEL.get(envelope.event_type)
-        if event_class:
-            event = event_class(**envelope.event_data)
-            order._apply(event)
-            order.version = envelope.aggregate_version
-
-    # Clear uncommitted events (just loaded from store)
-    order.mark_events_committed()
-
-    return order
 ```
+
+**Key Points:**
+- Use `self.load_aggregate(id, "Type", AggregateClass)` from BaseCommandHandler
+- Check `aggregate.version == 0` to verify existence (no events = never created)
+- Access aggregate state directly (`aggregate.state.field`) for validation
+- **NEVER query read model** - aggregate state is the source of truth
 
 ---
 

@@ -605,9 +605,25 @@ class LinkDiscoveredBrokerAccountHandler(BaseCommandHandler):
 **Handler Best Practices:**
 1. Use `@command_handler` decorator for registration
 2. Inject dependencies via `HandlerDependencies`
-3. Always use QueryBus for reads (CQRS compliance)
-4. Let aggregate validate business rules
+3. **NEVER use QueryBus for reads** - load aggregate from Event Store instead
+4. Let aggregate validate business rules (aggregate.version == 0 means not found)
 5. Log key operations for debugging
+
+**CRITICAL: Pure CQRS Pattern**
+```python
+# ✅ CORRECT - Load from Event Store
+aggregate = await self.load_aggregate(command.entity_id, "EntityType", EntityAggregate)
+if aggregate.version == 0:
+    raise ValueError("Entity not found")
+
+# ❌ WRONG - Query in command handler
+entity = await self.query_bus.query(GetEntityByIdQuery(id=command.entity_id))
+```
+
+**Documented Exceptions (use sparingly):**
+- **Authentication handlers**: Must lookup by email/username to find aggregate ID
+- **Password/Security handlers**: Must validate credentials via query
+- **Saga enrichment handlers**: Must query data to enrich event for saga
 
 ---
 

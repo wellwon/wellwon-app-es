@@ -20,7 +20,6 @@ from app.chat.commands import (
 )
 from app.chat.aggregate import ChatAggregate
 from app.chat.events import TypingStarted, TypingStopped
-from app.chat.queries import GetChatByIdQuery
 from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
 
@@ -38,7 +37,7 @@ class SendMessageHandler(BaseCommandHandler):
 
     When a message is sent from WellWon web:
     1. Store in event store (WellWon DB)
-    2. Sync to Telegram if chat has telegram_chat_id
+    2. Sync to Telegram if chat has telegram_chat_id (from aggregate state)
     """
 
     def __init__(self, deps: 'HandlerDependencies'):
@@ -47,13 +46,12 @@ class SendMessageHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
         self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: SendMessageCommand) -> uuid.UUID:
         log.info(f"Sending message to chat {command.chat_id} from {command.sender_id}, source={command.source}")
 
-        # Load aggregate
+        # Load aggregate from Event Store
         chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
         # Send message in WellWon
@@ -86,17 +84,15 @@ class SendMessageHandler(BaseCommandHandler):
         return command.message_id
 
     async def _sync_to_telegram(self, command: SendMessageCommand, chat_aggregate: ChatAggregate) -> None:
-        """Sync message to Telegram if chat is linked"""
+        """Sync message to Telegram if chat is linked (using aggregate state, not query)"""
         try:
-            # Get chat details to find Telegram IDs
-            chat_detail = await self.query_bus.query(GetChatByIdQuery(chat_id=command.chat_id))
+            # Get Telegram IDs from aggregate state (set by TelegramChatLinked event)
+            telegram_chat_id = chat_aggregate.state.telegram_chat_id
+            telegram_topic_id = chat_aggregate.state.telegram_topic_id
 
-            if not chat_detail or not chat_detail.telegram_chat_id:
+            if not telegram_chat_id:
                 log.debug(f"Chat {command.chat_id} not linked to Telegram, skipping sync")
                 return
-
-            telegram_chat_id = chat_detail.telegram_chat_id
-            telegram_topic_id = chat_detail.telegram_topic_id
 
             # Format chat_id for Telegram (supergroups need -100 prefix)
             # telegram_chat_id in DB is stored without prefix (e.g., 1234567890)
@@ -160,7 +156,11 @@ class SendMessageHandler(BaseCommandHandler):
 
 @command_handler(EditMessageCommand)
 class EditMessageHandler(BaseCommandHandler):
-    """Handle EditMessageCommand with bidirectional Telegram sync"""
+    """Handle EditMessageCommand with bidirectional Telegram sync.
+
+    telegram_message_id comes in the command (enriched by router).
+    telegram_chat_id comes from aggregate state.
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -168,37 +168,17 @@ class EditMessageHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
         self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: EditMessageCommand) -> uuid.UUID:
         log.info(f"Editing message {command.message_id} in chat {command.chat_id}")
 
-        # Lookup message to get telegram_message_id for sync
-        telegram_message_id: Optional[int] = None
-        telegram_chat_id: Optional[int] = None
-
-        try:
-            from app.chat.queries import GetMessageByIdQuery
-            message = await self.query_bus.query(
-                GetMessageByIdQuery(
-                    chat_id=command.chat_id,
-                    message_id=command.message_id
-                )
-            )
-            if message:
-                telegram_message_id = getattr(message, 'telegram_message_id', None)
-
-            # Lookup chat to get telegram_chat_id
-            chat = await self.query_bus.query(
-                GetChatByIdQuery(chat_id=command.chat_id)
-            )
-            if chat:
-                telegram_chat_id = getattr(chat, 'telegram_chat_id', None) or getattr(chat, 'telegram_supergroup_id', None)
-        except Exception as e:
-            log.warning(f"Failed to lookup telegram IDs for message edit: {e}")
-
+        # Load aggregate from Event Store
         chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
+
+        # Get Telegram IDs: chat_id from aggregate state, message_id from command
+        telegram_chat_id = chat_aggregate.state.telegram_chat_id
+        telegram_message_id = command.telegram_message_id
 
         chat_aggregate.edit_message(
             message_id=command.message_id,
@@ -246,7 +226,11 @@ class EditMessageHandler(BaseCommandHandler):
 
 @command_handler(DeleteMessageCommand)
 class DeleteMessageHandler(BaseCommandHandler):
-    """Handle DeleteMessageCommand (soft delete) with bidirectional Telegram sync"""
+    """Handle DeleteMessageCommand (soft delete) with bidirectional Telegram sync.
+
+    telegram_message_id comes in the command (enriched by router).
+    telegram_chat_id comes from aggregate state.
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -254,37 +238,17 @@ class DeleteMessageHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
         self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: DeleteMessageCommand) -> uuid.UUID:
         log.info(f"Deleting message {command.message_id} in chat {command.chat_id}")
 
-        # Lookup message to get telegram_message_id for sync
-        telegram_message_id: Optional[int] = None
-        telegram_chat_id: Optional[int] = None
-
-        try:
-            from app.chat.queries import GetMessageByIdQuery
-            message = await self.query_bus.query(
-                GetMessageByIdQuery(
-                    chat_id=command.chat_id,
-                    message_id=command.message_id
-                )
-            )
-            if message:
-                telegram_message_id = getattr(message, 'telegram_message_id', None)
-
-            # Lookup chat to get telegram_chat_id
-            chat = await self.query_bus.query(
-                GetChatByIdQuery(chat_id=command.chat_id)
-            )
-            if chat:
-                telegram_chat_id = getattr(chat, 'telegram_chat_id', None) or getattr(chat, 'telegram_supergroup_id', None)
-        except Exception as e:
-            log.warning(f"Failed to lookup telegram IDs for message deletion: {e}")
-
+        # Load aggregate from Event Store
         chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
+
+        # Get Telegram IDs: chat_id from aggregate state, message_id from command
+        telegram_chat_id = chat_aggregate.state.telegram_chat_id
+        telegram_message_id = command.telegram_message_id
 
         chat_aggregate.delete_message(
             message_id=command.message_id,
@@ -368,6 +332,9 @@ class MarkMessagesAsReadHandler(BaseCommandHandler):
     When a user marks messages as read in WellWon:
     1. Update aggregate state (idempotent)
     2. Sync read status to Telegram (if chat is linked)
+
+    telegram_message_id comes in the command (enriched by router).
+    telegram_chat_id/topic_id come from aggregate state.
     """
 
     def __init__(self, deps: 'HandlerDependencies'):
@@ -376,7 +343,6 @@ class MarkMessagesAsReadHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
         self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: MarkMessagesAsReadCommand) -> uuid.UUID:
@@ -422,9 +388,9 @@ class MarkMessagesAsReadHandler(BaseCommandHandler):
         command: MarkMessagesAsReadCommand,
         chat_aggregate: ChatAggregate
     ) -> None:
-        """Sync read status to Telegram"""
+        """Sync read status to Telegram (using data from command and aggregate state)"""
         try:
-            # Get chat details from aggregate state first
+            # Get Telegram IDs from aggregate state
             telegram_chat_id = chat_aggregate.state.telegram_chat_id
             telegram_topic_id = chat_aggregate.state.telegram_topic_id
 
@@ -432,15 +398,11 @@ class MarkMessagesAsReadHandler(BaseCommandHandler):
                 log.debug(f"Chat {command.chat_id} not linked to Telegram, skipping read sync")
                 return
 
-            # Get telegram_message_id for the last_read_message_id
-            # We need to look this up from ScyllaDB or the event data
-            telegram_message_id = await self._get_telegram_message_id(
-                command.chat_id,
-                command.last_read_message_id
-            )
+            # Get telegram_message_id from command (enriched by router)
+            telegram_message_id = command.telegram_message_id
 
             if not telegram_message_id:
-                log.debug(f"No telegram_message_id found for {command.last_read_message_id}, skipping Telegram sync")
+                log.debug(f"No telegram_message_id in command, skipping Telegram sync")
                 return
 
             log.info(
@@ -470,27 +432,6 @@ class MarkMessagesAsReadHandler(BaseCommandHandler):
         except Exception as e:
             # Don't fail the command if Telegram sync fails
             log.error(f"Error syncing read status to Telegram: {e}", exc_info=True)
-
-    async def _get_telegram_message_id(
-        self,
-        chat_id: uuid.UUID,
-        message_id: uuid.UUID
-    ) -> Optional[int]:
-        """
-        Get Telegram message ID for a WellWon message ID.
-
-        Looks up the message in ScyllaDB to find the telegram_message_id.
-        """
-        try:
-            from app.chat.queries import GetMessageByIdQuery
-            message = await self.query_bus.query(
-                GetMessageByIdQuery(chat_id=chat_id, message_id=message_id)
-            )
-            if message:
-                return getattr(message, 'telegram_message_id', None)
-        except Exception as e:
-            log.debug(f"Could not lookup telegram_message_id: {e}")
-        return None
 
 
 @command_handler(StartTypingCommand)

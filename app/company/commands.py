@@ -223,10 +223,15 @@ class UpdateTelegramSupergroupCommand(Command):
 
 
 class DeleteTelegramSupergroupCommand(Command):
-    """Permanently delete a Telegram supergroup (hard delete from read model)"""
+    """
+    Permanently delete a Telegram supergroup (hard delete from read model).
+
+    company_id should be enriched by the caller (router) if known.
+    """
     telegram_group_id: int
     deleted_by: uuid.UUID
     reason: Optional[str] = Field(None, max_length=500)
+    company_id: Optional[uuid.UUID] = None  # Enriched by router if known
 
 
 # =============================================================================

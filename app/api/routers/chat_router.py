@@ -126,8 +126,12 @@ class EditMessageRequest(BaseModel):
 
 
 class MarkAsReadRequest(BaseModel):
-    """Request to mark messages as read"""
-    last_read_message_id: uuid.UUID
+    """Request to mark messages as read.
+
+    Accepts the Snowflake message ID (bigint) as the last read position.
+    Frontend sends this as a string, we accept both int and str.
+    """
+    last_read_message_id: int  # Snowflake ID (bigint)
 
 
 class DeleteChatRequest(BaseModel):

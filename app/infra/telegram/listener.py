@@ -705,7 +705,7 @@ class TelegramEventListener:
         {
             "chat_id": UUID,
             "user_id": UUID,
-            "last_read_message_id": UUID,
+            "last_read_message_id": int (Snowflake ID),
             "read_count": int,
             "read_at": datetime,
             "source": str  # 'web' or 'telegram'
@@ -724,6 +724,7 @@ class TelegramEventListener:
 
         try:
             chat_id = event.get("chat_id")
+            last_read_message_id = event.get("last_read_message_id")  # Snowflake ID
 
             if not chat_id:
                 log.debug("No chat_id in MessagesMarkedAsRead event")
@@ -748,10 +749,16 @@ class TelegramEventListener:
                 log.debug(f"Chat {chat_id} not linked to Telegram, skipping read sync")
                 return
 
-            # Mark all messages as read on Telegram (max_id=0 means all messages)
-            # This is the standard behavior when opening a chat - mark everything as read
-            # Future optimization: track specific telegram_message_id for granular read tracking
-            max_id = 0
+            # Look up the telegram_message_id from the Snowflake message ID
+            max_id = 0  # Default to 0 (mark all as read) if lookup fails
+            if last_read_message_id:
+                telegram_message_id = await self._get_telegram_message_id(
+                    chat_id=UUID(chat_id) if isinstance(chat_id, str) else chat_id,
+                    message_id=last_read_message_id,
+                )
+                if telegram_message_id:
+                    max_id = telegram_message_id
+                    log.debug(f"Found telegram_message_id={max_id} for snowflake={last_read_message_id}")
 
             if telegram_topic_id:
                 # Forum topic - use topic-specific read method
@@ -779,6 +786,37 @@ class TelegramEventListener:
 
         except Exception as e:
             log.error(f"Error handling MessagesMarkedAsRead event: {e}", exc_info=True)
+
+    async def _get_telegram_message_id(
+        self,
+        chat_id: UUID,
+        message_id: int,  # Snowflake ID
+    ) -> Optional[int]:
+        """
+        Look up the telegram_message_id via QueryBus.
+
+        Args:
+            chat_id: WellWon chat UUID
+            message_id: Snowflake ID of the message
+
+        Returns:
+            Telegram message ID if found, None otherwise
+        """
+        try:
+            from app.chat.queries import GetMessageByIdQuery
+
+            message = await self._query_bus.query(
+                GetMessageByIdQuery(chat_id=chat_id, snowflake_id=message_id)
+            )
+
+            if message:
+                return getattr(message, 'telegram_message_id', None)
+
+            return None
+
+        except Exception as e:
+            log.debug(f"Could not lookup telegram_message_id: {e}")
+            return None
 
     async def on_chat_created(self, event: dict) -> None:
         """

@@ -637,8 +637,8 @@ class TelegramIncomingHandler:
         chat_id: UUID,
         telegram_chat_id: int,
         telegram_message_id: int
-    ) -> Optional[UUID]:
-        """Find WellWon message ID by Telegram message ID."""
+    ) -> Optional[int]:
+        """Find WellWon message Snowflake ID by Telegram message ID."""
         try:
             from app.chat.queries import GetMessageByTelegramIdQuery
 
@@ -649,7 +649,8 @@ class TelegramIncomingHandler:
                     telegram_message_id=telegram_message_id
                 )
             )
-            return result.message_id if result else None
+            # Return snowflake_id (int) for use with MarkMessagesAsReadCommand
+            return result.snowflake_id if result else None
 
         except Exception as e:
             log.debug(f"Message lookup by telegram_id failed: {e}")

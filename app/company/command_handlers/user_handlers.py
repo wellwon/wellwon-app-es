@@ -1,6 +1,6 @@
 # =============================================================================
 # File: app/company/command_handlers/user_handlers.py
-# Description: Company user relationship command handlers
+# Description: Company user relationship command handlers (pure Event Sourcing)
 # Handlers: AddUser, RemoveUser, ChangeRole
 # =============================================================================
 
@@ -15,7 +15,6 @@ from app.company.commands import (
     RemoveUserFromCompanyCommand,
     ChangeUserCompanyRoleCommand,
 )
-from app.company.queries import GetCompanyByIdQuery
 from app.company.aggregate import CompanyAggregate
 from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
@@ -31,7 +30,11 @@ log = get_logger("wellwon.company.command_handlers.user")
 # -----------------------------------------------------------------------------
 @command_handler(AddUserToCompanyCommand)
 class AddUserToCompanyHandler(BaseCommandHandler):
-    """Handles the AddUserToCompanyCommand using Event Sourcing pattern."""
+    """
+    Handles the AddUserToCompanyCommand using pure Event Sourcing.
+
+    Loads company from Event Store and adds user relationship.
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -39,20 +42,16 @@ class AddUserToCompanyHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
 
     async def handle(self, command: AddUserToCompanyCommand) -> uuid.UUID:
         log.info(f"Adding user {command.user_id} to company {command.company_id}")
 
-        # Verify company exists
-        company = await self.query_bus.query(
-            GetCompanyByIdQuery(company_id=command.company_id)
-        )
-        if not company:
-            raise ValueError(f"Company {command.company_id} not found")
+        # Load aggregate from Event Store
+        company_aggregate = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
 
-        # Create aggregate
-        company_aggregate = CompanyAggregate(company_id=command.company_id)
+        # Verify company exists
+        if company_aggregate.version == 0:
+            raise ValueError(f"Company {command.company_id} not found")
 
         # Call aggregate command method
         company_aggregate.add_user(
@@ -61,11 +60,11 @@ class AddUserToCompanyHandler(BaseCommandHandler):
             added_by=command.added_by,
         )
 
-        # Publish events
-        await self.publish_and_commit_events(
+        # Publish events with version tracking
+        await self.publish_events(
             aggregate=company_aggregate,
-            aggregate_type="Company",
-            expected_version=None,
+            aggregate_id=command.company_id,
+            command=command
         )
 
         log.info(f"User {command.user_id} added to company {command.company_id}")
@@ -77,7 +76,11 @@ class AddUserToCompanyHandler(BaseCommandHandler):
 # -----------------------------------------------------------------------------
 @command_handler(RemoveUserFromCompanyCommand)
 class RemoveUserFromCompanyHandler(BaseCommandHandler):
-    """Handles the RemoveUserFromCompanyCommand using Event Sourcing pattern."""
+    """
+    Handles the RemoveUserFromCompanyCommand using pure Event Sourcing.
+
+    Loads company from Event Store and removes user relationship.
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -85,20 +88,16 @@ class RemoveUserFromCompanyHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
 
     async def handle(self, command: RemoveUserFromCompanyCommand) -> uuid.UUID:
         log.info(f"Removing user {command.user_id} from company {command.company_id}")
 
-        # Verify company exists
-        company = await self.query_bus.query(
-            GetCompanyByIdQuery(company_id=command.company_id)
-        )
-        if not company:
-            raise ValueError(f"Company {command.company_id} not found")
+        # Load aggregate from Event Store
+        company_aggregate = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
 
-        # Create aggregate
-        company_aggregate = CompanyAggregate(company_id=command.company_id)
+        # Verify company exists
+        if company_aggregate.version == 0:
+            raise ValueError(f"Company {command.company_id} not found")
 
         # Call aggregate command method
         company_aggregate.remove_user(
@@ -107,11 +106,11 @@ class RemoveUserFromCompanyHandler(BaseCommandHandler):
             reason=command.reason,
         )
 
-        # Publish events
-        await self.publish_and_commit_events(
+        # Publish events with version tracking
+        await self.publish_events(
             aggregate=company_aggregate,
-            aggregate_type="Company",
-            expected_version=None,
+            aggregate_id=command.company_id,
+            command=command
         )
 
         log.info(f"User {command.user_id} removed from company {command.company_id}")
@@ -123,7 +122,11 @@ class RemoveUserFromCompanyHandler(BaseCommandHandler):
 # -----------------------------------------------------------------------------
 @command_handler(ChangeUserCompanyRoleCommand)
 class ChangeUserCompanyRoleHandler(BaseCommandHandler):
-    """Handles the ChangeUserCompanyRoleCommand using Event Sourcing pattern."""
+    """
+    Handles the ChangeUserCompanyRoleCommand using pure Event Sourcing.
+
+    Loads company from Event Store and changes user role.
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -131,20 +134,16 @@ class ChangeUserCompanyRoleHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
 
     async def handle(self, command: ChangeUserCompanyRoleCommand) -> uuid.UUID:
         log.info(f"Changing role for user {command.user_id} in company {command.company_id}")
 
-        # Verify company exists
-        company = await self.query_bus.query(
-            GetCompanyByIdQuery(company_id=command.company_id)
-        )
-        if not company:
-            raise ValueError(f"Company {command.company_id} not found")
+        # Load aggregate from Event Store
+        company_aggregate = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
 
-        # Create aggregate
-        company_aggregate = CompanyAggregate(company_id=command.company_id)
+        # Verify company exists
+        if company_aggregate.version == 0:
+            raise ValueError(f"Company {command.company_id} not found")
 
         # Call aggregate command method
         company_aggregate.change_user_role(
@@ -153,11 +152,11 @@ class ChangeUserCompanyRoleHandler(BaseCommandHandler):
             changed_by=command.changed_by,
         )
 
-        # Publish events
-        await self.publish_and_commit_events(
+        # Publish events with version tracking
+        await self.publish_events(
             aggregate=company_aggregate,
-            aggregate_type="Company",
-            expected_version=None,
+            aggregate_id=command.company_id,
+            command=command
         )
 
         log.info(f"User {command.user_id} role changed in company {command.company_id}")

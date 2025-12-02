@@ -436,17 +436,22 @@ class ChatReadRepo:
     async def update_participant_last_read(
         chat_id: uuid.UUID,
         user_id: uuid.UUID,
-        last_read_message_id: uuid.UUID,
+        last_read_message_id: Optional[int],  # Snowflake ID (unused in PG, tracked in ScyllaDB)
         last_read_at: datetime,
     ) -> None:
-        """Update participant's last read position"""
+        """Update participant's last read timestamp.
+
+        Note: The actual read position (last_read_message_id as Snowflake) is
+        stored in ScyllaDB's message_read_positions table. PostgreSQL only
+        tracks the timestamp for chat list sorting/metadata.
+        """
         await pg_client.execute(
             """
             UPDATE chat_participants
-            SET last_read_at = $1, last_read_message_id = $2
-            WHERE chat_id = $3 AND user_id = $4
+            SET last_read_at = $1
+            WHERE chat_id = $2 AND user_id = $3
             """,
-            last_read_at, last_read_message_id, chat_id, user_id
+            last_read_at, chat_id, user_id
         )
 
     @staticmethod

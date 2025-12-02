@@ -1,6 +1,6 @@
 # =============================================================================
 # File: app/user_account/command_handlers/profile_handlers.py
-# Description: User profile management command handlers (WellWon Platform)
+# Description: User profile management command handlers (pure Event Sourcing)
 # Handlers: UpdateProfile
 # =============================================================================
 
@@ -10,10 +10,6 @@ import logging
 from typing import TYPE_CHECKING
 
 from app.user_account.commands import UpdateUserProfileCommand
-from app.user_account.events import UserProfileUpdated
-from app.user_account.queries import GetUserProfileQuery
-
-from app.infra.cqrs.command_bus import ICommandHandler
 from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
 from app.user_account.aggregate import UserAccountAggregate
@@ -25,11 +21,15 @@ log = logging.getLogger("wellwon.users.profile_handlers")
 
 
 # -----------------------------------------------------------------------------
-# UpdateUserProfileHandler - Event Sourcing Pattern
+# UpdateUserProfileHandler - Pure Event Sourcing
 # -----------------------------------------------------------------------------
 @command_handler(UpdateUserProfileCommand)
 class UpdateUserProfileHandler(BaseCommandHandler):
-    """Handles the UpdateUserProfileCommand using Event Sourcing pattern."""
+    """
+    Handles the UpdateUserProfileCommand using pure Event Sourcing.
+
+    Loads user aggregate from Event Store and updates profile.
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -37,20 +37,16 @@ class UpdateUserProfileHandler(BaseCommandHandler):
             transport_topic="transport.user-account-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
 
     async def handle(self, command: UpdateUserProfileCommand) -> None:
         log.info(f"Updating profile for user {command.user_id}")
 
-        # Verify user exists
-        user = await self.query_bus.query(
-            GetUserProfileQuery(user_id=command.user_id)
-        )
-        if not user:
-            raise ValueError("User not found.")
+        # Load aggregate from Event Store
+        user_aggregate = await self.load_aggregate(command.user_id, "UserAccount", UserAccountAggregate)
 
-        # Create aggregate
-        user_aggregate = UserAccountAggregate(user_id=command.user_id)
+        # Verify user exists
+        if user_aggregate.version == 0:
+            raise ValueError("User not found.")
 
         # Call aggregate command method
         user_aggregate.update_profile(
@@ -63,11 +59,11 @@ class UpdateUserProfileHandler(BaseCommandHandler):
             is_developer=command.is_developer,
         )
 
-        # Publish events
-        await self.publish_and_commit_events(
+        # Publish events with version tracking
+        await self.publish_events(
             aggregate=user_aggregate,
-            aggregate_type="UserAccount",
-            expected_version=None,
+            aggregate_id=command.user_id,
+            command=command
         )
 
         log.info(f"Profile updated for user {command.user_id}")

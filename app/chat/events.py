@@ -210,7 +210,7 @@ class MessagesMarkedAsRead(BaseEvent):
     event_type: Literal["MessagesMarkedAsRead"] = "MessagesMarkedAsRead"
     chat_id: uuid.UUID
     user_id: uuid.UUID
-    last_read_message_id: uuid.UUID
+    last_read_message_id: int  # Snowflake ID (bigint) - matches ScyllaDB message_id
     read_count: int
     read_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     source: str = "web"  # 'web' or 'telegram' - prevents bidirectional sync loop
@@ -243,7 +243,7 @@ class MessagesReadOnTelegram(BaseEvent):
     """
     event_type: Literal["MessagesReadOnTelegram"] = "MessagesReadOnTelegram"
     chat_id: uuid.UUID
-    last_read_message_id: uuid.UUID  # WellWon message ID
+    last_read_message_id: Optional[int] = None  # Snowflake ID (bigint), None if message not found
     last_read_telegram_message_id: int  # Telegram's max_id
     telegram_read_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

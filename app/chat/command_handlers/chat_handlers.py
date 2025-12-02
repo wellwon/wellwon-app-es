@@ -20,7 +20,6 @@ from app.chat.commands import (
 )
 from app.chat.aggregate import ChatAggregate
 from app.chat.enums import ParticipantRole
-from app.company.queries import GetCompanyByIdQuery, GetCompanyByTelegramGroupQuery
 from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
 
@@ -34,13 +33,13 @@ log = logging.getLogger("wellwon.chat.handlers.chat")
 @command_handler(CreateChatCommand)
 class CreateChatHandler(BaseCommandHandler):
     """
-    Handle CreateChatCommand using Event Sourcing with bidirectional Telegram sync.
+    Handle CreateChatCommand using pure Event Sourcing.
 
     Creates a new chat and optionally adds initial participants.
     The creator is automatically added as admin.
 
-    If the chat belongs to a company with a Telegram supergroup and no topic_id is provided,
-    a new Telegram topic will be created for the chat.
+    IMPORTANT: All data (company_id, telegram_supergroup_id) must come in the command,
+    pre-enriched by the caller (API router or Saga). Command handlers do NOT query.
     """
 
     def __init__(self, deps: 'HandlerDependencies'):
@@ -49,41 +48,34 @@ class CreateChatHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
         self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: CreateChatCommand) -> uuid.UUID:
         log.info(f"Creating {command.chat_type} chat by user {command.created_by}")
 
-        # Determine Telegram IDs - either from command or create new topic
+        # All data comes from command (pre-enriched by caller)
         telegram_supergroup_id = command.telegram_supergroup_id
         telegram_topic_id = command.telegram_topic_id
         company_id = command.company_id
 
-        # If supergroup is provided but no company_id, lookup company from supergroup
-        if telegram_supergroup_id and not company_id:
-            company_id = await self._get_company_from_supergroup(telegram_supergroup_id)
-            if company_id:
-                log.info(f"Found company {company_id} for supergroup {telegram_supergroup_id}")
-
         # If we have a supergroup and no topic_id yet, create a Telegram topic
-        if telegram_supergroup_id and not telegram_topic_id:
-            telegram_supergroup_id, telegram_topic_id = await self._ensure_telegram_topic(
-                company_id,
+        # (telegram_adapter is infrastructure, not a query - this is allowed)
+        if telegram_supergroup_id and not telegram_topic_id and self.telegram_adapter:
+            telegram_topic_id = await self._create_telegram_topic(
+                telegram_supergroup_id,
                 command.name or "Новый чат",
-                telegram_supergroup_id
             )
 
         # Create new aggregate
         chat_aggregate = ChatAggregate(chat_id=command.chat_id)
 
-        # Create the chat (use resolved company_id if we found one from supergroup)
+        # Create the chat with data from command
         chat_aggregate.create_chat(
             name=command.name,
             chat_type=command.chat_type,
             created_by=command.created_by,
-            company_id=company_id,  # Use resolved company_id (could be from command or from supergroup lookup)
-            telegram_supergroup_id=telegram_supergroup_id,  # Primary field
+            company_id=company_id,
+            telegram_supergroup_id=telegram_supergroup_id,
             telegram_topic_id=telegram_topic_id,
         )
 
@@ -113,75 +105,34 @@ class CreateChatHandler(BaseCommandHandler):
         log.info(f"Chat created: {command.chat_id} with {len(command.participant_ids) + 1} participants, telegram_topic_id={telegram_topic_id}")
         return command.chat_id
 
-    async def _get_company_from_supergroup(self, telegram_supergroup_id: int) -> Optional[uuid.UUID]:
-        """
-        Lookup company by Telegram supergroup ID.
-
-        Returns:
-            Company ID if found, None otherwise
-        """
-        try:
-            company = await self.query_bus.query(
-                GetCompanyByTelegramGroupQuery(telegram_group_id=telegram_supergroup_id)
-            )
-            if company:
-                return company.id
-            return None
-        except Exception as e:
-            log.warning(f"Failed to lookup company for supergroup {telegram_supergroup_id}: {e}")
-            return None
-
-    async def _ensure_telegram_topic(
+    async def _create_telegram_topic(
         self,
-        company_id: Optional[uuid.UUID],
+        supergroup_id: int,
         chat_name: str,
-        provided_supergroup_id: Optional[int]
-    ) -> tuple[Optional[int], Optional[int]]:
+    ) -> Optional[int]:
         """
-        Ensure a Telegram topic exists for the chat.
-
-        Creates a new topic in the specified supergroup.
-        If company_id is provided, will lookup the supergroup from company if not provided.
-
-        Returns:
-            Tuple of (telegram_supergroup_id, telegram_topic_id)
+        Create a Telegram topic in the supergroup.
+        This is infrastructure operation (not a query).
         """
-        if not self.telegram_adapter:
-            log.debug("Telegram adapter not available, skipping topic creation")
-            return provided_supergroup_id, None
-
         try:
-            telegram_supergroup_id = provided_supergroup_id
-
-            # If no supergroup provided but we have company, try to get supergroup from company
-            if not telegram_supergroup_id and company_id:
-                company = await self.query_bus.query(GetCompanyByIdQuery(company_id=company_id))
-                if company:
-                    telegram_supergroup_id = getattr(company, 'telegram_group_id', None)
-
-            if not telegram_supergroup_id:
-                log.debug("No Telegram supergroup available for topic creation")
-                return None, None
-
-            # Create topic in Telegram
-            log.info(f"Creating Telegram topic '{chat_name}' in supergroup {telegram_supergroup_id}")
+            log.info(f"Creating Telegram topic '{chat_name}' in supergroup {supergroup_id}")
 
             topic_info = await self.telegram_adapter.create_chat_topic(
-                group_id=telegram_supergroup_id,
+                group_id=supergroup_id,
                 topic_name=chat_name,
             )
 
             if topic_info:
                 log.info(f"Telegram topic created: id={topic_info.topic_id}, name={topic_info.title}")
-                return telegram_supergroup_id, topic_info.topic_id
+                return topic_info.topic_id
             else:
                 log.warning(f"Failed to create Telegram topic for chat '{chat_name}'")
-                return telegram_supergroup_id, None
+                return None
 
         except Exception as e:
             # Don't fail chat creation if Telegram sync fails
             log.error(f"Error creating Telegram topic: {e}", exc_info=True)
-            return provided_supergroup_id, None
+            return None
 
 
 @command_handler(UpdateChatCommand)
@@ -194,7 +145,6 @@ class UpdateChatHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
 
     async def handle(self, command: UpdateChatCommand) -> uuid.UUID:
         log.info(f"Updating chat {command.chat_id}")
@@ -230,20 +180,6 @@ class UpdateChatHandler(BaseCommandHandler):
         log.info(f"Chat updated: {command.chat_id}")
         return command.chat_id
 
-    async def _is_company_member(self, user_id: uuid.UUID, company_id: uuid.UUID) -> bool:
-        """Check if user is a member of the company"""
-        try:
-            from app.company.queries import GetUserCompanyRelationshipQuery
-            relationship = await self.query_bus.query(GetUserCompanyRelationshipQuery(
-                company_id=company_id,
-                user_id=user_id,
-            ))
-            return relationship is not None and relationship.is_member
-        except Exception as e:
-            log.warning(f"Failed to check company membership: {e}")
-            # Fall back to allowing the operation for company chats
-            return True
-
 
 @command_handler(ArchiveChatCommand)
 class ArchiveChatHandler(BaseCommandHandler):
@@ -255,30 +191,19 @@ class ArchiveChatHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
         self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: ArchiveChatCommand) -> uuid.UUID:
         log.info(f"Archiving chat {command.chat_id}")
 
-        # Lookup telegram IDs for syncing archive to Telegram
-        telegram_supergroup_id: Optional[int] = None
-        telegram_topic_id: Optional[int] = None
-
-        try:
-            from app.chat.queries import GetChatByIdQuery
-            chat = await self.query_bus.query(
-                GetChatByIdQuery(chat_id=command.chat_id)
-            )
-            if chat:
-                telegram_supergroup_id = getattr(chat, 'telegram_supergroup_id', None) or getattr(chat, 'telegram_chat_id', None)
-                telegram_topic_id = getattr(chat, 'telegram_topic_id', None)
-        except Exception as e:
-            log.warning(f"Failed to lookup telegram IDs for chat archive: {e}")
-
+        # Load aggregate - telegram IDs come from aggregate state (Event Sourcing)
         chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
-        log.info(f"Chat state for archive: company_id={chat_aggregate.state.company_id}, participants={list(chat_aggregate.state.participants.keys())}, event_count={len(events)}")
+        # Get telegram IDs from aggregate state (set by TelegramChatLinked event)
+        telegram_supergroup_id = chat_aggregate.state.telegram_chat_id
+        telegram_topic_id = chat_aggregate.state.telegram_topic_id
+
+        log.info(f"Chat state for archive: company_id={chat_aggregate.state.company_id}, participants={list(chat_aggregate.state.participants.keys())}")
 
         # Auto-enroll user as admin if they're not yet a participant
         if not chat_aggregate.is_participant(command.archived_by):
@@ -328,20 +253,6 @@ class ArchiveChatHandler(BaseCommandHandler):
             # Don't fail the command if Telegram sync fails
             log.error(f"Error closing Telegram topic: {e}", exc_info=True)
 
-    async def _is_company_member(self, user_id: uuid.UUID, company_id: uuid.UUID) -> bool:
-        """Check if user is a member of the company"""
-        try:
-            from app.company.queries import GetUserCompanyRelationshipQuery
-            relationship = await self.query_bus.query(GetUserCompanyRelationshipQuery(
-                company_id=company_id,
-                user_id=user_id,
-            ))
-            return relationship is not None and relationship.is_member
-        except Exception as e:
-            log.warning(f"Failed to check company membership: {e}")
-            # Fall back to allowing the operation for company chats
-            return True
-
 
 @command_handler(RestoreChatCommand)
 class RestoreChatHandler(BaseCommandHandler):
@@ -353,28 +264,17 @@ class RestoreChatHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
         self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: RestoreChatCommand) -> uuid.UUID:
         log.info(f"Restoring chat {command.chat_id}")
 
-        # Lookup telegram IDs for syncing restore to Telegram
-        telegram_supergroup_id: Optional[int] = None
-        telegram_topic_id: Optional[int] = None
-
-        try:
-            from app.chat.queries import GetChatByIdQuery
-            chat = await self.query_bus.query(
-                GetChatByIdQuery(chat_id=command.chat_id)
-            )
-            if chat:
-                telegram_supergroup_id = getattr(chat, 'telegram_supergroup_id', None) or getattr(chat, 'telegram_chat_id', None)
-                telegram_topic_id = getattr(chat, 'telegram_topic_id', None)
-        except Exception as e:
-            log.warning(f"Failed to lookup telegram IDs for chat restore: {e}")
-
+        # Load aggregate - telegram IDs come from aggregate state (Event Sourcing)
         chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
+
+        # Get telegram IDs from aggregate state
+        telegram_supergroup_id = chat_aggregate.state.telegram_chat_id
+        telegram_topic_id = chat_aggregate.state.telegram_topic_id
 
         chat_aggregate.restore_chat(restored_by=command.restored_by)
 
@@ -422,32 +322,21 @@ class DeleteChatHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
         self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: DeleteChatCommand) -> uuid.UUID:
         log.info(f"Hard deleting chat {command.chat_id}")
 
-        # Lookup telegram IDs for syncing delete to Telegram
-        telegram_supergroup_id: Optional[int] = None
-        telegram_topic_id: Optional[int] = None
-
-        try:
-            from app.chat.queries import GetChatByIdQuery
-            chat = await self.query_bus.query(
-                GetChatByIdQuery(chat_id=command.chat_id)
-            )
-            if chat:
-                telegram_supergroup_id = getattr(chat, 'telegram_supergroup_id', None) or getattr(chat, 'telegram_chat_id', None)
-                telegram_topic_id = getattr(chat, 'telegram_topic_id', None)
-        except Exception as e:
-            log.warning(f"Failed to lookup telegram IDs for chat delete: {e}")
-
         # Retry loop for optimistic concurrency conflicts
         max_retries = 3
         for attempt in range(max_retries):
             try:
+                # Load aggregate - telegram IDs come from aggregate state (Event Sourcing)
                 chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
+
+                # Get telegram IDs from aggregate state
+                telegram_supergroup_id = chat_aggregate.state.telegram_chat_id
+                telegram_topic_id = chat_aggregate.state.telegram_topic_id
 
                 chat_aggregate.hard_delete_chat(
                     deleted_by=command.deleted_by,
@@ -466,14 +355,8 @@ class DeleteChatHandler(BaseCommandHandler):
                         command=command
                     )
                 else:
-                    # Already deleted in EventStore but maybe not in read model (previous projection failure)
-                    # Force cleanup of read model
-                    log.info(f"Chat {command.chat_id} already deleted in EventStore, ensuring read model cleanup")
-                    from app.infra.read_repos.chat_read_repo import ChatReadRepo
-                    try:
-                        await ChatReadRepo.hard_delete_chat(chat_id=command.chat_id)
-                    except Exception as e:
-                        log.warning(f"Read model cleanup failed (may already be deleted): {e}")
+                    # Already deleted - projector will handle read model cleanup via event replay
+                    log.info(f"Chat {command.chat_id} already deleted in EventStore")
 
                 # Success - break retry loop
                 break
@@ -485,7 +368,6 @@ class DeleteChatHandler(BaseCommandHandler):
                 raise
 
         # Telegram sync handled by TelegramEventListener via EventBus (CQRS pattern)
-        # Delete → delete_forum_topic() in Telegram (removes messages)
         log.info(f"Chat hard deleted: {command.chat_id}, telegram_topic_id={telegram_topic_id}")
         return command.chat_id
 

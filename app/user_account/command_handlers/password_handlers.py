@@ -2,6 +2,7 @@
 # File: app/user_account/command_handlers/password_handlers.py
 # Description: Password management command handlers
 # Handlers: ChangePassword, ResetPassword
+# EXCEPTION: Uses QueryBus for security operations (password validation, hashing)
 # =============================================================================
 
 from __future__ import annotations
@@ -15,20 +16,13 @@ from app.user_account.commands import (
     ResetUserPasswordWithSecretCommand,
 )
 
-from app.user_account.events import (
-    UserPasswordChanged,
-    UserPasswordResetViaSecret,
-)
-
 from app.user_account.queries import (
     GetUserByUsernameQuery,
-    GetUserProfileQuery,
     ValidateUserCredentialsQuery,
     HashPasswordQuery,
     VerifyPasswordHashQuery,
 )
 
-from app.infra.cqrs.command_bus import ICommandHandler
 from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
 from app.user_account.aggregate import UserAccountAggregate
@@ -40,11 +34,18 @@ log = logging.getLogger("wellwon.users.password_handlers")
 
 
 # -----------------------------------------------------------------------------
-# ChangeUserPasswordHandler - Event Sourcing Pattern
+# ChangeUserPasswordHandler
+# EXCEPTION: Uses QueryBus for password validation and hashing (security).
 # -----------------------------------------------------------------------------
 @command_handler(ChangeUserPasswordCommand)
 class ChangeUserPasswordHandler(BaseCommandHandler):
-    """Handles the ChangeUserPasswordCommand using Event Sourcing pattern."""
+    """
+    Handles the ChangeUserPasswordCommand using Event Sourcing.
+
+    EXCEPTION TO PURE CQRS: Uses QueryBus for:
+    - Password validation (security requirement)
+    - Password hashing (infrastructure service)
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -57,14 +58,14 @@ class ChangeUserPasswordHandler(BaseCommandHandler):
     async def handle(self, command: ChangeUserPasswordCommand) -> None:
         log.info(f"Changing password for user: {command.user_id}")
 
-        # Get user profile using query bus
-        user = await self.query_bus.query(
-            GetUserProfileQuery(user_id=command.user_id)
-        )
-        if not user:
+        # Load aggregate from Event Store
+        user_aggregate = await self.load_aggregate(command.user_id, "UserAccount", UserAccountAggregate)
+
+        # Verify user exists
+        if user_aggregate.version == 0:
             raise ValueError("User not found.")
 
-        # Verify current password using query bus
+        # Verify current password (security - must validate before change)
         credentials_result = await self.query_bus.query(
             ValidateUserCredentialsQuery(
                 user_id=command.user_id,
@@ -75,33 +76,38 @@ class ChangeUserPasswordHandler(BaseCommandHandler):
         if not credentials_result['valid']:
             raise ValueError("Current password is incorrect.")
 
-        # Hash new password using query bus
+        # Hash new password (infrastructure service)
         new_hashed_password = await self.query_bus.query(
             HashPasswordQuery(password=command.new_password)
         )
 
-        # Create aggregate
-        user_aggregate = UserAccountAggregate(user_id=command.user_id)
-
         # Call aggregate command method
         user_aggregate.change_password(new_hashed_password=new_hashed_password)
 
-        # Publish events
-        await self.publish_and_commit_events(
+        # Publish events with version tracking
+        await self.publish_events(
             aggregate=user_aggregate,
-            aggregate_type="UserAccount",
-            expected_version=None,
+            aggregate_id=command.user_id,
+            command=command
         )
 
         log.info(f"Password changed for user: {command.user_id}")
 
 
 # -----------------------------------------------------------------------------
-# ResetUserPasswordWithSecretHandler - Event Sourcing Pattern
+# ResetUserPasswordWithSecretHandler
+# EXCEPTION: Uses QueryBus for user lookup, secret verification, and hashing.
 # -----------------------------------------------------------------------------
 @command_handler(ResetUserPasswordWithSecretCommand)
 class ResetUserPasswordWithSecretHandler(BaseCommandHandler):
-    """Handles the ResetUserPasswordWithSecretCommand using Event Sourcing pattern."""
+    """
+    Handles the ResetUserPasswordWithSecretCommand using Event Sourcing.
+
+    EXCEPTION TO PURE CQRS: Uses QueryBus for:
+    - User lookup by username (to find aggregate ID)
+    - Secret verification (security requirement)
+    - Password hashing (infrastructure service)
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -114,7 +120,7 @@ class ResetUserPasswordWithSecretHandler(BaseCommandHandler):
     async def handle(self, command: ResetUserPasswordWithSecretCommand) -> None:
         log.info(f"Resetting password for username: {command.username}")
 
-        # Get user by username including auth details
+        # Lookup user by username (exception: need to find aggregate ID)
         user = await self.query_bus.query(
             GetUserByUsernameQuery(username=command.username)
         )
@@ -122,7 +128,10 @@ class ResetUserPasswordWithSecretHandler(BaseCommandHandler):
         if not user or not user.is_active:
             raise ValueError("User not found or inactive.")
 
-        # Verify secret using query bus
+        # Load aggregate from Event Store
+        user_aggregate = await self.load_aggregate(user.id, "UserAccount", UserAccountAggregate)
+
+        # Verify secret (security)
         secret_valid = await self.query_bus.query(
             VerifyPasswordHashQuery(
                 user_id=user.id,
@@ -134,22 +143,19 @@ class ResetUserPasswordWithSecretHandler(BaseCommandHandler):
         if not secret_valid:
             raise ValueError("Invalid secret word.")
 
-        # Hash new password using query bus
+        # Hash new password (infrastructure service)
         new_hashed_password = await self.query_bus.query(
             HashPasswordQuery(password=command.new_password)
         )
 
-        # Create aggregate
-        user_aggregate = UserAccountAggregate(user_id=user.id)
-
         # Call aggregate command method
         user_aggregate.reset_password_with_secret(new_hashed_password=new_hashed_password)
 
-        # Publish events
-        await self.publish_and_commit_events(
+        # Publish events with version tracking
+        await self.publish_events(
             aggregate=user_aggregate,
-            aggregate_type="UserAccount",
-            expected_version=None,
+            aggregate_id=user.id,
+            command=command
         )
 
         log.info(f"Password reset for user: {user.id}")

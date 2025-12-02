@@ -18,9 +18,10 @@ from app.company.commands import (
     DeleteCompanyCommand,
     RequestCompanyDeletionCommand,
 )
-from app.company.queries import GetCompanyByIdQuery, GetCompanyTelegramSupergroupsQuery
 from app.company.aggregate import CompanyAggregate
 from app.company.events import CompanyDeleteRequested
+# Queries only for Saga enrichment (RequestCompanyDeletionHandler)
+from app.company.queries import GetCompanyByIdQuery, GetCompanyTelegramSupergroupsQuery
 from app.chat.queries import GetChatsByCompanyQuery
 from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
@@ -36,7 +37,11 @@ log = get_logger("wellwon.company.command_handlers")
 # -----------------------------------------------------------------------------
 @command_handler(CreateCompanyCommand)
 class CreateCompanyHandler(BaseCommandHandler):
-    """Handles the CreateCompanyCommand using Event Sourcing pattern."""
+    """
+    Handles the CreateCompanyCommand using pure Event Sourcing.
+
+    Creates a new company aggregate and emits CompanyCreated event.
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -44,7 +49,6 @@ class CreateCompanyHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
 
     async def handle(self, command: CreateCompanyCommand) -> uuid.UUID:
         log.info(f"Creating company: {command.name}")
@@ -105,7 +109,11 @@ class CreateCompanyHandler(BaseCommandHandler):
 # -----------------------------------------------------------------------------
 @command_handler(UpdateCompanyCommand)
 class UpdateCompanyHandler(BaseCommandHandler):
-    """Handles the UpdateCompanyCommand using Event Sourcing pattern."""
+    """
+    Handles the UpdateCompanyCommand using pure Event Sourcing.
+
+    Loads company aggregate from Event Store and updates it.
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -113,20 +121,16 @@ class UpdateCompanyHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
 
     async def handle(self, command: UpdateCompanyCommand) -> uuid.UUID:
         log.info(f"Updating company: {command.company_id}")
 
-        # Verify company exists
-        company = await self.query_bus.query(
-            GetCompanyByIdQuery(company_id=command.company_id)
-        )
-        if not company:
-            raise ValueError(f"Company {command.company_id} not found")
+        # Load aggregate from Event Store (proper Event Sourcing)
+        company_aggregate = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
 
-        # Create aggregate
-        company_aggregate = CompanyAggregate(company_id=command.company_id)
+        # Verify company exists (version > 0 means events exist)
+        if company_aggregate.version == 0:
+            raise ValueError(f"Company {command.company_id} not found")
 
         # Call aggregate command method
         company_aggregate.update_company(
@@ -151,11 +155,11 @@ class UpdateCompanyHandler(BaseCommandHandler):
             tg_support=command.tg_support,
         )
 
-        # Publish events
-        await self.publish_and_commit_events(
+        # Publish events with version tracking
+        await self.publish_events(
             aggregate=company_aggregate,
-            aggregate_type="Company",
-            expected_version=None,
+            aggregate_id=command.company_id,
+            command=command
         )
 
         log.info(f"Company updated: {command.company_id}")
@@ -167,7 +171,11 @@ class UpdateCompanyHandler(BaseCommandHandler):
 # -----------------------------------------------------------------------------
 @command_handler(ArchiveCompanyCommand)
 class ArchiveCompanyHandler(BaseCommandHandler):
-    """Handles the ArchiveCompanyCommand using Event Sourcing pattern."""
+    """
+    Handles the ArchiveCompanyCommand using pure Event Sourcing.
+
+    Loads company from Event Store and archives it.
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -175,20 +183,16 @@ class ArchiveCompanyHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
 
     async def handle(self, command: ArchiveCompanyCommand) -> uuid.UUID:
         log.info(f"Archiving company: {command.company_id}")
 
-        # Verify company exists
-        company = await self.query_bus.query(
-            GetCompanyByIdQuery(company_id=command.company_id)
-        )
-        if not company:
-            raise ValueError(f"Company {command.company_id} not found")
+        # Load aggregate from Event Store
+        company_aggregate = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
 
-        # Create aggregate
-        company_aggregate = CompanyAggregate(company_id=command.company_id)
+        # Verify company exists
+        if company_aggregate.version == 0:
+            raise ValueError(f"Company {command.company_id} not found")
 
         # Call aggregate command method
         company_aggregate.archive_company(
@@ -196,11 +200,11 @@ class ArchiveCompanyHandler(BaseCommandHandler):
             reason=command.reason,
         )
 
-        # Publish events
-        await self.publish_and_commit_events(
+        # Publish events with version tracking
+        await self.publish_events(
             aggregate=company_aggregate,
-            aggregate_type="Company",
-            expected_version=None,
+            aggregate_id=command.company_id,
+            command=command
         )
 
         log.info(f"Company archived: {command.company_id}")
@@ -212,7 +216,11 @@ class ArchiveCompanyHandler(BaseCommandHandler):
 # -----------------------------------------------------------------------------
 @command_handler(RestoreCompanyCommand)
 class RestoreCompanyHandler(BaseCommandHandler):
-    """Handles the RestoreCompanyCommand using Event Sourcing pattern."""
+    """
+    Handles the RestoreCompanyCommand using pure Event Sourcing.
+
+    Loads company from Event Store and restores it.
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -220,29 +228,25 @@ class RestoreCompanyHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
 
     async def handle(self, command: RestoreCompanyCommand) -> uuid.UUID:
         log.info(f"Restoring company: {command.company_id}")
 
-        # Verify company exists
-        company = await self.query_bus.query(
-            GetCompanyByIdQuery(company_id=command.company_id)
-        )
-        if not company:
-            raise ValueError(f"Company {command.company_id} not found")
+        # Load aggregate from Event Store
+        company_aggregate = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
 
-        # Create aggregate
-        company_aggregate = CompanyAggregate(company_id=command.company_id)
+        # Verify company exists
+        if company_aggregate.version == 0:
+            raise ValueError(f"Company {command.company_id} not found")
 
         # Call aggregate command method
         company_aggregate.restore_company(restored_by=command.restored_by)
 
-        # Publish events
-        await self.publish_and_commit_events(
+        # Publish events with version tracking
+        await self.publish_events(
             aggregate=company_aggregate,
-            aggregate_type="Company",
-            expected_version=None,
+            aggregate_id=command.company_id,
+            command=command
         )
 
         log.info(f"Company restored: {command.company_id}")
@@ -254,7 +258,11 @@ class RestoreCompanyHandler(BaseCommandHandler):
 # -----------------------------------------------------------------------------
 @command_handler(DeleteCompanyCommand)
 class DeleteCompanyHandler(BaseCommandHandler):
-    """Handles the DeleteCompanyCommand using Event Sourcing pattern."""
+    """
+    Handles the DeleteCompanyCommand using pure Event Sourcing.
+
+    Loads company from Event Store and deletes it.
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -262,20 +270,16 @@ class DeleteCompanyHandler(BaseCommandHandler):
             transport_topic="transport.company-events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus
 
     async def handle(self, command: DeleteCompanyCommand) -> uuid.UUID:
         log.info(f"Deleting company: {command.company_id}")
 
-        # Verify company exists in read model
-        company = await self.query_bus.query(
-            GetCompanyByIdQuery(company_id=command.company_id)
-        )
-        if not company:
-            raise ValueError(f"Company {command.company_id} not found")
-
-        # REPLAY: Load aggregate from EventStore (proper Event Sourcing)
+        # Load aggregate from Event Store
         company_aggregate = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
+
+        # Verify company exists
+        if company_aggregate.version == 0:
+            raise ValueError(f"Company {command.company_id} not found")
 
         # Call aggregate command method
         # force=True bypasses permission checks for saga-initiated deletions
@@ -299,15 +303,16 @@ class DeleteCompanyHandler(BaseCommandHandler):
 
 # -----------------------------------------------------------------------------
 # RequestCompanyDeletionHandler - TRUE SAGA Pattern
+# EXCEPTION: This handler uses QueryBus for Saga event enrichment.
 # -----------------------------------------------------------------------------
 @command_handler(RequestCompanyDeletionCommand)
 class RequestCompanyDeletionHandler(BaseCommandHandler):
     """
     Handles RequestCompanyDeletionCommand - TRUE SAGA Pattern.
 
-    This handler ENRICHES the CompanyDeleteRequested event with all data
-    the GroupDeletionSaga needs. The saga will use ONLY this event data,
-    NO queries, NO direct SQL.
+    EXCEPTION TO PURE CQRS: This handler uses QueryBus to enrich the event
+    with all data the Saga needs. This is intentional - the Saga should
+    receive all data in the event, not query for it.
 
     Flow:
     1. Query company info (name, telegram_group_id)

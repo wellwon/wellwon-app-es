@@ -46,10 +46,18 @@ log = logging.getLogger("wellwon.users.auth_handlers")
 
 # -----------------------------------------------------------------------------
 # CreateUserHandler - Event Sourcing Pattern
+# EXCEPTION: Uses QueryBus for uniqueness check and password hashing.
+# These are legitimate exceptions: uniqueness validation and infrastructure services.
 # -----------------------------------------------------------------------------
 @command_handler(CreateUserAccountCommand)
 class CreateUserAccountHandler(BaseCommandHandler):
-    """Handles the CreateUserAccountCommand using Event Sourcing pattern."""
+    """
+    Handles the CreateUserAccountCommand using Event Sourcing.
+
+    EXCEPTION TO PURE CQRS: Uses QueryBus for:
+    - Uniqueness check (username exists) - validation before create
+    - Password hashing - infrastructure service (not a true query)
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         # Initialize base with event infrastructure
@@ -58,7 +66,7 @@ class CreateUserAccountHandler(BaseCommandHandler):
             transport_topic="transport.user-account-events",
             event_store=deps.event_store
         )
-        # Store additional dependencies
+        # Query bus for uniqueness check and password hashing
         self.query_bus = deps.query_bus
 
     async def handle(self, command: CreateUserAccountCommand) -> uuid.UUID:
@@ -110,13 +118,20 @@ class CreateUserAccountHandler(BaseCommandHandler):
 
 # -----------------------------------------------------------------------------
 # AuthenticateUserHandler - Query-like with Audit Events
+# EXCEPTION: Authentication is inherently query-based (lookup by email/username).
+# This is a legitimate exception for security-critical operations.
 # -----------------------------------------------------------------------------
 @command_handler(AuthenticateUserCommand)
 class AuthenticateUserHandler(BaseCommandHandler):
     """
     Handles the AuthenticateUserCommand.
-    Authentication is a query-like operation that emits audit events.
-    Note: Uses BaseCommandHandler for consistent event publishing, but no aggregate.
+
+    EXCEPTION TO PURE CQRS: Authentication is inherently query-based:
+    - Must lookup user by email/username to find aggregate ID
+    - Must validate credentials against stored hash
+    - Emits audit events (success/failure) for security tracking
+
+    This is not a typical command - it's a security operation with audit trail.
     """
 
     def __init__(self, deps: 'HandlerDependencies'):
