@@ -2,13 +2,16 @@
 # File: app/config/wse_config.py
 # Description: WebSocket Event System - Technical Configuration
 #              Enterprise pattern with admin UI support and hot-reload
+# UPDATED: Using BaseConfig pattern
 # =============================================================================
 
-import os
+from functools import lru_cache
 from typing import Dict, Any, Optional, List
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 from enum import Enum
+
+from app.common.base.base_config import BaseConfig
 
 
 # =============================================================================
@@ -28,7 +31,7 @@ class EventPriority(str, Enum):
 # WSE Configuration Class (Pydantic BaseSettings)
 # =============================================================================
 
-class WSEConfig(BaseSettings):
+class WSEConfig(BaseConfig):
     """
     WebSocket Event System Configuration (Enterprise Pattern)
 
@@ -51,6 +54,12 @@ class WSEConfig(BaseSettings):
         config.update_setting("heartbeat_interval", 20)
         await config.reload()  # Hot-reload across all instances
     """
+
+    model_config = SettingsConfigDict(
+        **BaseConfig.model_config,
+        env_prefix='WSE_',
+        validate_assignment=True,  # Validate on property updates
+    )
 
     # =========================================================================
     # Connection & Protocol Settings
@@ -596,18 +605,6 @@ class WSEConfig(BaseSettings):
     )
 
     # =========================================================================
-    # Pydantic Configuration
-    # =========================================================================
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_prefix="WSE_",
-        case_sensitive=False,
-        extra="ignore",  # Ignore extra env vars
-        validate_assignment=True,  # Validate on property updates
-    )
-
-    # =========================================================================
     # Helper Methods
     # =========================================================================
 
@@ -652,85 +649,25 @@ class WSEConfig(BaseSettings):
             if hasattr(self, key):
                 setattr(self, key, value)
 
-    @classmethod
-    def from_env(cls) -> 'WSEConfig':
-        """
-        Create configuration from environment variables.
-
-        Environment variables:
-        - WSE_HEARTBEAT_INTERVAL=15
-        - WSE_COMPRESSION_THRESHOLD=1024
-        - WSE_MAX_QUEUE_SIZE=1000
-        - ... (all config fields with WSE_ prefix)
-
-        Returns:
-            WSEConfig instance with environment overrides
-        """
-        return cls()
-
-
 # =============================================================================
-# Singleton Instance (with Redis hot-reload support)
+# Factory Function
 # =============================================================================
 
-_wse_config: Optional[WSEConfig] = None
-_config_version: int = 0
+@lru_cache(maxsize=1)
+def get_wse_config() -> WSEConfig:
+    """Get WSE configuration singleton (cached)."""
+    return WSEConfig()
 
 
-def get_wse_config(reload: bool = False) -> WSEConfig:
-    """
-    Get WSE configuration singleton.
-
-    This function provides:
-    - Lazy initialization
-    - Hot-reload support (call with reload=True)
-    - Redis override support (future)
-    - Thread-safe singleton
-
-    Args:
-        reload: Force reload from environment/Redis (default: False)
-
-    Returns:
-        WSEConfig: Configuration instance
-
-    Usage:
-        config = get_wse_config()
-        heartbeat = config.heartbeat_interval  # Type-safe access
-
-        # Hot-reload after admin changes:
-        config = get_wse_config(reload=True)
-    """
-    global _wse_config, _config_version
-
-    if _wse_config is None or reload:
-        _wse_config = WSEConfig.from_env()
-        _config_version += 1
-
-    return _wse_config
+def reset_wse_config() -> None:
+    """Reset config singleton (for testing/hot-reload)."""
+    get_wse_config.cache_clear()
 
 
 def reload_wse_config() -> WSEConfig:
-    """
-    Force reload configuration (hot-reload).
-
-    Call this after admin UI updates or Redis changes.
-
-    Returns:
-        WSEConfig: Reloaded configuration instance
-    """
-    return get_wse_config(reload=True)
-
-
-def get_config_version() -> int:
-    """
-    Get current config version (increments on reload).
-
-    Use this to detect config changes in long-running tasks.
-
-    Returns:
-        int: Current config version number
-    """
-    return _config_version
+    """Force reload configuration (hot-reload)."""
+    reset_wse_config()
+    return get_wse_config()
 
 
 # =============================================================================

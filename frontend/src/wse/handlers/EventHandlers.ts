@@ -871,70 +871,63 @@ export class EventHandlers {
   // ─────────────────────────────────────────────────────────────────────────
 
   static registerAll(messageProcessor: any): void {
-    logger.info('=== REGISTERING EVENT HANDLERS ===');
-
     try {
-      // User account events
-      messageProcessor.registerHandler('user_account_update', this.handleUserAccountUpdate);
-      messageProcessor.registerHandler('user_profile_updated', this.handleUserProfileUpdated);
-      messageProcessor.registerHandler('user_admin_status_updated', this.handleUserAdminStatusUpdated);
+      // Define all handlers in a map for batch registration
+      const handlers: Record<string, (message: WSMessage) => void> = {
+        // User account events
+        'user_account_update': this.handleUserAccountUpdate,
+        'user_profile_updated': this.handleUserProfileUpdated,
+        'user_admin_status_updated': this.handleUserAdminStatusUpdated,
+        'user_admin_change': this.handleUserAdminChange,
 
-      // CES Events (Compensating Event System - External Admin Changes)
-      messageProcessor.registerHandler('user_admin_change', this.handleUserAdminChange);
+        // Company domain events
+        'company_created': this.handleCompanyCreated,
+        'company_updated': this.handleCompanyUpdated,
+        'company_archived': this.handleCompanyArchived,
+        'company_restored': this.handleCompanyRestored,
+        'company_deleted': this.handleCompanyDeleted,
+        'company_member_joined': this.handleCompanyMemberJoined,
+        'company_member_left': this.handleCompanyMemberLeft,
+        'company_member_role_changed': this.handleCompanyMemberRoleChanged,
+        'company_telegram_created': this.handleCompanyTelegramCreated,
+        'company_telegram_linked': this.handleCompanyTelegramLinked,
+        'company_telegram_unlinked': this.handleCompanyTelegramUnlinked,
+        'company_balance_updated': this.handleCompanyBalanceUpdated,
 
-      // ─────────────────────────────────────────────────────────────────────────
-      // Company Domain Events
-      // ─────────────────────────────────────────────────────────────────────────
-      messageProcessor.registerHandler('company_created', this.handleCompanyCreated);
-      messageProcessor.registerHandler('company_updated', this.handleCompanyUpdated);
-      messageProcessor.registerHandler('company_archived', this.handleCompanyArchived);
-      messageProcessor.registerHandler('company_restored', this.handleCompanyRestored);
-      messageProcessor.registerHandler('company_deleted', this.handleCompanyDeleted);
-      messageProcessor.registerHandler('company_member_joined', this.handleCompanyMemberJoined);
-      messageProcessor.registerHandler('company_member_left', this.handleCompanyMemberLeft);
-      messageProcessor.registerHandler('company_member_role_changed', this.handleCompanyMemberRoleChanged);
-      messageProcessor.registerHandler('company_telegram_created', this.handleCompanyTelegramCreated);
-      messageProcessor.registerHandler('company_telegram_linked', this.handleCompanyTelegramLinked);
-      messageProcessor.registerHandler('company_telegram_unlinked', this.handleCompanyTelegramUnlinked);
-      messageProcessor.registerHandler('company_balance_updated', this.handleCompanyBalanceUpdated);
+        // Chat domain events
+        'chat_created': this.handleChatCreated,
+        'chat_updated': this.handleChatUpdated,
+        'chat_archived': this.handleChatArchived,
+        'chat_deleted': this.handleChatDeleted,
+        'message_created': this.handleMessageCreated,
+        'message_updated': this.handleMessageUpdated,
+        'message_deleted': this.handleMessageDeleted,
+        'participant_joined': this.handleParticipantJoined,
+        'participant_left': this.handleParticipantLeft,
+        'participant_role_changed': this.handleParticipantRoleChanged,
+        'user_typing': this.handleUserTyping,
+        'user_stopped_typing': this.handleUserStoppedTyping,
+        'messages_read': this.handleMessagesRead,
+        'chat_telegram_linked': this.handleChatTelegramLinked,
+        'chat_telegram_unlinked': this.handleChatTelegramUnlinked,
 
-      // ─────────────────────────────────────────────────────────────────────────
-      // Chat Domain Events
-      // ─────────────────────────────────────────────────────────────────────────
-      messageProcessor.registerHandler('chat_created', this.handleChatCreated);
-      messageProcessor.registerHandler('chat_updated', this.handleChatUpdated);
-      messageProcessor.registerHandler('chat_archived', this.handleChatArchived);
-      messageProcessor.registerHandler('chat_deleted', this.handleChatDeleted);
-      messageProcessor.registerHandler('message_created', this.handleMessageCreated);
-      messageProcessor.registerHandler('message_updated', this.handleMessageUpdated);
-      messageProcessor.registerHandler('message_deleted', this.handleMessageDeleted);
-      messageProcessor.registerHandler('participant_joined', this.handleParticipantJoined);
-      messageProcessor.registerHandler('participant_left', this.handleParticipantLeft);
-      messageProcessor.registerHandler('participant_role_changed', this.handleParticipantRoleChanged);
-      messageProcessor.registerHandler('user_typing', this.handleUserTyping);
-      messageProcessor.registerHandler('user_stopped_typing', this.handleUserStoppedTyping);
-      messageProcessor.registerHandler('messages_read', this.handleMessagesRead);
-      messageProcessor.registerHandler('chat_telegram_linked', this.handleChatTelegramLinked);
-      messageProcessor.registerHandler('chat_telegram_unlinked', this.handleChatTelegramUnlinked);
+        // Generic and system events
+        'entity_update': this.handleEntityUpdate,
+        'system_announcement': this.handleSystemAnnouncement,
+        'system_status': this.handleSystemStatus,
+        'system_health_update': this.handleSystemHealthUpdate,
+        'component_health': this.handleComponentHealth,
+        'performance_metrics': this.handlePerformanceMetrics,
+        'notification': this.handleNotification,
+      };
 
-      // Generic entity events
-      messageProcessor.registerHandler('entity_update', this.handleEntityUpdate);
+      // Batch register all handlers (no individual logging)
+      const handlerNames = Object.keys(handlers);
+      for (const [type, handler] of Object.entries(handlers)) {
+        messageProcessor.registerHandler(type, handler);
+      }
 
-      // System events
-      messageProcessor.registerHandler('system_announcement', this.handleSystemAnnouncement);
-      messageProcessor.registerHandler('system_status', this.handleSystemStatus);
-      messageProcessor.registerHandler('system_health_update', this.handleSystemHealthUpdate);
-      messageProcessor.registerHandler('component_health', this.handleComponentHealth);
-      messageProcessor.registerHandler('performance_metrics', this.handlePerformanceMetrics);
-
-      // Notification events
-      messageProcessor.registerHandler('notification', this.handleNotification);
-
-      logger.info('All event handlers registered successfully');
-
-      // Log the registered handlers for debugging
-      const registeredHandlers = messageProcessor.getRegisteredHandlers();
-      logger.info('Registered handlers:', registeredHandlers);
+      logger.info(`Registered ${handlerNames.length} event handlers`);
 
     } catch (error) {
       logger.error('Error registering event handlers:', error);

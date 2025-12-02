@@ -514,9 +514,8 @@ export class MessageProcessor {
   private async routeMessage(message: WSMessage): Promise<void> {
     const type = message.t;
 
-    // CRITICAL: Log ALL messages for debugging
-    logger.info(`=== ROUTING MESSAGE ===`);
-    logger.info(`Type: ${type}`);
+    // Debug level - only visible when debug mode enabled
+    logger.debug(`Routing message: ${type}`);
 
     // For snapshot messages, log the structure
     if (type === 'broker_connection_snapshot') {
@@ -543,9 +542,7 @@ export class MessageProcessor {
     const handler = this.messageHandlers.get(type);
     if (handler) {
       try {
-        logger.info(`Executing handler for ${type}`);
         handler(message);
-        logger.info(`Handler executed successfully for ${type}`);
       } catch (error) {
         logger.error(`Error in handler for ${type}:`, error);
       }
@@ -562,7 +559,6 @@ export class MessageProcessor {
   // ─────────────────────────────────────────────────────────────────────────
 
   private registerDefaultHandlers(): void {
-    logger.info('Registering default message handlers');
 
     // System message handlers
     this.messageHandlers.set('server_ready', (msg) => this.handleServerReady(msg));
@@ -670,7 +666,7 @@ export class MessageProcessor {
       const payload = msg.p;
       const priority = payload.priority || MessagePriority.NORMAL;
 
-      logger.info(`Priority message received with priority ${priority}:`, payload);
+      logger.debug(`Priority message received with priority ${priority}:`, payload);
 
       // Could forward to specific handlers based on content
       if (payload.type && this.messageHandlers.has(payload.type)) {
@@ -678,8 +674,6 @@ export class MessageProcessor {
         handler!({ ...msg, p: payload.content || payload });
       }
     });
-
-    logger.info('Default handlers registered');
   }
 
   // Updated handleServerReady method with proper state management
@@ -1271,7 +1265,7 @@ export class MessageProcessor {
   // ─────────────────────────────────────────────────────────────────────────
 
   registerHandler(type: string, handler: (message: WSMessage) => void): void {
-    logger.info(`Registering handler for message type: ${type}`);
+    // Silent registration - summary logged by caller
     this.messageHandlers.set(type, handler);
   }
 

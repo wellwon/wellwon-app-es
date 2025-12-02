@@ -2,28 +2,28 @@
 """
 Centralized configuration for all saga-related settings.
 Replaces individual environment variables with a clean, maintainable config.
-UPDATED: Using Pydantic v2 with pydantic-settings
+UPDATED: Using Pydantic v2 with BaseConfig pattern
 """
 
-from typing import Dict, Optional
+from functools import lru_cache
+from typing import Optional
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 from datetime import timedelta
 
+from app.common.base.base_config import BaseConfig
 
-class SagaConfig(BaseSettings):
+
+class SagaConfig(BaseConfig):
     """
     Saga configuration with sensible defaults.
     Only the essential parameters that might need tuning.
-    Updated for Pydantic v2.
+    Updated for Pydantic v2 with BaseConfig pattern.
     """
 
-    # Pydantic v2 configuration
     model_config = SettingsConfigDict(
-        env_file='.env',
+        **BaseConfig.model_config,
         env_prefix='SAGA_',
-        case_sensitive=False,
-        extra='ignore'
     )
 
     # =========================================================================
@@ -222,16 +222,10 @@ class SagaConfig(BaseSettings):
         return self.virtual_broker_event_wait_seconds if is_virtual else self.event_propagation_wait_seconds
 
 
-# Singleton instance
-_saga_config: Optional[SagaConfig] = None
-
-
+@lru_cache(maxsize=1)
 def get_saga_config() -> SagaConfig:
-    """Get or create the saga configuration singleton"""
-    global _saga_config
-    if _saga_config is None:
-        _saga_config = SagaConfig()
-    return _saga_config
+    """Get saga configuration singleton (cached)."""
+    return SagaConfig()
 
 
 # Export for convenience

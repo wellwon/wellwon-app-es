@@ -3,15 +3,18 @@
 # File: app/config/event_store_config.py
 # Description: Unified Event Store configuration for WellWon
 # Backend: KurrentDB (EventStoreDB)
-# Created: November 2025
+# UPDATED: Using BaseConfig pattern
 # =============================================================================
 
-import os
+from functools import lru_cache
 from typing import Optional, Dict
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic_settings import SettingsConfigDict
+from pydantic import Field, SecretStr
 
-class EventStoreConfig(BaseSettings):
+from app.common.base.base_config import BaseConfig
+
+
+class EventStoreConfig(BaseConfig):
     """
     Unified Event Store configuration for WellWon.
 
@@ -29,6 +32,11 @@ class EventStoreConfig(BaseSettings):
     - Redpanda: Transport layer (7-day retention)
     - PostgreSQL: Read models and projections
     """
+
+    model_config = SettingsConfigDict(
+        **BaseConfig.model_config,
+        env_prefix='KURRENTDB_',
+    )
 
     # =========================================================================
     # Connection Settings
@@ -48,7 +56,7 @@ class EventStoreConfig(BaseSettings):
     username: Optional[str] = None
     """KurrentDB username (if using authentication)"""
 
-    password: Optional[str] = None
+    password: Optional[SecretStr] = None
     """KurrentDB password (if using authentication)"""
 
     # =========================================================================
@@ -397,76 +405,20 @@ class EventStoreConfig(BaseSettings):
             self.snapshot_interval
         )
 
-    @classmethod
-    def from_env(cls) -> 'EventStoreConfig':
-        """
-        Create configuration from environment variables.
-
-        Environment variables:
-        - KURRENTDB_CONNECTION_STRING
-        - KURRENTDB_USERNAME
-        - KURRENTDB_PASSWORD
-        - KURRENTDB_STREAM_PREFIX
-        - KURRENTDB_SNAPSHOT_INTERVAL
-        - ... (all config fields with KURRENTDB_ prefix)
-
-        Returns:
-            EventStoreConfig instance
-        """
-        connection_string = os.getenv("KURRENTDB_CONNECTION_STRING", "esdb://localhost:12113?tls=false")
-
-        return cls(
-            connection_string=connection_string,
-            username=os.getenv("KURRENTDB_USERNAME"),
-            password=os.getenv("KURRENTDB_PASSWORD"),
-            stream_prefix=os.getenv("KURRENTDB_STREAM_PREFIX", ""),
-            snapshot_interval=int(os.getenv("KURRENTDB_SNAPSHOT_INTERVAL", "200")),
-            enable_auto_snapshots=os.getenv("KURRENTDB_ENABLE_AUTO_SNAPSHOTS", "true").lower() == "true",
-            read_timeout_seconds=int(os.getenv("KURRENTDB_READ_TIMEOUT_SECONDS", "10")),
-            write_timeout_seconds=int(os.getenv("KURRENTDB_WRITE_TIMEOUT_SECONDS", "5")),
-            append_retry_max_attempts=int(os.getenv("KURRENTDB_APPEND_RETRY_MAX_ATTEMPTS", "3")),
-            sync_projection_timeout=float(os.getenv("KURRENTDB_SYNC_PROJECTION_TIMEOUT", "5.0")),
-            enable_optimistic_concurrency=os.getenv("KURRENTDB_ENABLE_OCC", "true").lower() == "true",
-            enable_snapshots=os.getenv("KURRENTDB_ENABLE_SNAPSHOTS", "true").lower() == "true",
-            enable_metrics=os.getenv("KURRENTDB_ENABLE_METRICS", "true").lower() == "true",
-        )
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_prefix="KURRENTDB_",
-        case_sensitive=False,
-        extra="ignore"  # Ignore extra env vars from .env
-    )
-
-
-# =============================================================================
-# Default Configuration Instances
-# =============================================================================
-
-# Default configuration (for imports)
-default_event_store_config = EventStoreConfig()
-
-# Environment-based configuration (for production)
-event_store_config = EventStoreConfig.from_env()
-
-
 # =============================================================================
 # Factory Function
 # =============================================================================
 
+@lru_cache(maxsize=1)
 def get_event_store_config() -> EventStoreConfig:
-    """
-    Get Event Store configuration instance.
-
-    Returns the environment-based configuration singleton.
-    This function is used throughout the codebase to get the config.
-
-    Returns:
-        EventStoreConfig: Configuration instance
-    """
-    return event_store_config
+    """Get Event Store configuration singleton (cached)."""
+    return EventStoreConfig()
 
 
-# =============================================================================
-# EOF
-# =============================================================================
+def reset_event_store_config() -> None:
+    """Reset config singleton (for testing)."""
+    get_event_store_config.cache_clear()
+
+
+# Backward compatibility alias
+event_store_config = get_event_store_config()

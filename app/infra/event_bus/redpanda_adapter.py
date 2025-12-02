@@ -56,9 +56,7 @@ from app.infra.reliability.circuit_breaker import (
 from app.infra.reliability.retry import retry_async, RetryConfig
 
 # Import configuration
-from app.config.eventbus_transport_config import (
-    EventBusConfig, TransportConfig
-)
+from app.config.eventbus_config import EventBusConfig, get_eventbus_config
 
 # Import Topic Manager for automatic topic creation
 from app.infra.event_bus.topic_manager import TopicManager, TopicSpec

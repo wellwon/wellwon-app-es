@@ -1,11 +1,7 @@
 # app/config/worker_config.py
 """
 Unified Worker Configuration - Advanced Pattern
-Pydantic BaseSettings with profiles, worker-type customization, and admin panel support.
-
-Replaces:
-- app/infra/worker_core/worker_config.py (old dataclass-based config)
-- Parts of app/config/data_integrity_config.py (integrity settings)
+UPDATED: Using BaseConfig pattern
 
 Features:
 - Pydantic v2 BaseSettings with env var auto-loading
@@ -26,14 +22,16 @@ Usage:
     config = WorkerConfig.production()
 """
 
+from functools import lru_cache
 import os
 import socket
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from enum import Enum
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
+from pydantic_settings import SettingsConfigDict
 
+from app.common.base.base_config import BaseConfig
 # Import WorkerType from consumer_groups
 from app.infra.worker_core.consumer_groups import WorkerType
 
@@ -53,7 +51,7 @@ class WorkerProfile(str, Enum):
 # WORKER CONFIG - ADVANCED PATTERN
 # =============================================================================
 
-class WorkerConfig(BaseSettings):
+class WorkerConfig(BaseConfig):
     """
     Unified configuration for all worker types.
 
@@ -65,12 +63,9 @@ class WorkerConfig(BaseSettings):
     - Features (gap detection, sync projections, integrity checks)
     """
 
-    # Pydantic v2 configuration
     model_config = SettingsConfigDict(
+        **BaseConfig.model_config,
         env_prefix='WORKER_',
-        env_file='.env',
-        case_sensitive=False,
-        extra='ignore'
     )
 
     # =========================================================================

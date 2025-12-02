@@ -10,6 +10,7 @@ import * as telegramApi from '@/api/telegram';
 import * as companyApi from '@/api/company';
 import type { TelegramSupergroup } from '@/types/chat';
 import { logger } from '@/utils/logger';
+import { useSupergroupsStore } from '@/stores/useSupergroupsStore';
 
 // Query keys - centralized for consistency
 export const supergroupKeys = {
@@ -24,10 +25,16 @@ export const supergroupKeys = {
  * Hook for fetching active supergroups with WSE real-time updates
  *
  * TkDodo Pattern: Optimistic updates via setQueryData + invalidation for sync
+ * + Zustand cache for instant page refresh (no "Loading..." on refresh)
  * https://tkdodo.eu/blog/using-web-sockets-with-react-query
  */
 export function useActiveSupergroups() {
   const queryClient = useQueryClient();
+
+  // Zustand cache for instant page refresh
+  const cachedActiveSupergroups = useSupergroupsStore((s) => s.cachedActiveSupergroups);
+  const cachedUpdatedAt = useSupergroupsStore((s) => s.cachedUpdatedAt);
+  const setCachedActiveSupergroups = useSupergroupsStore((s) => s.setCachedActiveSupergroups);
 
   useEffect(() => {
     // Optimistic delete - immediately remove from cache
@@ -164,20 +171,36 @@ export function useActiveSupergroups() {
           // Merge: optimistic entries first, then API data (excluding duplicates)
           const apiCompanyIds = new Set(apiData.map(a => a.company_id));
           const uniqueOptimistic = optimisticEntries.filter(o => !apiCompanyIds.has(o.company_id));
-          return [...uniqueOptimistic, ...apiData];
+          const result = [...uniqueOptimistic, ...apiData];
+          // Persist to Zustand for instant load on refresh
+          setCachedActiveSupergroups(result);
+          return result;
         }
       }
+
+      // Persist to Zustand for instant load on refresh
+      setCachedActiveSupergroups(apiData);
       return apiData;
     },
     staleTime: Infinity, // WSE handles updates
+
+    // Use cached data as initial data (instant render on page refresh!)
+    initialData: cachedActiveSupergroups ?? undefined,
+    initialDataUpdatedAt: cachedUpdatedAt ?? 0,
   });
 }
 
 /**
  * Hook for fetching archived supergroups
+ * + Zustand cache for instant page refresh (no "Loading..." on refresh)
  */
 export function useArchivedSupergroups() {
   const queryClient = useQueryClient();
+
+  // Zustand cache for instant page refresh
+  const cachedArchivedSupergroups = useSupergroupsStore((s) => s.cachedArchivedSupergroups);
+  const cachedUpdatedAt = useSupergroupsStore((s) => s.cachedUpdatedAt);
+  const setCachedArchivedSupergroups = useSupergroupsStore((s) => s.setCachedArchivedSupergroups);
 
   useEffect(() => {
     // Optimistic delete - immediately remove from cache
@@ -233,8 +256,17 @@ export function useArchivedSupergroups() {
 
   return useQuery({
     queryKey: supergroupKeys.archived,
-    queryFn: () => telegramApi.getAllSupergroups(false),
+    queryFn: async () => {
+      const apiData = await telegramApi.getAllSupergroups(false);
+      // Persist to Zustand for instant load on refresh
+      setCachedArchivedSupergroups(apiData);
+      return apiData;
+    },
     staleTime: Infinity,
+
+    // Use cached data as initial data (instant render on page refresh!)
+    initialData: cachedArchivedSupergroups ?? undefined,
+    initialDataUpdatedAt: cachedUpdatedAt ?? 0,
   });
 }
 
@@ -254,9 +286,17 @@ export function useSupergroupChatCounts() {
  * Single hook to replace multiple useState + useEffect patterns
  *
  * TkDodo Pattern: Optimistic updates via setQueryData for delete/archive/restore
+ * + Zustand cache for instant page refresh (no "Loading..." on refresh)
  */
 export function useSupergroups() {
   const queryClient = useQueryClient();
+
+  // Zustand cache for instant page refresh
+  const cachedActiveSupergroups = useSupergroupsStore((s) => s.cachedActiveSupergroups);
+  const cachedArchivedSupergroups = useSupergroupsStore((s) => s.cachedArchivedSupergroups);
+  const cachedUpdatedAt = useSupergroupsStore((s) => s.cachedUpdatedAt);
+  const setCachedActiveSupergroups = useSupergroupsStore((s) => s.setCachedActiveSupergroups);
+  const setCachedArchivedSupergroups = useSupergroupsStore((s) => s.setCachedArchivedSupergroups);
 
   // Listen for WSE events with optimistic updates
   useEffect(() => {
@@ -463,19 +503,38 @@ export function useSupergroups() {
           });
           const apiCompanyIds = new Set(apiData.map(a => a.company_id));
           const uniqueOptimistic = optimisticEntries.filter(o => !apiCompanyIds.has(o.company_id));
-          return [...uniqueOptimistic, ...apiData];
+          const result = [...uniqueOptimistic, ...apiData];
+          // Persist to Zustand for instant load on refresh
+          setCachedActiveSupergroups(result);
+          return result;
         }
       }
+
+      // Persist to Zustand for instant load on refresh
+      setCachedActiveSupergroups(apiData);
       return apiData;
     },
     staleTime: Infinity,
+
+    // Use cached data as initial data (instant render on page refresh!)
+    initialData: cachedActiveSupergroups ?? undefined,
+    initialDataUpdatedAt: cachedUpdatedAt ?? 0,
   });
 
   // Fetch archived supergroups
   const archivedQuery = useQuery({
     queryKey: supergroupKeys.archived,
-    queryFn: () => telegramApi.getAllSupergroups(false),
+    queryFn: async () => {
+      const apiData = await telegramApi.getAllSupergroups(false);
+      // Persist to Zustand for instant load on refresh
+      setCachedArchivedSupergroups(apiData);
+      return apiData;
+    },
     staleTime: Infinity,
+
+    // Use cached data as initial data (instant render on page refresh!)
+    initialData: cachedArchivedSupergroups ?? undefined,
+    initialDataUpdatedAt: cachedUpdatedAt ?? 0,
   });
 
   // Fetch chat counts

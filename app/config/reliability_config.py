@@ -1,76 +1,81 @@
 # =============================================================================
 # File: app/config/reliability_config.py
 # Description: Unified reliability configuration for circuit breakers, retry
-#              patterns, rate limiting, and distributed locking across all
-#              infrastructure components in 
-# ENHANCED: Added Gunicorn-aware PostgreSQL configurations
+#              patterns, rate limiting, and distributed locking
+# UPDATED: Using BaseConfig pattern with Pydantic v2
 # =============================================================================
 
 import os
-from dataclasses import dataclass
-from enum import Enum, auto
-
-# Forward declarations to avoid circular imports
-from dataclasses import dataclass as original_dataclass
+from functools import lru_cache
 from typing import Optional, Callable
+from enum import Enum, auto
+from pydantic import BaseModel, Field
+from pydantic_settings import SettingsConfigDict
+
+from app.common.base.base_config import BaseConfig
 
 
-# We'll define the config classes here to avoid circular imports
-@original_dataclass
-class CircuitBreakerConfig:
+# =============================================================================
+# Configuration Models (Pydantic BaseModel for type safety)
+# =============================================================================
+
+class CircuitBreakerConfig(BaseModel):
     """Circuit breaker configuration."""
     name: str
     failure_threshold: int = 5
     success_threshold: int = 3
     reset_timeout_seconds: int = 30
     half_open_max_calls: int = 3
-    # Additional config for enhanced features
     window_size: Optional[int] = None
     failure_rate_threshold: Optional[float] = None
     timeout_seconds: Optional[float] = None
 
 
-@original_dataclass
-class RetryConfig:
+class RetryConfig(BaseModel):
     """Retry configuration."""
     max_attempts: int = 3
     initial_delay_ms: int = 100
     max_delay_ms: int = 10000
     backoff_factor: float = 2.0
     jitter: bool = True
-    retry_condition: Optional[Callable[[Exception], bool]] = None
-    # Enhanced config options
     exponential_base: Optional[float] = None
     jitter_type: str = "full"
 
+    class Config:
+        arbitrary_types_allowed = True
 
-@original_dataclass
-class RateLimiterConfig:
+
+class RateLimiterConfig(BaseModel):
     """Rate limiter configuration."""
     algorithm: str = "token_bucket"
     capacity: int = 100
     refill_rate: float = 10.0
     distributed: bool = True
-    # Additional config for compatibility
     max_requests: Optional[int] = None
     time_window: Optional[int] = None
 
 
-@original_dataclass
-class DistributedLockConfig:
+class DistributedLockConfig(BaseModel):
     """Distributed lock configuration."""
     namespace: str = "distributed_lock"
     ttl_seconds: int = 30
     max_wait_ms: int = 5000
     retry_times: int = 3
     retry_delay_ms: int = 100
-    strategy: str = "wait_with_timeout"  # fail_fast, wait_forever, wait_with_timeout, exponential_backoff
+    strategy: str = "wait_with_timeout"
     enable_metrics: bool = True
     enable_auto_cleanup: bool = True
     use_lua_scripts: bool = True
-    # Enhanced features
-    stale_lock_multiplier: float = 2.0  # Consider lock stale after TTL * multiplier
-    use_backoff: Optional[bool] = None  # For compatibility with adapter pool
+    stale_lock_multiplier: float = 2.0
+    use_backoff: Optional[bool] = None
+
+
+class ReliabilityConfigBundle(BaseModel):
+    """Combined configuration for circuit breaker, retry, rate limiter, and distributed lock"""
+    circuit_breaker: CircuitBreakerConfig
+    retry: Optional[RetryConfig] = None
+    rate_limiter: Optional[RateLimiterConfig] = None
+    distributed_lock: Optional[DistributedLockConfig] = None
 
 
 class ErrorClass(Enum):
@@ -83,19 +88,103 @@ class ErrorClass(Enum):
     PERMANENT = auto()
 
 
-@dataclass
-class ReliabilityConfig:
-    """Combined configuration for circuit breaker, retry, rate limiter, and distributed lock"""
-    circuit_breaker: CircuitBreakerConfig
-    retry: RetryConfig
-    rate_limiter: Optional[RateLimiterConfig] = None
-    distributed_lock: Optional[DistributedLockConfig] = None
+# =============================================================================
+# Main Reliability Config (loads from env)
+# =============================================================================
 
+class ReliabilitySettings(BaseConfig):
+    """
+    Global reliability settings loaded from environment.
+    Individual service configs are created via ReliabilityConfigs factory.
+    """
+
+    model_config = SettingsConfigDict(
+        **BaseConfig.model_config,
+        env_prefix='RELIABILITY_',
+    )
+
+    # Global defaults
+    default_circuit_breaker_threshold: int = Field(default=5)
+    default_circuit_breaker_timeout: int = Field(default=30)
+    default_retry_max_attempts: int = Field(default=3)
+    default_retry_initial_delay_ms: int = Field(default=100)
+    default_rate_limit_capacity: int = Field(default=100)
+
+    # Feature flags
+    enable_circuit_breakers: bool = Field(default=True)
+    enable_retries: bool = Field(default=True)
+    enable_rate_limiting: bool = Field(default=True)
+    enable_distributed_locks: bool = Field(default=True)
+
+
+@lru_cache(maxsize=1)
+def get_reliability_settings() -> ReliabilitySettings:
+    """Get global reliability settings (cached)."""
+    return ReliabilitySettings()
+
+
+def reset_reliability_settings() -> None:
+    """Reset settings singleton (for testing)."""
+    get_reliability_settings.cache_clear()
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+def _detect_multi_worker_server() -> bool:
+    """Detect if running under multi-worker server"""
+    if 'granian' in os.environ.get('SERVER_SOFTWARE', '').lower():
+        return True
+    if os.environ.get('WEB_CONCURRENCY'):
+        try:
+            workers = int(os.environ.get('WEB_CONCURRENCY', '1'))
+            if workers > 1:
+                return True
+        except ValueError:
+            pass
+    try:
+        import psutil
+        current_process = psutil.Process()
+        cmdline = ' '.join(current_process.cmdline())
+        if 'granian' in cmdline:
+            return True
+    except (ImportError, Exception):
+        pass
+    return False
+
+
+def _get_worker_count() -> int:
+    """Get estimated worker count"""
+    if workers := os.environ.get('GUNICORN_WORKERS'):
+        return int(workers)
+    if workers := os.environ.get('WEB_CONCURRENCY'):
+        return int(workers)
+    return 1
+
+
+def _detect_pool_pressure() -> str:
+    """Detect pool pressure level"""
+    worker_count = _get_worker_count()
+    max_pool = int(os.environ.get('PG_POOL_MAX_SIZE', '20'))
+    total_connections = worker_count * max_pool
+    if total_connections > 80:
+        return "high"
+    elif total_connections > 40:
+        return "medium"
+    return "low"
+
+
+# =============================================================================
+# ReliabilityConfigs Factory Class
+# =============================================================================
 
 class ReliabilityConfigs:
     """Pre-configured reliability settings for different services"""
 
-    # Kafka/RedPanda configurations
+    # =========================================================================
+    # Kafka/RedPanda
+    # =========================================================================
     @staticmethod
     def kafka_circuit_breaker(name: str) -> CircuitBreakerConfig:
         return CircuitBreakerConfig(
@@ -113,25 +202,26 @@ class ReliabilityConfigs:
             initial_delay_ms=100,
             max_delay_ms=10000,
             backoff_factor=2.0,
-            jitter=True,
-            retry_condition=lambda err: ReliabilityConfigs._should_retry_kafka(err)
+            jitter=True
         )
 
     @staticmethod
     def kafka_rate_limiter() -> RateLimiterConfig:
         return RateLimiterConfig(
             algorithm="token_bucket",
-            capacity=1000,  # 1000 requests per refill
-            refill_rate=100.0,  # 100 tokens per second
+            capacity=1000,
+            refill_rate=100.0,
             distributed=True
         )
 
-    # Redis configurations
+    # =========================================================================
+    # Redis
+    # =========================================================================
     @staticmethod
     def redis_circuit_breaker(name: str) -> CircuitBreakerConfig:
         return CircuitBreakerConfig(
             name=f"redis_{name}",
-            failure_threshold=3,  # More aggressive for Redis
+            failure_threshold=3,
             reset_timeout_seconds=15,
             half_open_max_calls=3,
             success_threshold=2
@@ -141,120 +231,101 @@ class ReliabilityConfigs:
     def redis_retry() -> RetryConfig:
         return RetryConfig(
             max_attempts=3,
-            initial_delay_ms=50,  # Faster for Redis
+            initial_delay_ms=50,
             max_delay_ms=1000,
             backoff_factor=2.0,
-            jitter=True,
-            retry_condition=lambda err: ReliabilityConfigs._should_retry_redis(err)
+            jitter=True
         )
 
     @staticmethod
     def redis_rate_limiter() -> RateLimiterConfig:
         return RateLimiterConfig(
             algorithm="token_bucket",
-            capacity=5000,  # Higher for Redis
-            refill_rate=500.0,  # 500 tokens per second
-            distributed=False  # Local rate limiting for Redis
+            capacity=5000,
+            refill_rate=500.0,
+            distributed=False
         )
 
-    # PostgreSQL configurations - ENHANCED for different scenarios
+    # =========================================================================
+    # PostgreSQL
+    # =========================================================================
     @staticmethod
     def postgres_circuit_breaker(name: str) -> CircuitBreakerConfig:
-        """Standard PostgreSQL circuit breaker"""
-        # Check if we're running under multi-worker server (Granian, Gunicorn, etc.)
         is_multi_worker = _detect_multi_worker_server()
-
         if is_multi_worker:
-            # More forgiving under multi-worker server due to connection pool competition
             return CircuitBreakerConfig(
                 name=f"postgres_{name}",
-                failure_threshold=10,  # Higher threshold
-                reset_timeout_seconds=60,  # Longer reset time
+                failure_threshold=10,
+                reset_timeout_seconds=60,
                 half_open_max_calls=5,
                 success_threshold=3,
                 window_size=20,
                 failure_rate_threshold=0.5
             )
-        else:
-            # Standard config for single process
-            return CircuitBreakerConfig(
-                name=f"postgres_{name}",
-                failure_threshold=5,
-                reset_timeout_seconds=30,
-                half_open_max_calls=3,
-                success_threshold=3
-            )
+        return CircuitBreakerConfig(
+            name=f"postgres_{name}",
+            failure_threshold=5,
+            reset_timeout_seconds=30,
+            half_open_max_calls=3,
+            success_threshold=3
+        )
 
     @staticmethod
     def postgres_retry() -> RetryConfig:
-        """Standard PostgreSQL retry config"""
-        # Check environment for pool pressure
         pool_pressure = _detect_pool_pressure()
-
         if pool_pressure == "high":
-            # More aggressive retry for high pool pressure
             return RetryConfig(
                 max_attempts=5,
-                initial_delay_ms=50,  # Start faster
-                max_delay_ms=2000,  # Cap lower
-                backoff_factor=1.5,  # Less aggressive backoff
+                initial_delay_ms=50,
+                max_delay_ms=2000,
+                backoff_factor=1.5,
                 jitter=True,
-                jitter_type="full",
-                retry_condition=lambda err: ReliabilityConfigs._should_retry_postgres(err)
+                jitter_type="full"
             )
-        else:
-            # Standard retry
-            return RetryConfig(
-                max_attempts=3,
-                initial_delay_ms=100,
-                max_delay_ms=5000,
-                backoff_factor=2.0,
-                jitter=True,
-                retry_condition=lambda err: ReliabilityConfigs._should_retry_postgres(err)
-            )
+        return RetryConfig(
+            max_attempts=3,
+            initial_delay_ms=100,
+            max_delay_ms=5000,
+            backoff_factor=2.0,
+            jitter=True
+        )
 
     @staticmethod
     def postgres_pool_acquisition_retry() -> RetryConfig:
-        """Special config for connection pool acquisition"""
         return RetryConfig(
-            max_attempts=10,  # Many attempts for pool acquisition
-            initial_delay_ms=10,  # Very fast initial retry
-            max_delay_ms=500,  # Cap at 500ms
-            backoff_factor=1.2,  # Gentle backoff
+            max_attempts=10,
+            initial_delay_ms=10,
+            max_delay_ms=500,
+            backoff_factor=1.2,
             jitter=True,
-            jitter_type="decorrelated",  # Better for pool contention
-            retry_condition=lambda err: "timeout" in str(err).lower() or "pool" in str(err).lower()
+            jitter_type="decorrelated"
         )
 
     @staticmethod
     def postgres_deadlock_retry() -> RetryConfig:
-        """Special config for deadlock handling"""
         return RetryConfig(
-            max_attempts=5,  # More attempts for deadlock
-            initial_delay_ms=0,  # Immediate retry for deadlock
+            max_attempts=5,
+            initial_delay_ms=0,
             max_delay_ms=100,
             backoff_factor=1.5,
-            jitter=True,
-            retry_condition=lambda err: "deadlock detected" in str(err).lower()
+            jitter=True
         )
 
     @staticmethod
     def postgres_rate_limiter() -> RateLimiterConfig:
-        """PostgreSQL rate limiter - adjusts based on worker count"""
         worker_count = _get_worker_count()
-
-        # Adjust capacity based on workers
         base_capacity = 100
         capacity = base_capacity // max(1, worker_count)
-
         return RateLimiterConfig(
             algorithm="token_bucket",
             capacity=capacity,
-            refill_rate=capacity / 10.0,  # Refill over 10 seconds
+            refill_rate=capacity / 10.0,
             distributed=True
         )
 
-    # Broker API configurations
+    # =========================================================================
+    # Broker API
+    # =========================================================================
     @staticmethod
     def broker_api_circuit_breaker(broker_id: str) -> CircuitBreakerConfig:
         return CircuitBreakerConfig(
@@ -263,7 +334,6 @@ class ReliabilityConfigs:
             reset_timeout_seconds=60,
             half_open_max_calls=2,
             success_threshold=3,
-            # Enhanced features
             window_size=20,
             failure_rate_threshold=0.5
         )
@@ -276,23 +346,19 @@ class ReliabilityConfigs:
             max_delay_ms=30000,
             backoff_factor=2.0,
             jitter=True,
-            jitter_type="full",
-            retry_condition=lambda err: ReliabilityConfigs._should_retry_broker_api(err)
+            jitter_type="full"
         )
 
     @staticmethod
     def broker_api_rate_limiter(broker_id: str) -> RateLimiterConfig:
-        """Rate limiter config per broker (they have different limits)"""
         broker_limits = {
-            "alpaca": {"capacity": 200, "refill_rate": 10.0},  # 200 req/bucket, 10/sec
-            "interactive_brokers": {"capacity": 50, "refill_rate": 1.0},  # Conservative
+            "alpaca": {"capacity": 200, "refill_rate": 10.0},
+            "interactive_brokers": {"capacity": 50, "refill_rate": 1.0},
             "td_ameritrade": {"capacity": 120, "refill_rate": 2.0},
             "schwab": {"capacity": 100, "refill_rate": 2.0},
             "etrade": {"capacity": 100, "refill_rate": 2.0},
         }
-
         limits = broker_limits.get(broker_id, {"capacity": 100, "refill_rate": 1.0})
-
         return RateLimiterConfig(
             algorithm="token_bucket",
             capacity=limits["capacity"],
@@ -300,76 +366,58 @@ class ReliabilityConfigs:
             distributed=True
         )
 
-    # WSE (WebSocket Event System) specific configurations
+    # =========================================================================
+    # WSE (WebSocket Event System)
+    # =========================================================================
     @staticmethod
     def wse_circuit_breaker(conn_id: str = "default") -> CircuitBreakerConfig:
-        """Circuit breaker for WSE connections"""
         return CircuitBreakerConfig(
             name=f"wse_{conn_id}",
-            failure_threshold=10,  # More tolerant for WSE
+            failure_threshold=10,
             success_threshold=3,
             reset_timeout_seconds=30,
             half_open_max_calls=5,
             window_size=50,
-            failure_rate_threshold=0.3  # 30% failure rate
+            failure_rate_threshold=0.3
         )
 
     @staticmethod
     def wse_rate_limiter() -> RateLimiterConfig:
-        """Rate limiter for WSE messages (per connection)"""
         return RateLimiterConfig(
             algorithm="token_bucket",
-            capacity=1000,  # From wse_config connection.rate_limit_capacity
-            refill_rate=100.0,  # From wse_config connection.rate_limit_refill_rate
-            distributed=False  # Local to each connection
+            capacity=1000,
+            refill_rate=100.0,
+            distributed=False
         )
 
     @staticmethod
     def wse_user_rate_limiter(is_premium: bool = False) -> RateLimiterConfig:
-        """Rate limiter for WSE users (per user across connections)"""
         if is_premium:
-            return RateLimiterConfig(
-                algorithm="token_bucket",
-                capacity=5000,  # Premium users get 5x capacity
-                refill_rate=500.0,  # 5x refill rate
-                distributed=False
-            )
-        else:
-            return RateLimiterConfig(
-                algorithm="token_bucket",
-                capacity=1000,  # Standard users
-                refill_rate=100.0,  # Standard rate
-                distributed=False
-            )
+            return RateLimiterConfig(capacity=5000, refill_rate=500.0, distributed=False)
+        return RateLimiterConfig(capacity=1000, refill_rate=100.0, distributed=False)
 
     @staticmethod
     def wse_ip_rate_limiter() -> RateLimiterConfig:
-        """Rate limiter for WSE IP addresses (DDoS protection)"""
-        return RateLimiterConfig(
-            algorithm="token_bucket",
-            capacity=10000,  # 10x connection limit for IP-level
-            refill_rate=1000.0,  # 10x refill rate
-            distributed=False  # Per-server rate limiting
-        )
+        return RateLimiterConfig(capacity=10000, refill_rate=1000.0, distributed=False)
 
     @staticmethod
-    def wse_reliability() -> ReliabilityConfig:
-        """Complete reliability config for WSE system"""
-        return ReliabilityConfig(
+    def wse_reliability() -> ReliabilityConfigBundle:
+        return ReliabilityConfigBundle(
             circuit_breaker=ReliabilityConfigs.wse_circuit_breaker(),
-            retry=None,  # WSE doesn't use retry (it's connection-based)
+            retry=None,
             rate_limiter=ReliabilityConfigs.wse_rate_limiter()
         )
 
-    # Distributed Lock configurations
+    # =========================================================================
+    # Distributed Locks
+    # =========================================================================
     @staticmethod
     def event_store_distributed_lock() -> DistributedLockConfig:
-        """Lock config for EventStore aggregates"""
         return DistributedLockConfig(
             namespace="aggregate_lock",
             ttl_seconds=30,
             max_wait_ms=5000,
-            retry_times=100,  # More retries for critical operations
+            retry_times=100,
             retry_delay_ms=50,
             strategy="wait_with_timeout",
             enable_auto_cleanup=True,
@@ -378,20 +426,18 @@ class ReliabilityConfigs:
 
     @staticmethod
     def event_bus_distributed_lock() -> DistributedLockConfig:
-        """Lock config for EventBus message processing"""
         return DistributedLockConfig(
             namespace="event_bus:message",
             ttl_seconds=10,
             max_wait_ms=1000,
             retry_times=3,
             retry_delay_ms=100,
-            strategy="fail_fast",  # Don't wait for message processing
+            strategy="fail_fast",
             enable_metrics=True
         )
 
     @staticmethod
     def adapter_pool_distributed_lock() -> DistributedLockConfig:
-        """Lock config for AdapterPool operations"""
         return DistributedLockConfig(
             namespace="adapter_pool:lock",
             ttl_seconds=30,
@@ -399,13 +445,12 @@ class ReliabilityConfigs:
             retry_times=3,
             retry_delay_ms=100,
             strategy="exponential_backoff",
-            use_backoff=True,  # AdapterPool compatibility
+            use_backoff=True,
             enable_metrics=True
         )
 
     @staticmethod
     def cache_distributed_lock() -> DistributedLockConfig:
-        """Lock config for cache operations (stampede prevention)"""
         return DistributedLockConfig(
             namespace="cache:lock",
             ttl_seconds=5,
@@ -417,10 +462,9 @@ class ReliabilityConfigs:
 
     @staticmethod
     def saga_distributed_lock() -> DistributedLockConfig:
-        """Lock config for saga execution"""
         return DistributedLockConfig(
             namespace="saga:execution",
-            ttl_seconds=60,  # Longer for complex operations
+            ttl_seconds=60,
             max_wait_ms=30000,
             retry_times=10,
             retry_delay_ms=200,
@@ -429,22 +473,23 @@ class ReliabilityConfigs:
 
     @staticmethod
     def schema_init_lock() -> DistributedLockConfig:
-        """Lock config for database schema initialization (multi-worker safety)"""
         return DistributedLockConfig(
             namespace="db:schema_init",
-            ttl_seconds=60,  # Schema execution can take up to 60 seconds
-            max_wait_ms=120000,  # Wait up to 2 minutes for another worker to finish
-            retry_delay_ms=500,  # Check every 500ms if schema is done
-            retry_times=240,  # 240 * 500ms = 120 seconds max wait
+            ttl_seconds=60,
+            max_wait_ms=120000,
+            retry_delay_ms=500,
+            retry_times=240,
             strategy="wait_with_timeout",
             use_lua_scripts=True,
             enable_metrics=True
         )
 
-    # Combined configurations for services
+    # =========================================================================
+    # Combined Configurations
+    # =========================================================================
     @staticmethod
-    def event_store_reliability() -> ReliabilityConfig:
-        return ReliabilityConfig(
+    def event_store_reliability() -> ReliabilityConfigBundle:
+        return ReliabilityConfigBundle(
             circuit_breaker=ReliabilityConfigs.kafka_circuit_breaker("event_store"),
             retry=ReliabilityConfigs.kafka_retry(),
             rate_limiter=ReliabilityConfigs.kafka_rate_limiter(),
@@ -452,8 +497,8 @@ class ReliabilityConfigs:
         )
 
     @staticmethod
-    def event_bus_reliability() -> ReliabilityConfig:
-        return ReliabilityConfig(
+    def event_bus_reliability() -> ReliabilityConfigBundle:
+        return ReliabilityConfigBundle(
             circuit_breaker=ReliabilityConfigs.kafka_circuit_breaker("event_bus"),
             retry=ReliabilityConfigs.kafka_retry(),
             rate_limiter=ReliabilityConfigs.kafka_rate_limiter(),
@@ -461,8 +506,8 @@ class ReliabilityConfigs:
         )
 
     @staticmethod
-    def cache_reliability() -> ReliabilityConfig:
-        return ReliabilityConfig(
+    def cache_reliability() -> ReliabilityConfigBundle:
+        return ReliabilityConfigBundle(
             circuit_breaker=ReliabilityConfigs.redis_circuit_breaker("cache"),
             retry=ReliabilityConfigs.redis_retry(),
             rate_limiter=ReliabilityConfigs.redis_rate_limiter(),
@@ -470,35 +515,33 @@ class ReliabilityConfigs:
         )
 
     @staticmethod
-    def database_reliability() -> ReliabilityConfig:
-        """Enhanced database reliability config"""
-        return ReliabilityConfig(
+    def database_reliability() -> ReliabilityConfigBundle:
+        return ReliabilityConfigBundle(
             circuit_breaker=ReliabilityConfigs.postgres_circuit_breaker("main_db"),
             retry=ReliabilityConfigs.postgres_retry(),
             rate_limiter=ReliabilityConfigs.postgres_rate_limiter()
-            # No distributed lock for DB - it has its own locking
         )
 
     @staticmethod
-    def broker_reliability(broker_id: str) -> ReliabilityConfig:
-        """Get reliability config for a specific broker"""
-        return ReliabilityConfig(
+    def broker_reliability(broker_id: str) -> ReliabilityConfigBundle:
+        return ReliabilityConfigBundle(
             circuit_breaker=ReliabilityConfigs.broker_api_circuit_breaker(broker_id),
             retry=ReliabilityConfigs.broker_api_retry(),
             rate_limiter=ReliabilityConfigs.broker_api_rate_limiter(broker_id),
             distributed_lock=ReliabilityConfigs.adapter_pool_distributed_lock()
         )
 
-    # Connection recovery specific configurations
+    # =========================================================================
+    # Connection Recovery
+    # =========================================================================
     @staticmethod
     def connection_recovery_circuit_breaker(broker_id: str) -> CircuitBreakerConfig:
-        """Circuit breaker for connection recovery operations"""
         return CircuitBreakerConfig(
             name=f"{broker_id}_recovery",
             failure_threshold=5,
             success_threshold=3,
             reset_timeout_seconds=30,
-            timeout_seconds=30,  # Alias support
+            timeout_seconds=30,
             half_open_max_calls=3,
             window_size=10,
             failure_rate_threshold=0.5
@@ -506,20 +549,18 @@ class ReliabilityConfigs:
 
     @staticmethod
     def connection_recovery_retry() -> RetryConfig:
-        """Retry config for connection recovery"""
         return RetryConfig(
             max_attempts=3,
             initial_delay_ms=100,
             max_delay_ms=30000,
             backoff_factor=2.0,
-            exponential_base=2.0,  # Alias support
+            exponential_base=2.0,
             jitter=True,
             jitter_type="full"
         )
 
     @staticmethod
     def connection_recovery_rate_limiter() -> RateLimiterConfig:
-        """Rate limiter for recovery attempts"""
         return RateLimiterConfig(
             algorithm="token_bucket",
             capacity=100,
@@ -527,18 +568,11 @@ class ReliabilityConfigs:
             distributed=True
         )
 
-    # ==========================================================================
-    # Telegram configurations
-    # ==========================================================================
-    # Official Telegram rate limits:
-    #   - Global: 30 messages/second to different chats
-    #   - Per-Chat: 1 message/second (bursts allowed, then 429)
-    #   - Per-Group: 20 messages/minute
-    # ==========================================================================
-
+    # =========================================================================
+    # Telegram
+    # =========================================================================
     @staticmethod
     def telegram_circuit_breaker() -> CircuitBreakerConfig:
-        """Circuit breaker for Telegram API operations"""
         return CircuitBreakerConfig(
             name="telegram_api",
             failure_threshold=5,
@@ -551,89 +585,45 @@ class ReliabilityConfigs:
 
     @staticmethod
     def telegram_retry() -> RetryConfig:
-        """Retry config for Telegram API (handles FloodWaitError)"""
         return RetryConfig(
             max_attempts=3,
             initial_delay_ms=1000,
-            max_delay_ms=60000,  # Telegram can ask for up to 60s wait
+            max_delay_ms=60000,
             backoff_factor=2.0,
             jitter=True,
-            jitter_type="full",
-            retry_condition=lambda err: ReliabilityConfigs._should_retry_telegram(err)
+            jitter_type="full"
         )
 
     @staticmethod
     def telegram_global_rate_limiter() -> RateLimiterConfig:
-        """Global rate limiter for Telegram (30 msg/s)"""
-        return RateLimiterConfig(
-            algorithm="token_bucket",
-            capacity=60,  # 2 seconds burst
-            refill_rate=30.0,  # 30 tokens per second
-            distributed=True
-        )
+        return RateLimiterConfig(capacity=60, refill_rate=30.0, distributed=True)
 
     @staticmethod
     def telegram_per_chat_rate_limiter() -> RateLimiterConfig:
-        """Per-chat rate limiter (1 msg/s with burst)"""
-        return RateLimiterConfig(
-            algorithm="token_bucket",
-            capacity=3,  # Allow burst of 3
-            refill_rate=1.0,  # 1 token per second
-            distributed=False  # Local per-chat
-        )
+        return RateLimiterConfig(capacity=3, refill_rate=1.0, distributed=False)
 
     @staticmethod
     def telegram_per_group_rate_limiter() -> RateLimiterConfig:
-        """Per-group rate limiter (20 msg/min)"""
         return RateLimiterConfig(
             algorithm="sliding_window",
             capacity=20,
-            time_window=60,  # 60 seconds
+            time_window=60,
             distributed=False
         )
 
     @staticmethod
-    def telegram_reliability() -> ReliabilityConfig:
-        """Complete reliability config for Telegram operations"""
-        return ReliabilityConfig(
+    def telegram_reliability() -> ReliabilityConfigBundle:
+        return ReliabilityConfigBundle(
             circuit_breaker=ReliabilityConfigs.telegram_circuit_breaker(),
             retry=ReliabilityConfigs.telegram_retry(),
             rate_limiter=ReliabilityConfigs.telegram_global_rate_limiter()
         )
 
-    @staticmethod
-    def _should_retry_telegram(error: Exception) -> bool:
-        """Telegram-specific retry logic"""
-        if error is None:
-            return False
-
-        error_str = str(error).lower()
-
-        # Don't retry on permanent errors
-        if any(term in error_str for term in [
-            "chat not found", "bot was blocked", "user is deactivated",
-            "chat_write_forbidden", "need administrator rights",
-            "message is too long", "topic_closed", "topic_deleted",
-            "invalid token", "unauthorized"
-        ]):
-            return False
-
-        # Retry on FloodWait (Telegram asks to wait)
-        if "flood" in error_str or "retry after" in error_str:
-            return True
-
-        # Retry on transient errors
-        if any(term in error_str for term in [
-            "timeout", "connection", "network", "503", "500"
-        ]):
-            return True
-
-        return ReliabilityConfigs.should_retry_error(error)
-
-    # MinIO/S3 Storage configurations
+    # =========================================================================
+    # Storage (MinIO/S3)
+    # =========================================================================
     @staticmethod
     def storage_circuit_breaker() -> CircuitBreakerConfig:
-        """Circuit breaker for MinIO/S3 storage operations"""
         return CircuitBreakerConfig(
             name="storage_minio",
             failure_threshold=5,
@@ -646,246 +636,142 @@ class ReliabilityConfigs:
 
     @staticmethod
     def storage_retry() -> RetryConfig:
-        """Retry config for MinIO/S3 storage operations"""
         return RetryConfig(
             max_attempts=3,
             initial_delay_ms=100,
             max_delay_ms=5000,
             backoff_factor=2.0,
             jitter=True,
-            jitter_type="full",
-            retry_condition=lambda err: ReliabilityConfigs._should_retry_storage(err)
+            jitter_type="full"
         )
 
     @staticmethod
-    def storage_reliability() -> ReliabilityConfig:
-        """Complete reliability config for storage operations"""
-        return ReliabilityConfig(
+    def storage_reliability() -> ReliabilityConfigBundle:
+        return ReliabilityConfigBundle(
             circuit_breaker=ReliabilityConfigs.storage_circuit_breaker(),
             retry=ReliabilityConfigs.storage_retry(),
             rate_limiter=None
         )
 
+    # =========================================================================
+    # Webhook
+    # =========================================================================
     @staticmethod
-    def _should_retry_storage(error: Exception) -> bool:
-        """MinIO/S3 specific retry logic"""
-        if error is None:
-            return False
+    def webhook_rate_limiter() -> RateLimiterConfig:
+        return RateLimiterConfig(
+            algorithm="sliding_window",
+            capacity=60,
+            time_window=60,
+            distributed=True
+        )
 
+    # =========================================================================
+    # Error Classification
+    # =========================================================================
+    @staticmethod
+    def classify_error(error: Exception) -> ErrorClass:
+        if error is None:
+            return ErrorClass.UNKNOWN
         error_str = str(error).lower()
 
-        # Don't retry on access denied or invalid credentials
+        if any(term in error_str for term in ["connection refused", "no such host", "network is unreachable", "broken pipe"]):
+            return ErrorClass.NETWORK
+        if any(term in error_str for term in ["timeout", "deadline exceeded"]):
+            return ErrorClass.TIMEOUT
+        if any(term in error_str for term in ["syntax error", "invalid", "constraint", "wrongtype"]):
+            return ErrorClass.LOGICAL
+        if any(term in error_str for term in ["deadlock", "too many connections", "temporary"]):
+            return ErrorClass.TRANSIENT
+        if hasattr(error, '__permanent__') and error.__permanent__:
+            return ErrorClass.PERMANENT
+        return ErrorClass.UNKNOWN
+
+    @staticmethod
+    def should_retry_error(error: Exception) -> bool:
+        error_class = ReliabilityConfigs.classify_error(error)
+        return error_class in [ErrorClass.NETWORK, ErrorClass.TIMEOUT, ErrorClass.TRANSIENT, ErrorClass.UNKNOWN]
+
+    @staticmethod
+    def _should_retry_kafka(error: Exception) -> bool:
+        if error is None:
+            return False
+        error_str = str(error)
+        if any(term in error_str for term in ["REBALANCE", "SASL", "AUTH"]):
+            return False
+        return ReliabilityConfigs.should_retry_error(error)
+
+    @staticmethod
+    def _should_retry_redis(error: Exception) -> bool:
+        if error is None:
+            return False
+        error_str = str(error)
+        if any(term in error_str for term in ["WRONGTYPE", "ERR invalid", "ERR syntax"]):
+            return False
+        return ReliabilityConfigs.should_retry_error(error)
+
+    @staticmethod
+    def _should_retry_postgres(error: Exception) -> bool:
+        if error is None:
+            return False
+        error_str = str(error)
+        if "deadlock detected" in error_str:
+            return True
+        if any(term in error_str for term in ["syntax error", "violates unique constraint", "violates foreign key", "violates check constraint"]):
+            return False
+        return ReliabilityConfigs.should_retry_error(error)
+
+    @staticmethod
+    def _should_retry_broker_api(error: Exception) -> bool:
+        if error is None:
+            return False
+        error_str = str(error)
+        if any(term in error_str for term in ["401", "403", "unauthorized", "forbidden"]):
+            return False
+        if any(term in error_str for term in ["400", "bad request", "invalid parameter"]):
+            return False
+        if any(term in error_str for term in ["429", "rate limit", "too many requests"]):
+            return True
+        return ReliabilityConfigs.should_retry_error(error)
+
+    @staticmethod
+    def _should_retry_telegram(error: Exception) -> bool:
+        if error is None:
+            return False
+        error_str = str(error).lower()
+        if any(term in error_str for term in [
+            "chat not found", "bot was blocked", "user is deactivated",
+            "chat_write_forbidden", "need administrator rights",
+            "message is too long", "topic_closed", "topic_deleted",
+            "invalid token", "unauthorized"
+        ]):
+            return False
+        if "flood" in error_str or "retry after" in error_str:
+            return True
+        if any(term in error_str for term in ["timeout", "connection", "network", "503", "500"]):
+            return True
+        return ReliabilityConfigs.should_retry_error(error)
+
+    @staticmethod
+    def _should_retry_storage(error: Exception) -> bool:
+        if error is None:
+            return False
+        error_str = str(error).lower()
         if any(term in error_str for term in [
             "accessdenied", "invalidaccesskeyid", "signaturesdoesnotmatch",
             "403", "401", "nosuchbucket"
         ]):
             return False
-
-        # Retry on transient errors
         if any(term in error_str for term in [
             "timeout", "connection", "503", "500", "slowdown",
             "serviceunavailable", "internalerror"
         ]):
             return True
-
         return ReliabilityConfigs.should_retry_error(error)
 
-    # Webhook configurations
-    @staticmethod
-    def webhook_rate_limiter() -> RateLimiterConfig:
-        """Rate limiter for webhook endpoints (per automation)"""
-        return RateLimiterConfig(
-            algorithm="sliding_window",
-            capacity=60,  # 60 requests per window
-            time_window=60,  # 60 seconds (1 minute)
-            distributed=True
-        )
-
-    # Error classification
-    @staticmethod
-    def classify_error(error: Exception) -> ErrorClass:
-        """Classify an error to determine retry behavior"""
-        if error is None:
-            return ErrorClass.UNKNOWN
-
-        error_str = str(error).lower()
-
-        # Network errors
-        if any(term in error_str for term in [
-            "connection refused", "no such host",
-            "network is unreachable", "broken pipe"
-        ]):
-            return ErrorClass.NETWORK
-
-        # Timeout errors
-        if any(term in error_str for term in ["timeout", "deadline exceeded"]):
-            return ErrorClass.TIMEOUT
-
-        # Logical errors (should not retry)
-        if any(term in error_str for term in [
-            "syntax error", "invalid", "constraint", "wrongtype"
-        ]):
-            return ErrorClass.LOGICAL
-
-        # Transient errors (should retry)
-        if any(term in error_str for term in [
-            "deadlock", "too many connections", "temporary"
-        ]):
-            return ErrorClass.TRANSIENT
-
-        # Check if marked as permanent
-        if hasattr(error, '__permanent__') and error.__permanent__:
-            return ErrorClass.PERMANENT
-
-        return ErrorClass.UNKNOWN
-
-    @staticmethod
-    def should_retry_error(error: Exception) -> bool:
-        """Determine if an error should be retried based on its class"""
-        error_class = ReliabilityConfigs.classify_error(error)
-        return error_class in [ErrorClass.NETWORK, ErrorClass.TIMEOUT,
-                               ErrorClass.TRANSIENT, ErrorClass.UNKNOWN]
-
-    # Private helper methods
-    @staticmethod
-    def _should_retry_kafka(error: Exception) -> bool:
-        """Kafka-specific retry logic"""
-        if error is None:
-            return False
-
-        error_str = str(error)
-        # Don't retry on rebalancing or auth errors
-        if any(term in error_str for term in ["REBALANCE", "SASL", "AUTH"]):
-            return False
-
-        return ReliabilityConfigs.should_retry_error(error)
-
-    @staticmethod
-    def _should_retry_redis(error: Exception) -> bool:
-        """Redis-specific retry logic"""
-        if error is None:
-            return False
-
-        error_str = str(error)
-        # Don't retry on logical errors
-        if any(term in error_str for term in ["WRONGTYPE", "ERR invalid", "ERR syntax"]):
-            return False
-
-        return ReliabilityConfigs.should_retry_error(error)
-
-    @staticmethod
-    def _should_retry_postgres(error: Exception) -> bool:
-        """PostgreSQL-specific retry logic"""
-        if error is None:
-            return False
-
-        error_str = str(error)
-        # Immediate retry for deadlocks
-        if "deadlock detected" in error_str:
-            return True
-
-        # Don't retry syntax errors or constraint violations
-        if any(term in error_str for term in [
-            "syntax error", "violates unique constraint",
-            "violates foreign key", "violates check constraint"
-        ]):
-            return False
-
-        return ReliabilityConfigs.should_retry_error(error)
-
-    @staticmethod
-    def _should_retry_broker_api(error: Exception) -> bool:
-        """Broker API specific retry logic"""
-        if error is None:
-            return False
-
-        error_str = str(error)
-
-        # Don't retry on auth errors
-        if any(term in error_str for term in ["401", "403", "unauthorized", "forbidden"]):
-            return False
-
-        # Don't retry on bad requests
-        if any(term in error_str for term in ["400", "bad request", "invalid parameter"]):
-            return False
-
-        # Retry on rate limits
-        if any(term in error_str for term in ["429", "rate limit", "too many requests"]):
-            return True
-
-        return ReliabilityConfigs.should_retry_error(error)
-
-
-# Helper functions for environment detection
-def _detect_multi_worker_server() -> bool:
-    """Detect if running under multi-worker server (Granian)"""
-    # Check for Granian
-    if 'granian' in os.environ.get('SERVER_SOFTWARE', '').lower():
-        return True
-
-    # Check for WEB_CONCURRENCY (standard multi-worker indicator)
-    if os.environ.get('WEB_CONCURRENCY'):
-        try:
-            workers = int(os.environ.get('WEB_CONCURRENCY', '1'))
-            if workers > 1:
-                return True
-        except ValueError:
-            pass
-
-    # Check process name
-    try:
-        import psutil
-        current_process = psutil.Process()
-        cmdline = ' '.join(current_process.cmdline())
-        # Check for granian
-        if 'granian' in cmdline:
-            # Look for --workers flag
-            if '--workers' in cmdline or '-w' in cmdline:
-                return True
-            return True  # Assume multi-worker if granian detected
-    except ImportError:
-        pass  # psutil not installed
-    except Exception as e:
-        # Catch any psutil-specific errors
-        if 'psutil' in str(type(e).__module__):
-            pass  # psutil error, ignore
-        else:
-            raise
-
-    return False
-
-
-def _get_worker_count() -> int:
-    """Get estimated worker count"""
-    # From environment
-    if workers := os.environ.get('GUNICORN_WORKERS'):
-        return int(workers)
-
-    if workers := os.environ.get('WEB_CONCURRENCY'):
-        return int(workers)
-
-    # Default
-    return 1
-
-
-def _detect_pool_pressure() -> str:
-    """Detect pool pressure level"""
-    # Check if we have many workers
-    worker_count = _get_worker_count()
-
-    # Check pool size configuration
-    max_pool = int(os.environ.get('PG_POOL_MAX_SIZE', '20'))
-
-    # Calculate pressure
-    total_connections = worker_count * max_pool
-
-    if total_connections > 80:
-        return "high"
-    elif total_connections > 40:
-        return "medium"
-    else:
-        return "low"
 
 # =============================================================================
-# EOF
+# Backward Compatibility Aliases
 # =============================================================================
+
+# Alias for backward compatibility
+ReliabilityConfig = ReliabilityConfigBundle

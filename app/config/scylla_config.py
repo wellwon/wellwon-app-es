@@ -1,11 +1,15 @@
 # =============================================================================
 # File: app/config/scylla_config.py
 # Description: Configuration for ScyllaDB/Cassandra client with Pydantic v2
+# UPDATED: Using BaseConfig pattern
 # =============================================================================
-from typing import Optional, List, Dict, Any, Tuple, Type
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings
+from functools import lru_cache
+from typing import Optional, List, Dict, Any
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import SettingsConfigDict
 from enum import Enum
+
+from app.common.base.base_config import BaseConfig
 
 
 class ConsistencyLevel(str, Enum):
@@ -29,7 +33,7 @@ class CircuitBreakerState(str, Enum):
 
 
 # noinspection PyMethodParameters
-class ScyllaConfig(BaseSettings):
+class ScyllaConfig(BaseConfig):
     """
     Comprehensive configuration for ScyllaDB/Cassandra client.
 
@@ -41,6 +45,11 @@ class ScyllaConfig(BaseSettings):
     - Performance tuning
     - Monitoring and metrics
     """
+
+    model_config = SettingsConfigDict(
+        **BaseConfig.model_config,
+        env_prefix='SCYLLA_',
+    )
 
     # =========================================================================
     # Connection Settings
@@ -72,7 +81,7 @@ class ScyllaConfig(BaseSettings):
         description="ScyllaDB username"
     )
 
-    password: Optional[str] = Field(
+    password: Optional[SecretStr] = Field(
         default=None,
         description="ScyllaDB password"
     )
@@ -279,17 +288,6 @@ class ScyllaConfig(BaseSettings):
     )
 
     # =========================================================================
-    # Environment Configuration
-    # =========================================================================
-
-    model_config = {
-        "env_prefix": "SCYLLA_",
-        "env_file": ".env",
-        "case_sensitive": False,
-        "extra": "allow"
-    }
-
-    # =========================================================================
     # Validators
     # =========================================================================
 
@@ -338,7 +336,7 @@ class ScyllaConfig(BaseSettings):
         if self.username and self.password:
             return {
                 "username": self.username,
-                "password": self.password
+                "password": self.password.get_secret_value()
             }
         return None
 
@@ -486,18 +484,15 @@ def validate_config(config: ScyllaConfig) -> None:
 
 
 # =============================================================================
-# Environment Variable Helper
+# Factory Function
 # =============================================================================
 
-def load_scylla_config_from_env() -> ScyllaConfig:
-    """
-    Load ScyllaDB configuration from environment variables.
-
-    Environment variables should be prefixed with SCYLLA_
-    For example:
-    - SCYLLA_CONTACT_POINTS=scylla-1,scylla-2,scylla-3
-    - SCYLLA_KEYSPACE=wellwon_scylla
-    - SCYLLA_USERNAME=scylla
-    - SCYLLA_PASSWORD=secret
-    """
+@lru_cache(maxsize=1)
+def get_scylla_config() -> ScyllaConfig:
+    """Get ScyllaDB configuration singleton (cached)."""
     return ScyllaConfig()
+
+
+def reset_scylla_config() -> None:
+    """Reset config singleton (for testing)."""
+    get_scylla_config.cache_clear()

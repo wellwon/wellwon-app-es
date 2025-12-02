@@ -1,15 +1,13 @@
 import React, { ReactNode } from 'react';
 import { UnifiedSidebarProvider } from './UnifiedSidebarProvider';
 import { RealtimeChatProvider } from '@/contexts/RealtimeChatContext';
-import { ChatDisplayOptionsProvider } from './ChatDisplayOptionsContext';
+// ChatDisplayOptionsProvider removed - state now managed by useChatUIStore (Zustand)
 
 export const ProvidersWrapper: React.FC<{ children: ReactNode }> = ({ children }) => {
   return (
     <RealtimeChatProvider>
       <UnifiedSidebarProvider>
-        <ChatDisplayOptionsProvider>
-          {children}
-        </ChatDisplayOptionsProvider>
+        {children}
       </UnifiedSidebarProvider>
     </RealtimeChatProvider>
   );

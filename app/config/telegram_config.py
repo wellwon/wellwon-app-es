@@ -1,18 +1,21 @@
 # =============================================================================
 # File: app/config/telegram_config.py
 # Description: Telegram integration configuration (Bot API + MTProto)
+# UPDATED: Using Pydantic v2 with BaseConfig pattern
 # =============================================================================
 
+from functools import lru_cache
 from typing import Optional, List
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import SettingsConfigDict
 
+from app.common.base.base_config import BaseConfig
 from app.config.logging_config import get_logger
 
 log = get_logger("wellwon.config.telegram")
 
 
-class TelegramConfig(BaseSettings):
+class TelegramConfig(BaseConfig):
     """
     Telegram integration configuration.
 
@@ -23,12 +26,17 @@ class TelegramConfig(BaseSettings):
     - Reconnection and caching
     """
 
+    model_config = SettingsConfigDict(
+        **BaseConfig.model_config,
+        env_prefix='TELEGRAM_',
+    )
+
     # =========================================================================
     # Bot API Settings
     # =========================================================================
 
-    bot_token: str = Field(
-        default="",
+    bot_token: SecretStr = Field(
+        default=SecretStr(""),
         description="Bot API token from @BotFather"
     )
 
@@ -37,8 +45,8 @@ class TelegramConfig(BaseSettings):
         description="Public URL for webhook (e.g., https://api.wellwon.com)"
     )
 
-    webhook_secret: str = Field(
-        default="",
+    webhook_secret: SecretStr = Field(
+        default=SecretStr(""),
         description="Secret token for webhook verification"
     )
 
@@ -56,8 +64,8 @@ class TelegramConfig(BaseSettings):
         description="MTProto API ID (from my.telegram.org)"
     )
 
-    api_hash: str = Field(
-        default="",
+    api_hash: SecretStr = Field(
+        default=SecretStr(""),
         description="MTProto API hash (from my.telegram.org)"
     )
 
@@ -189,16 +197,6 @@ class TelegramConfig(BaseSettings):
         description="Enable MTProto client"
     )
 
-    # =========================================================================
-    # Environment Configuration
-    # =========================================================================
-
-    model_config = {
-        "env_prefix": "TELEGRAM_",
-        "env_file": ".env",
-        "case_sensitive": False,
-        "extra": "allow"
-    }
 
     # =========================================================================
     # Validators
@@ -243,12 +241,12 @@ class TelegramConfig(BaseSettings):
     @property
     def bot_api_available(self) -> bool:
         """Check if Bot API is configured."""
-        return bool(self.bot_token)
+        return bool(self.bot_token.get_secret_value())
 
     @property
     def mtproto_available(self) -> bool:
         """Check if MTProto is configured."""
-        return bool(self.api_id and self.api_hash and (self.session_string or self.admin_phone))
+        return bool(self.api_id and self.api_hash.get_secret_value() and (self.session_string or self.admin_phone))
 
     @property
     def bot_usernames_list(self) -> List[str]:
@@ -263,33 +261,28 @@ class TelegramConfig(BaseSettings):
 
     def validate_config(self) -> None:
         """Validate configuration and log warnings."""
-        if self.enable_webhook and not self.bot_token:
+        if self.enable_webhook and not self.bot_token.get_secret_value():
             log.warning("TELEGRAM_BOT_TOKEN not set - Bot API features disabled")
 
         if self.enable_mtproto:
-            if not self.api_id or not self.api_hash:
+            if not self.api_id or not self.api_hash.get_secret_value():
                 log.warning("TELEGRAM_API_ID or TELEGRAM_API_HASH not set - MTProto disabled")
             if not self.session_string and not self.admin_phone:
                 log.warning("Neither TELEGRAM_SESSION_STRING nor TELEGRAM_ADMIN_PHONE set")
 
 
 # =============================================================================
-# Singleton
+# Factory Function
 # =============================================================================
 
-_telegram_config: TelegramConfig | None = None
-
-
+@lru_cache(maxsize=1)
 def get_telegram_config() -> TelegramConfig:
-    """Get Telegram configuration singleton."""
-    global _telegram_config
-    if _telegram_config is None:
-        _telegram_config = TelegramConfig()
-        _telegram_config.validate_config()
-    return _telegram_config
+    """Get Telegram configuration singleton (cached)."""
+    config = TelegramConfig()
+    config.validate_config()
+    return config
 
 
 def reset_telegram_config() -> None:
     """Reset config singleton (for testing)."""
-    global _telegram_config
-    _telegram_config = None
+    get_telegram_config.cache_clear()

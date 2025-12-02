@@ -14,6 +14,11 @@ import {
   getDefaultProSection,
   isValidProSection,
 } from '@/config/PlatformProSectionConfig';
+import {
+  usePlatformProStore,
+  usePlatformProSidebarCollapsed,
+  usePlatformProIsDark,
+} from '@/stores/usePlatformProStore';
 
 // =============================================================================
 // Types
@@ -56,17 +61,15 @@ export const PlatformProProvider: React.FC<PlatformProProviderProps> = ({ childr
   const navigate = useNavigate();
   const { profile } = useAuth();
 
-  // State
+  // Route state (local)
   const [activeSection, setActiveSectionState] = useState<PlatformProSection>(getDefaultProSection());
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
-    const stored = localStorage.getItem('platformPro_sidebarCollapsed');
-    return stored ? JSON.parse(stored) : false;
-  });
-  const [isDark, setIsDark] = useState<boolean>(() => {
-    const stored = localStorage.getItem('platformPro_theme');
-    // Default to dark theme if not set
-    return stored === null ? true : stored === 'dark';
-  });
+
+  // UI state from Zustand store (persisted automatically)
+  const sidebarCollapsed = usePlatformProSidebarCollapsed();
+  const isDark = usePlatformProIsDark();
+  const setSidebarCollapsed = usePlatformProStore((s) => s.setSidebarCollapsed);
+  const storeToggleSidebar = usePlatformProStore((s) => s.toggleSidebar);
+  const storeToggleTheme = usePlatformProStore((s) => s.toggleTheme);
 
   // Available sections (все секции для developers)
   const availableSections = platformProSections;
@@ -95,15 +98,7 @@ export const PlatformProProvider: React.FC<PlatformProProviderProps> = ({ childr
     }
   }, [section, navigate]);
 
-  // Persist sidebar state
-  useEffect(() => {
-    localStorage.setItem('platformPro_sidebarCollapsed', JSON.stringify(sidebarCollapsed));
-  }, [sidebarCollapsed]);
-
-  // Persist theme
-  useEffect(() => {
-    localStorage.setItem('platformPro_theme', isDark ? 'dark' : 'light');
-  }, [isDark]);
+  // Note: State persistence is handled automatically by Zustand persist middleware
 
   // Actions
   const setActiveSection = useCallback((newSection: PlatformProSection) => {
@@ -111,12 +106,12 @@ export const PlatformProProvider: React.FC<PlatformProProviderProps> = ({ childr
   }, [navigate]);
 
   const toggleSidebar = useCallback(() => {
-    setSidebarCollapsed((prev) => !prev);
-  }, []);
+    storeToggleSidebar();
+  }, [storeToggleSidebar]);
 
   const toggleTheme = useCallback(() => {
-    setIsDark((prev) => !prev);
-  }, []);
+    storeToggleTheme();
+  }, [storeToggleTheme]);
 
   // Context value
   const value: PlatformProContextType = {

@@ -1,214 +1,213 @@
 # app/config/dlq_config.py
 """
 Configuration for DLQ Service that matches existing database schema
-UPDATED: DLQ now enabled by default with full functionality
+UPDATED: Using BaseConfig pattern with Pydantic v2
 """
 
-from dataclasses import dataclass
+from functools import lru_cache
 from typing import Optional, Dict, Any
 from enum import Enum
+from pydantic import Field
+from pydantic_settings import SettingsConfigDict
+
+from app.common.base.base_config import BaseConfig
 
 
-class DLQStorageMode(Enum):
+class DLQStorageMode(str, Enum):
     """DLQ storage strategies"""
     DATABASE_ONLY = "database"  # Direct to DB
     KAFKA_ONLY = "kafka"  # Only Kafka topic
     HYBRID = "hybrid"  # Both Kafka and DB
 
 
-@dataclass
-class DLQConfig:
+class DLQConfig(BaseConfig):
     """
     DLQ Service configuration matching existing dlq_events table
     """
+
+    model_config = SettingsConfigDict(
+        **BaseConfig.model_config,
+        env_prefix='DLQ_',
+    )
+
     # Basic settings - ENABLED BY DEFAULT
-    enabled: bool = True  # DLQ is active by default
-    storage_mode: DLQStorageMode = DLQStorageMode.HYBRID
+    enabled: bool = Field(
+        default=True,
+        description="DLQ is active by default"
+    )
+
+    storage_mode: DLQStorageMode = Field(
+        default=DLQStorageMode.HYBRID,
+        description="DLQ storage strategy"
+    )
 
     # Queue settings - optimal for production
-    queue_size: int = 50000
-    batch_size: int = 200
-    flush_interval_seconds: float = 2.0
+    queue_size: int = Field(
+        default=50000,
+        description="Maximum queue size"
+    )
+
+    batch_size: int = Field(
+        default=200,
+        description="Batch size for processing"
+    )
+
+    flush_interval_seconds: float = Field(
+        default=2.0,
+        description="Flush interval in seconds"
+    )
 
     # Kafka settings
-    kafka_topic: str = "system.dlq.events"
-    enable_kafka_forward: bool = True
+    kafka_topic: str = Field(
+        default="system.dlq.events",
+        description="Kafka topic for DLQ events"
+    )
+
+    enable_kafka_forward: bool = Field(
+        default=True,
+        description="Enable Kafka forwarding"
+    )
 
     # Database settings
-    table_name: str = "dlq_events"
+    table_name: str = Field(
+        default="dlq_events",
+        description="Database table name"
+    )
 
     # Retry settings
-    max_retry_count: int = 3
-    retry_delay_seconds: int = 60
+    max_retry_count: int = Field(
+        default=3,
+        description="Maximum retry attempts"
+    )
+
+    retry_delay_seconds: int = Field(
+        default=60,
+        description="Delay between retries in seconds"
+    )
 
     # Recovery settings
-    enable_auto_recovery: bool = True
-    recovery_check_interval: int = 300  # 5 minutes
+    enable_auto_recovery: bool = Field(
+        default=True,
+        description="Enable automatic recovery"
+    )
+
+    recovery_check_interval: int = Field(
+        default=300,
+        description="Recovery check interval in seconds (5 minutes)"
+    )
 
     # Monitoring
-    enable_metrics: bool = True
-    log_dropped_events: bool = False  # Don't spam logs in production
-    dropped_events_threshold: int = 1000
+    enable_metrics: bool = Field(
+        default=True,
+        description="Enable metrics collection"
+    )
+
+    log_dropped_events: bool = Field(
+        default=False,
+        description="Log dropped events (can spam logs)"
+    )
+
+    dropped_events_threshold: int = Field(
+        default=1000,
+        description="Threshold for dropped events warning"
+    )
 
     # Performance tuning
-    emergency_persist_threshold: int = 45000  # When queue is 90% full
-    max_batch_wait_seconds: float = 5.0
+    emergency_persist_threshold: int = Field(
+        default=45000,
+        description="When queue is 90% full"
+    )
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for logging"""
-        return {
-            "enabled": self.enabled,
-            "storage_mode": self.storage_mode.value,
-            "queue_size": self.queue_size,
-            "batch_size": self.batch_size,
-            "flush_interval_seconds": self.flush_interval_seconds,
-            "kafka_topic": self.kafka_topic,
-            "enable_kafka_forward": self.enable_kafka_forward,
-            "table_name": self.table_name,
-            "max_retry_count": self.max_retry_count,
-            "enable_auto_recovery": self.enable_auto_recovery,
-            "enable_metrics": self.enable_metrics
-        }
+    max_batch_wait_seconds: float = Field(
+        default=5.0,
+        description="Maximum wait for batch completion"
+    )
 
 
-# Configuration profiles for different environments
-class DLQProfiles:
-    """Preset configuration profiles"""
+# =============================================================================
+# Factory Function
+# =============================================================================
 
-    @staticmethod
-    def development() -> DLQConfig:
-        """Development config - everything enabled for debugging"""
-        return DLQConfig(
-            enabled=True,
-            storage_mode=DLQStorageMode.HYBRID,
-            batch_size=10,  # Small batch for fast response
-            flush_interval_seconds=0.5,  # Fast flush
-            enable_metrics=True,
-            log_dropped_events=True,
-            enable_auto_recovery=True
-        )
-
-    @staticmethod
-    def testing() -> DLQConfig:
-        """Testing config - DB only, no Kafka"""
-        return DLQConfig(
-            enabled=True,
-            storage_mode=DLQStorageMode.DATABASE_ONLY,
-            batch_size=5,
-            flush_interval_seconds=0.1,
-            enable_kafka_forward=False,
-            enable_metrics=True,
-            enable_auto_recovery=False
-        )
-
-    @staticmethod
-    def production() -> DLQConfig:
-        """Production config - fully functional mode"""
-        return DLQConfig(
-            enabled=True,  # ENABLED in production!
-            storage_mode=DLQStorageMode.HYBRID,  # Both Kafka and DB
-            batch_size=200,  # Optimal batch size
-            flush_interval_seconds=2.0,  # Balance between latency and performance
-            queue_size=50000,  # Large queue for high loads
-            emergency_persist_threshold=45000,  # 90% of queue size
-            enable_metrics=True,  # Metrics enabled
-            log_dropped_events=False,  # Don't spam logs in production
-            dropped_events_threshold=1000,
-            enable_kafka_forward=True,  # Kafka forwarding enabled
-            enable_auto_recovery=True,  # Auto recovery enabled
-            recovery_check_interval=300  # Check every 5 minutes
-        )
-
-    @staticmethod
-    def high_load() -> DLQConfig:
-        """High load config - for extreme loads"""
-        return DLQConfig(
-            enabled=True,
-            storage_mode=DLQStorageMode.KAFKA_ONLY,  # Kafka only for speed
-            batch_size=500,
-            flush_interval_seconds=5.0,
-            queue_size=100000,
-            enable_kafka_forward=True,
-            enable_metrics=True,
-            log_dropped_events=False,
-            enable_auto_recovery=True,
-            emergency_persist_threshold=90000
-        )
+@lru_cache(maxsize=1)
+def get_dlq_config() -> DLQConfig:
+    """Get DLQ configuration singleton (cached)."""
+    return DLQConfig()
 
 
-# Main function to get config
-def get_dlq_config(profile: Optional[str] = None) -> DLQConfig:
-    """
-    Get DLQ configuration
-
-    Args:
-        profile: Profile name (development, testing, production, high_load)
-                If not specified - uses production profile by default
-    """
-    # Use production profile by default
-    if not profile:
-        return DLQProfiles.production()
-
-    profile_map = {
-        "development": DLQProfiles.development,
-        "testing": DLQProfiles.testing,
-        "production": DLQProfiles.production,
-        "high_load": DLQProfiles.high_load
-    }
-
-    profile_func = profile_map.get(profile.lower())
-    if profile_func:
-        return profile_func()
-
-    # If profile not found - return production
-    return DLQProfiles.production()
+def reset_dlq_config() -> None:
+    """Reset config singleton (for testing)."""
+    get_dlq_config.cache_clear()
 
 
-# Table documentation
-DLQ_TABLE_COLUMNS = {
-    # Primary fields
-    "id": "UUID PRIMARY KEY DEFAULT gen_random_uuid()",
-    "original_event_id": "UUID",
-    "event_type": "TEXT",
-    "topic_name": "TEXT",
-    "raw_payload": "JSONB NOT NULL",
-    "error_message": "TEXT",
-    "error_type": "TEXT",
-    "consumer_name": "TEXT",
-    "retry_count": "INT DEFAULT 0",
-    "last_attempted_at": "TIMESTAMP WITH TIME ZONE",
+# =============================================================================
+# Profile Factory Functions (for specific environments)
+# =============================================================================
 
-    # Enhanced tracking
-    "saga_id": "UUID",
-    "causation_id": "UUID",
-    "correlation_id": "UUID",
-    "aggregate_id": "UUID",
-    "aggregate_type": "TEXT",
-    "sequence_number": "BIGINT",
-
-    # Classification
-    "dlq_reason": "TEXT",
-    "dlq_category": "TEXT",
-    "recoverable": "BOOLEAN DEFAULT TRUE",
-
-    # Recovery tracking
-    "recovery_attempted": "BOOLEAN DEFAULT FALSE",
-    "recovery_attempted_at": "TIMESTAMP WITH TIME ZONE",
-    "recovery_success": "BOOLEAN",
-
-    # Unified DLQ columns
-    "source_system": "TEXT DEFAULT 'sql'",
-    "original_topic": "TEXT",
-    "reprocess_count": "INT DEFAULT 0",
-    "last_reprocess_at": "TIMESTAMP WITH TIME ZONE",
-
-    "created_at": "TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP",
-    "payload_size": "INT"
-}
+def create_development_config() -> DLQConfig:
+    """Development config - everything enabled for debugging"""
+    return DLQConfig(
+        enabled=True,
+        storage_mode=DLQStorageMode.HYBRID,
+        batch_size=10,  # Small batch for fast response
+        flush_interval_seconds=0.5,  # Fast flush
+        enable_metrics=True,
+        log_dropped_events=True,
+        enable_auto_recovery=True
+    )
 
 
-# Source system values matching existing schema
-class DLQSourceSystem(Enum):
+def create_testing_config() -> DLQConfig:
+    """Testing config - DB only, no Kafka"""
+    return DLQConfig(
+        enabled=True,
+        storage_mode=DLQStorageMode.DATABASE_ONLY,
+        batch_size=5,
+        flush_interval_seconds=0.1,
+        enable_kafka_forward=False,
+        enable_metrics=True,
+        enable_auto_recovery=False
+    )
+
+
+def create_production_config() -> DLQConfig:
+    """Production config - fully functional mode"""
+    return DLQConfig(
+        enabled=True,
+        storage_mode=DLQStorageMode.HYBRID,
+        batch_size=200,
+        flush_interval_seconds=2.0,
+        queue_size=50000,
+        emergency_persist_threshold=45000,
+        enable_metrics=True,
+        log_dropped_events=False,
+        dropped_events_threshold=1000,
+        enable_kafka_forward=True,
+        enable_auto_recovery=True,
+        recovery_check_interval=300
+    )
+
+
+def create_high_load_config() -> DLQConfig:
+    """High load config - for extreme loads"""
+    return DLQConfig(
+        enabled=True,
+        storage_mode=DLQStorageMode.KAFKA_ONLY,
+        batch_size=500,
+        flush_interval_seconds=5.0,
+        queue_size=100000,
+        enable_kafka_forward=True,
+        enable_metrics=True,
+        log_dropped_events=False,
+        enable_auto_recovery=True,
+        emergency_persist_threshold=90000
+    )
+
+
+# =============================================================================
+# Enums for DLQ Classification
+# =============================================================================
+
+class DLQSourceSystem(str, Enum):
     """Source systems that can send to DLQ"""
     EVENT_PROCESSOR = "event_processor"
     OUTBOX = "outbox"
@@ -217,12 +216,11 @@ class DLQSourceSystem(Enum):
     PROJECTION = "projection"
     WORKER = "worker"
     API = "api"
-    SQL = "sql"  # Default in DB
+    SQL = "sql"
     KAFKA = "kafka"
 
 
-# DLQ categories matching what should go in dlq_category column
-class DLQCategory(Enum):
+class DLQCategory(str, Enum):
     """Error categories for dlq_category column"""
     TIMEOUT = "timeout"
     CONNECTION = "connection"
@@ -236,8 +234,7 @@ class DLQCategory(Enum):
     UNKNOWN = "unknown"
 
 
-# DLQ reasons matching what should go in dlq_reason column
-class DLQReason(Enum):
+class DLQReason(str, Enum):
     """Reasons for DLQ for dlq_reason column"""
     PROCESSING_FAILED = "processing_failed"
     MAX_RETRIES_EXCEEDED = "max_retries_exceeded"

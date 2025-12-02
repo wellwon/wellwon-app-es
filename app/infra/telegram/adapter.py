@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from app.config.logging_config import get_logger
 from app.config.telegram_config import TelegramConfig, get_telegram_config
 from app.infra.telegram.bot_client import TelegramBotClient, TelegramMessage, SendMessageResult
-from app.infra.telegram.mtproto_client import TelegramMTProtoClient, GroupInfo, TopicInfo, MemberInfo, IncomingMessage
+from app.infra.telegram.mtproto_client import TelegramMTProtoClient, GroupInfo, TopicInfo, MemberInfo, IncomingMessage, ReadEventInfo
 
 log = get_logger("wellwon.telegram.adapter")
 
@@ -127,6 +127,19 @@ class TelegramAdapter:
             log.info("Incoming message handler registered with MTProto client")
         else:
             log.warning("Cannot set message handler - MTProto client not available")
+
+    def set_read_status_handler(self, handler: callable) -> None:
+        """
+        Set handler for message read events from Telegram via MTProto.
+
+        The handler will be called with ReadEventInfo for each read event.
+        This is used to sync read status from Telegram to WellWon.
+        """
+        if self._mtproto_client:
+            self._mtproto_client.set_read_callback(handler)
+            log.info("Read status handler registered with MTProto client")
+        else:
+            log.warning("Cannot set read handler - MTProto client not available")
 
     # =========================================================================
     # MESSAGING (Bot API)
@@ -245,6 +258,54 @@ class TelegramAdapter:
             return None
 
         return await self._bot_client.get_file_url(file_id)
+
+    # =========================================================================
+    # READ STATUS (MTProto)
+    # =========================================================================
+
+    async def mark_messages_read(
+        self,
+        chat_id: int,
+        max_id: int = 0,
+    ) -> bool:
+        """
+        Mark messages as read in a Telegram chat.
+
+        Args:
+            chat_id: Telegram chat ID (as stored in DB, without -100 prefix)
+            max_id: Mark all messages up to this ID as read (0 = all messages)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self._mtproto_client:
+            log.warning("Cannot mark messages read - MTProto client not available")
+            return False
+
+        return await self._mtproto_client.mark_messages_read(chat_id, max_id)
+
+    async def mark_topic_messages_read(
+        self,
+        group_id: int,
+        topic_id: int,
+        max_id: int = 0,
+    ) -> bool:
+        """
+        Mark messages as read in a Telegram forum topic.
+
+        Args:
+            group_id: Telegram group ID (as stored in DB, without -100 prefix)
+            topic_id: Forum topic ID
+            max_id: Mark all messages up to this ID as read (0 = all messages)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self._mtproto_client:
+            log.warning("Cannot mark topic messages read - MTProto client not available")
+            return False
+
+        return await self._mtproto_client.mark_topic_messages_read(group_id, topic_id, max_id)
 
     # =========================================================================
     # WEBHOOK HANDLING (Bot API)

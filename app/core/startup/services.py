@@ -209,6 +209,52 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
             telegram_adapter.set_incoming_message_handler(handle_incoming_telegram_message)
             logger.info("MTProto incoming message handler registered")
 
+            # Register read status handler for syncing Telegram read status to WellWon
+            from app.infra.telegram.mtproto_client import ReadEventInfo
+            from app.chat.commands import MarkMessagesAsReadCommand
+
+            async def handle_telegram_read_event(read_info: ReadEventInfo):
+                """Handle read event from Telegram and sync to WellWon"""
+                logger.info(
+                    f"Received Telegram read event: chat_id={read_info.chat_id}, "
+                    f"max_id={read_info.max_id}, is_outbox={read_info.is_outbox}"
+                )
+                try:
+                    # Only process outbox events (when someone else reads our messages)
+                    # inbox events mean WE read messages, which shouldn't trigger a sync back
+                    if not read_info.is_outbox:
+                        logger.debug("Ignoring inbox read event (we read their messages)")
+                        return
+
+                    # Find WellWon chat by Telegram chat ID
+                    from app.chat.queries import GetChatByTelegramIdQuery
+                    query = GetChatByTelegramIdQuery(
+                        telegram_chat_id=read_info.chat_id,
+                        telegram_topic_id=None,  # Will match any topic in this group
+                    )
+                    chat_detail = await app.state.query_bus.query(query)
+
+                    if not chat_detail:
+                        logger.debug(f"No chat found for telegram_chat_id={read_info.chat_id}")
+                        return
+
+                    logger.info(
+                        f"Syncing Telegram read status to WellWon chat {chat_detail.id}: "
+                        f"telegram_max_id={read_info.max_id}"
+                    )
+
+                    # TODO: Map telegram_message_id to WellWon message_id
+                    # For now, just log the event
+                    # The full implementation would:
+                    # 1. Query messages with telegram_message_id <= max_id
+                    # 2. Mark those messages as read for the chat participants
+
+                except Exception as e:
+                    logger.error(f"Error handling Telegram read event: {e}", exc_info=True)
+
+            telegram_adapter.set_read_status_handler(handle_telegram_read_event)
+            logger.info("MTProto read status handler registered")
+
             # NOTE: Polling setup is deferred to after CQRS handlers are registered
             # See start_telegram_polling() which is called from lifespan.py Phase 10
 

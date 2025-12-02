@@ -439,7 +439,7 @@ def create_redpanda_adapter_for_worker(
 
     # Get event bus config
     if not event_bus_config:
-        from app.config.eventbus_transport_config import event_bus_config as default_config
+        from app.config.eventbus_config import event_bus_config as default_config
         event_bus_config = default_config
 
     # Create consumer config from worker settings

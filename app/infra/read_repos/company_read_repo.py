@@ -190,14 +190,26 @@ class CompanyReadRepo:
         company_id: uuid.UUID,
         updated_at: Optional[datetime] = None,
     ) -> None:
-        """Hard delete (mark as deleted) a company"""
+        """Hard delete a company and all related data (permanent deletion)"""
+        # Delete user-company relationships first (FK constraint)
         await pg_client.execute(
-            """
-            UPDATE companies
-            SET is_deleted = true, is_active = false, updated_at = $1, version = version + 1
-            WHERE id = $2
-            """,
-            updated_at or datetime.utcnow(), company_id
+            "DELETE FROM user_companies WHERE company_id = $1",
+            company_id
+        )
+        # Delete company balance transactions
+        await pg_client.execute(
+            "DELETE FROM company_balance_transactions WHERE company_id = $1",
+            company_id
+        )
+        # Delete telegram supergroups linked to this company
+        await pg_client.execute(
+            "DELETE FROM telegram_supergroups WHERE company_id = $1",
+            company_id
+        )
+        # Finally delete the company itself
+        await pg_client.execute(
+            "DELETE FROM companies WHERE id = $1",
+            company_id
         )
 
     @staticmethod

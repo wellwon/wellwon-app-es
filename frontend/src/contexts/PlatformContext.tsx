@@ -5,6 +5,12 @@ import { getAvailableSections, getDefaultSectionForUser, getUserTheme, isUserAll
 import type { Company } from '@/types/realtime-chat';
 import type { SectionConfig as PlatformSectionConfig } from '@/types/platform';
 import { logger } from '@/utils/logger';
+import {
+  useSidebarCollapsed,
+  useIsLightTheme,
+  useSelectedCompany,
+  usePlatformActions,
+} from '@/stores/usePlatformStore';
 
 export type PlatformSection = SectionId;
 
@@ -33,18 +39,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const navigate = useNavigate();
   const { profile } = useAuth();
   const [activeSection, setActiveSectionState] = useState<PlatformSection>('chat');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    const saved = localStorage.getItem('ww-platform-sidebar-collapsed');
-    return saved === 'true';
-  });
-  const [isInitialized, setIsInitialized] = useState(false);
-  const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
-  const [companyInitialized, setCompanyInitialized] = useState(false);
-  // Light theme support (like Declarant page - content is light, sidebar stays dark)
-  const [isLightTheme, setIsLightTheme] = useState(() => {
-    const saved = localStorage.getItem('ww-platform-light-theme');
-    return saved === 'true';
-  });
+
+  // Platform UI state from Zustand store (persisted automatically)
+  const sidebarCollapsed = useSidebarCollapsed();
+  const isLightTheme = useIsLightTheme();
+  const selectedCompany = useSelectedCompany();
+  const platformActions = usePlatformActions();
+
+  // Derive companyInitialized from store hydration (Zustand persist handles this)
+  const companyInitialized = true; // Store is hydrated synchronously
 
   // Get user type - simplified to just isDeveloper boolean
   const isDeveloper = profile?.is_developer || false;
@@ -93,60 +96,28 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [isDeveloper, activeSection, navigate]);
 
-  // Загрузка состояния из localStorage (только один раз)
-  useEffect(() => {
-    if (isInitialized) return;
+  // Wrapper for setSidebarCollapsed to maintain context API compatibility
+  const setSidebarCollapsed = useCallback((collapsed: boolean) => {
+    platformActions.setSidebarCollapsed(collapsed);
+  }, [platformActions]);
 
-    try {
-      const savedCompany = localStorage.getItem('ww-platform-selected-company');
-      if (savedCompany) {
-        try {
-          const company = JSON.parse(savedCompany);
-          // Security: Only store company ID and name, not full object
-          if (company && company.id && company.name) {
-            logger.debug('Restored company from localStorage', { companyId: company.id, component: 'PlatformContext' });
-            setSelectedCompany(company);
-          } else {
-            localStorage.removeItem('ww-platform-selected-company');
-          }
-        } catch (error) {
-          logger.error('Error restoring company from localStorage', error, { component: 'PlatformContext' });
-          localStorage.removeItem('ww-platform-selected-company');
-        }
-      }
-      setCompanyInitialized(true);
-    } catch (error) {
-      logger.error('Error loading platform state', error, { component: 'PlatformContext' });
-    }
-
-    setIsInitialized(true);
-  }, [isInitialized]);
-
-  // Сохранение состояния в localStorage только если инициализирован
-  useEffect(() => {
-    if (!isInitialized) return;
-    localStorage.setItem('ww-platform-sidebar-collapsed', JSON.stringify(sidebarCollapsed));
-  }, [sidebarCollapsed, isInitialized]);
-
-  // Сохранение выбранной компании в localStorage (только ID и название)
-  useEffect(() => {
-    if (!isInitialized) return;
-    if (selectedCompany) {
-      // Security: Store only essential data (no sensitive company details)
-      const companyToStore = {
-        id: selectedCompany.id,
-        name: selectedCompany.name,
-        company_type: selectedCompany.company_type
-      };
-      localStorage.setItem('ww-platform-selected-company', JSON.stringify(companyToStore));
-    } else {
-      localStorage.removeItem('ww-platform-selected-company');
-    }
-  }, [selectedCompany, isInitialized]);
-
+  // Wrapper for toggleSidebar
   const toggleSidebar = useCallback(() => {
-    setSidebarCollapsed(!sidebarCollapsed);
-  }, [sidebarCollapsed]);
+    platformActions.toggleSidebar();
+  }, [platformActions]);
+
+  // Wrapper for setSelectedCompany - accepts Company and extracts minimal data
+  const setSelectedCompany = useCallback((company: Company | null) => {
+    if (company) {
+      platformActions.setSelectedCompany({
+        id: company.id,
+        name: company.name,
+        company_type: company.company_type,
+      });
+    } else {
+      platformActions.clearCompany();
+    }
+  }, [platformActions]);
 
   // Toggle theme function (light/dark for content area, sidebar stays dark)
   // Disables transitions for instant theme switch
@@ -154,9 +125,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // Add no-transitions class to body to disable all transitions during theme change
     document.body.classList.add('no-transitions');
 
-    const newValue = !isLightTheme;
-    setIsLightTheme(newValue);
-    localStorage.setItem('ww-platform-light-theme', String(newValue));
+    platformActions.toggleTheme();
 
     // Remove no-transitions class after a brief moment to re-enable transitions
     requestAnimationFrame(() => {
@@ -164,7 +133,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         document.body.classList.remove('no-transitions');
       });
     });
-  }, [isLightTheme]);
+  }, [platformActions]);
 
   // Функция для изменения активной секции с обновлением URL
   const setActiveSection = useCallback((newSection: PlatformSection, newChatId?: string) => {
@@ -185,13 +154,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     userTheme,
     availableSections,
     isDeveloper,
-    selectedCompany,
+    // Cast minimal stored company to Company type (consumers only use id, name, company_type)
+    selectedCompany: selectedCompany as Company | null,
     setSelectedCompany,
     companyInitialized,
     chatId,
     isLightTheme,
     toggleTheme
-  }), [activeSection, setActiveSection, sidebarCollapsed, toggleSidebar, userTheme, availableSections, isDeveloper, selectedCompany, companyInitialized, chatId, isLightTheme, toggleTheme]);
+  }), [activeSection, setActiveSection, sidebarCollapsed, setSidebarCollapsed, toggleSidebar, userTheme, availableSections, isDeveloper, selectedCompany, setSelectedCompany, companyInitialized, chatId, isLightTheme, toggleTheme]);
 
   return (
     <PlatformContext.Provider value={contextValue}>

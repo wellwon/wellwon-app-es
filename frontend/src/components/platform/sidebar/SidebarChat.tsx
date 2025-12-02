@@ -18,6 +18,12 @@ import { OptimizedChatListForSidebar } from '@/components/chat/components/Optimi
 import { logger } from '@/utils/logger';
 import { SupergroupsList } from './SupergroupsList';
 import { GroupsPanel } from './GroupsPanel';
+import {
+  useChatUIStore,
+  useSidebarMode,
+  useGroupsPanelCollapsed,
+  useSelectedSupergroupId,
+} from '@/hooks/chat/useChatUIStore';
 
 const SidebarChat: React.FC = () => {
   const {
@@ -55,76 +61,20 @@ const SidebarChat: React.FC = () => {
   const [editingChatId, setEditingChatId] = React.useState<string | null>(null);
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [showNoChatsHint, setShowNoChatsHint] = React.useState(false);
-  
-  
+
+  // Sidebar state from Zustand store (persisted automatically)
+  const activeMode = useSidebarMode();
+  const groupsPanelCollapsed = useGroupsPanelCollapsed();
+  const selectedSupergroupId = useSelectedSupergroupId();
+  const setSidebarMode = useChatUIStore((s) => s.setSidebarMode);
+  const setGroupsPanelCollapsed = useChatUIStore((s) => s.setGroupsPanelCollapsed);
+  const setSelectedSupergroupId = useChatUIStore((s) => s.setSelectedSupergroupId);
+  const groupPanelWidth = groupsPanelCollapsed ? 80 : 320;
+
   // Ref для отслеживания последнего ручного выбора группы
   const lastManualGroupSelectionRef = useRef<{ supergroupId: number | null; timestamp: number } | null>(null);
   // Ref для автовыбора первого чата при загрузке
   const selectFirstChatOnLoadRef = useRef(false);
-  // Функция для восстановления состояния из localStorage
-  const getInitialSidebarState = () => {
-    try {
-      const saved = localStorage.getItem('ww:chat.sidebar.state');
-      if (!saved) return { mode: 'supergroups', collapsed: false, supergroupId: null };
-
-      const state = JSON.parse(saved);
-      
-      // Проверяем валидность сохранённых данных
-      if (typeof state !== 'object' || state === null) return { mode: 'supergroups', collapsed: false, supergroupId: null };
-      if (state.timestamp && Date.now() - state.timestamp > 7 * 24 * 60 * 60 * 1000) {
-        // Удаляем устаревшие данные (старше 7 дней)
-        localStorage.removeItem('ww:chat.sidebar.state');
-        return { mode: 'supergroups', collapsed: false, supergroupId: null };
-      }
-
-      // Если сохранён mode 'requests', принудительно заменяем на 'supergroups'
-      const savedMode = state.activeMode === 'requests' ? 'supergroups' : state.activeMode;
-
-      return {
-        mode: ['supergroups', 'personal'].includes(savedMode) ? savedMode : 'supergroups',
-        collapsed: typeof state.groupsPanelCollapsed === 'boolean' ? state.groupsPanelCollapsed : false,
-        supergroupId: typeof state.selectedSupergroupId === 'number' ? state.selectedSupergroupId : null
-      };
-    } catch (error) {
-      logger.error('Failed to restore sidebar state from localStorage', error, { component: 'SidebarChat' });
-      return { mode: 'supergroups', collapsed: false, supergroupId: null };
-    }
-  };
-
-  // Инициализация состояния напрямую из localStorage
-  const initialState = getInitialSidebarState();
-  const [activeMode, setActiveMode] = React.useState<'supergroups' | 'personal'>(initialState.mode as 'supergroups' | 'personal');
-  const [groupsPanelCollapsed, setGroupsPanelCollapsed] = React.useState(initialState.collapsed);
-  const [selectedSupergroupId, setSelectedSupergroupId] = React.useState<number | null>(initialState.supergroupId);
-  const groupPanelWidth = groupsPanelCollapsed ? 80 : 320;
-
-  // Ref для предотвращения циклических обновлений
-  const isRestoringState = useRef(false);
-
-  // LocalStorage key для сохранения состояния сайдбара
-  const SIDEBAR_STATE_KEY = 'ww:chat.sidebar.state';
-
-  // Функция для сохранения состояния в localStorage
-  const saveSidebarState = React.useCallback((
-    supergroupId: number | null,
-    collapsed: boolean,
-    mode: 'supergroups' | 'personal'
-  ) => {
-    if (isRestoringState.current) return;
-    
-    try {
-      const state = {
-        selectedSupergroupId: supergroupId,
-        groupsPanelCollapsed: collapsed,
-        activeMode: mode,
-        timestamp: Date.now()
-      };
-      localStorage.setItem(SIDEBAR_STATE_KEY, JSON.stringify(state));
-      logger.debug('Sidebar state saved', { state, component: 'SidebarChat' });
-    } catch (error) {
-      logger.error('Failed to save sidebar state to localStorage', error, { component: 'SidebarChat' });
-    }
-  }, [SIDEBAR_STATE_KEY]);
 
 
   // Ref to track last synced chat id
@@ -134,7 +84,7 @@ const SidebarChat: React.FC = () => {
   // автоматически показываем темы этой группы (только при смене активного чата)
   // НО уважаем ручной выбор группы пользователем
   useEffect(() => {
-    if (!activeChat || isRestoringState.current) return;
+    if (!activeChat) return;
 
     // Prevent running if we already synced this chat
     if (lastSyncedChatIdRef.current === activeChat.id) return;
@@ -157,7 +107,7 @@ const SidebarChat: React.FC = () => {
     if (chat?.telegram_supergroup_id) {
       // У активного чата есть supergroup - настраиваем UI для отображения тем этой группы
       setSelectedSupergroupId(chat.telegram_supergroup_id);
-      setActiveMode('supergroups');
+      setSidebarMode('supergroups');
 
       // Устанавливаем scope только если supergroup изменилась
       if (selectedSupergroupId !== chat.telegram_supergroup_id) {
@@ -208,7 +158,7 @@ const SidebarChat: React.FC = () => {
   // Синхронизация scope с визуально выбранной группой на старте (когда нет активного чата)
   useEffect(() => {
     // Выполняем только если нет активного чата, но есть визуально выбранная supergroup
-    if (activeChat || selectedSupergroupId === null || isRestoringState.current) return;
+    if (activeChat || selectedSupergroupId === null) return;
 
     // Prevent infinite loop - only sync if supergroup actually changed
     if (scopeSyncedRef.current === selectedSupergroupId) return;
@@ -238,14 +188,7 @@ const SidebarChat: React.FC = () => {
     return () => window.removeEventListener('manualGroupSelection', handleManualGroupSelection as EventListener);
   }, []);
 
-  // Сохранение состояния при изменениях (с дебаунсом)
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      saveSidebarState(selectedSupergroupId, groupsPanelCollapsed, activeMode);
-    }, 500);
-
-    return () => clearTimeout(timeoutId);
-  }, [selectedSupergroupId, groupsPanelCollapsed, activeMode, saveSidebarState]);
+  // Note: State persistence is handled automatically by Zustand persist middleware
 
   // Преобразуем realtime чаты в формат для отображения (мемоизировано)
   const conversations = useMemo(() => chats.map(chat => {
@@ -540,9 +483,9 @@ const SidebarChat: React.FC = () => {
   const handleModeChange = (mode: 'supergroups' | 'personal') => {
     if (mode === 'supergroups') {
       setGroupsPanelCollapsed(false);
-      setActiveMode('supergroups');
+      setSidebarMode('supergroups');
     } else {
-      setActiveMode(mode);
+      setSidebarMode(mode);
       setGroupsPanelCollapsed(true);
       setSelectedSupergroupId(null);
     }

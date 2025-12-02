@@ -78,7 +78,7 @@ export function useLogout() {
       }
     },
     onSuccess: () => {
-      // Clear tokens
+      // Clear tokens (also clears cached profile via Zustand)
       clearTokens();
 
       // Clear all auth-related queries

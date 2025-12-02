@@ -1,53 +1,54 @@
 # =============================================================================
 # File: app/config/storage_config.py
 # Description: MinIO/S3 storage configuration
+# UPDATED: Using BaseConfig pattern with Pydantic v2
 # =============================================================================
 
-from pydantic_settings import BaseSettings
+from functools import lru_cache
+from pydantic import Field, SecretStr
+from pydantic_settings import SettingsConfigDict
+
+from app.common.base.base_config import BaseConfig
 
 
-class StorageConfig(BaseSettings):
+class StorageConfig(BaseConfig):
     """
     Storage configuration for MinIO/S3.
-
-    Environment variables (prefix: STORAGE_):
-        STORAGE_ENDPOINT_URL - MinIO/S3 endpoint
-        STORAGE_ACCESS_KEY - Access key
-        STORAGE_SECRET_KEY - Secret key
-        STORAGE_REGION - AWS region
-        STORAGE_BUCKET_NAME - Bucket name
-        STORAGE_USE_SSL - Use SSL/TLS
-        STORAGE_PUBLIC_URL - Public URL for file access
-        STORAGE_CONNECT_TIMEOUT - Connection timeout (seconds)
-        STORAGE_READ_TIMEOUT - Read timeout (seconds)
-        STORAGE_MAX_POOL_CONNECTIONS - Max connection pool size
-        STORAGE_MAX_RETRIES - Max retry attempts
     """
 
-    endpoint_url: str = "http://localhost:9000"
-    access_key: str = "minioadmin"
-    secret_key: str = "minioadmin"
-    region: str = "us-east-1"
-    bucket_name: str = "wellwon"
-    use_ssl: bool = False
-    public_url: str = "http://localhost:9000/wellwon"
+    model_config = SettingsConfigDict(
+        **BaseConfig.model_config,
+        env_prefix='STORAGE_',
+    )
 
-    # Performance settings (retry handled by reliability package)
-    connect_timeout: int = 5
-    read_timeout: int = 30
-    max_pool_connections: int = 25
+    endpoint_url: str = Field(default="http://localhost:9000", description="MinIO/S3 endpoint")
+    access_key: SecretStr = Field(default=SecretStr("minioadmin"), description="Access key")
+    secret_key: SecretStr = Field(default=SecretStr("minioadmin"), description="Secret key")
+    region: str = Field(default="us-east-1", description="AWS region")
+    bucket_name: str = Field(default="wellwon", description="Bucket name")
+    use_ssl: bool = Field(default=False, description="Use SSL/TLS")
+    public_url: str = Field(default="http://localhost:9000/wellwon", description="Public URL")
 
-    class Config:
-        env_prefix = "STORAGE_"
+    # Performance settings
+    connect_timeout: int = Field(default=5, description="Connection timeout (seconds)")
+    read_timeout: int = Field(default=30, description="Read timeout (seconds)")
+    max_pool_connections: int = Field(default=25, description="Max connection pool size")
+
+    def get_access_key(self) -> str:
+        """Get access key as plain string"""
+        return self.access_key.get_secret_value()
+
+    def get_secret_key(self) -> str:
+        """Get secret key as plain string"""
+        return self.secret_key.get_secret_value()
 
 
-# Singleton instance
-_storage_config: StorageConfig | None = None
-
-
+@lru_cache(maxsize=1)
 def get_storage_config() -> StorageConfig:
-    """Get storage configuration singleton"""
-    global _storage_config
-    if _storage_config is None:
-        _storage_config = StorageConfig()
-    return _storage_config
+    """Get storage configuration singleton (cached)."""
+    return StorageConfig()
+
+
+def reset_storage_config() -> None:
+    """Reset config singleton (for testing)."""
+    get_storage_config.cache_clear()

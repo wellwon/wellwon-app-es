@@ -296,6 +296,18 @@ class IncomingMessage:
     voice_duration: Optional[int] = None
 
 
+@dataclass
+class ReadEventInfo:
+    """
+    Information about a message read event from Telegram.
+
+    Used to sync read status from Telegram to WellWon.
+    """
+    chat_id: int  # Telegram chat ID (stored format, without -100 prefix)
+    max_id: int  # Messages up to this ID were read
+    is_outbox: bool  # True if others read your messages, False if you read theirs
+
+
 class TelegramMTProtoClient:
     """
     Telegram MTProto client for user-level operations.
@@ -319,6 +331,7 @@ class TelegramMTProtoClient:
         self._connected = False
         self._bots_config = DEFAULT_BOTS_CONFIG
         self._message_callback: Optional[Callable] = None
+        self._read_callback: Optional[Callable] = None  # Callback for message read events
         self._update_task: Optional[asyncio.Task] = None
         self._polling_task: Optional[asyncio.Task] = None
         self._monitored_chats: Dict[int, int] = {}  # telegram_chat_id -> last_message_id
@@ -395,6 +408,14 @@ class TelegramMTProtoClient:
 
             log.info("MTProto message handler registered")
             print("[MTPROTO] Message handler registered")
+
+            # Register MessageRead handler (for syncing read status from Telegram to WellWon)
+            @self._client.on(events.MessageRead)
+            async def handle_message_read(event):
+                await self._handle_message_read(event)
+
+            log.info("MTProto MessageRead handler registered")
+            print("[MTPROTO] MessageRead handler registered")
 
             # Start the update loop in a background task
             # This is required for Telethon to actually receive new messages
@@ -519,6 +540,18 @@ class TelegramMTProtoClient:
         """Set callback for incoming messages"""
         self._message_callback = callback
         log.info("MTProto message callback registered")
+
+    def set_read_callback(self, callback: Callable) -> None:
+        """
+        Set callback for message read events from Telegram.
+
+        The callback will be called with a ReadEventInfo dataclass containing:
+        - chat_id: Telegram chat ID
+        - max_id: Message ID up to which messages were read
+        - is_outbox: True if others read your messages, False if you read theirs
+        """
+        self._read_callback = callback
+        log.info("MTProto read callback registered")
 
     def add_monitored_chat(self, telegram_chat_id: int, last_message_id: int = 0) -> None:
         """
@@ -979,6 +1012,60 @@ class TelegramMTProtoClient:
 
         except (AttributeError, TypeError, ValueError) as msg_err:
             log.error(f"Error handling incoming message: {msg_err}", exc_info=True)
+
+    async def _handle_message_read(self, event) -> None:
+        """
+        Handle MessageRead event from Telegram.
+
+        This is called by Telethon when messages are marked as read.
+        We forward this to the registered callback to sync read status to WellWon.
+        """
+        try:
+            chat_id = event.chat_id
+            max_id = event.max_id
+            is_outbox = getattr(event, 'outbox', False)
+
+            # Convert chat_id to stored format (remove -100 prefix if present)
+            stored_chat_id = self._from_telegram_peer_id(chat_id)
+
+            log.info(
+                f"MTProto MessageRead: chat_id={stored_chat_id}, max_id={max_id}, "
+                f"is_outbox={is_outbox}"
+            )
+
+            # Create ReadEventInfo
+            read_info = ReadEventInfo(
+                chat_id=stored_chat_id,
+                max_id=max_id,
+                is_outbox=is_outbox,
+            )
+
+            # Forward to callback if registered
+            if self._read_callback is not None:
+                await self._read_callback(read_info)
+            else:
+                log.debug("No read callback registered, MessageRead event ignored")
+
+        except Exception as e:
+            log.error(f"Error handling MessageRead event: {e}", exc_info=True)
+
+    @staticmethod
+    def _from_telegram_peer_id(peer_id: int) -> int:
+        """
+        Convert a Telegram peer ID to stored format (without -100 prefix).
+
+        Args:
+            peer_id: Full Telegram peer ID (may have -100 prefix)
+
+        Returns:
+            Stored format ID (without -100 prefix)
+        """
+        if peer_id < 0:
+            # Check if it has the -100 prefix
+            peer_str = str(peer_id)
+            if peer_str.startswith("-100"):
+                return int(peer_str[4:])  # Remove "-100" prefix
+        return abs(peer_id)
 
     @staticmethod
     def _to_telegram_peer_id(group_id: int) -> int:
@@ -1728,6 +1815,89 @@ class TelegramMTProtoClient:
 
         except Exception as e:
             log.error(f"Failed to update user restrictions: {e}", exc_info=True)
+            return False
+
+    # =========================================================================
+    # Read Status Methods
+    # =========================================================================
+
+    async def mark_messages_read(
+        self,
+        chat_id: int,
+        max_id: int = 0,
+    ) -> bool:
+        """
+        Mark messages as read in a Telegram chat.
+
+        Uses Telethon's send_read_acknowledge which wraps messages.readHistory.
+        This marks all messages up to max_id as read.
+
+        Args:
+            chat_id: Telegram chat ID (as stored in DB, without -100 prefix)
+            max_id: Mark all messages up to this ID as read (0 = all messages)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not await self._ensure_connected():
+            return False
+
+        try:
+            peer_id = TelegramMTProtoClient._to_telegram_peer_id(chat_id)
+            entity = await self._client.get_entity(peer_id)
+
+            # send_read_acknowledge marks messages as read
+            # If max_id=0 or None, it marks all messages as read
+            await self._client.send_read_acknowledge(
+                entity=entity,
+                max_id=max_id if max_id > 0 else None,
+            )
+
+            log.info(f"Marked messages as read in chat {chat_id} up to {max_id}")
+            return True
+
+        except Exception as e:
+            log.error(f"Failed to mark messages as read in chat {chat_id}: {e}", exc_info=True)
+            return False
+
+    async def mark_topic_messages_read(
+        self,
+        group_id: int,
+        topic_id: int,
+        max_id: int = 0,
+    ) -> bool:
+        """
+        Mark messages as read in a Telegram forum topic.
+
+        Args:
+            group_id: Telegram group ID (as stored in DB, without -100 prefix)
+            topic_id: Forum topic ID
+            max_id: Mark all messages up to this ID as read (0 = all messages)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not await self._ensure_connected():
+            return False
+
+        try:
+            from telethon.tl.functions.messages import ReadDiscussionRequest
+
+            peer_id = TelegramMTProtoClient._to_telegram_peer_id(group_id)
+            group = await self._client.get_entity(peer_id)
+
+            # ReadDiscussionRequest marks messages in a forum topic as read
+            await self._client(ReadDiscussionRequest(
+                peer=group,
+                msg_id=topic_id,  # Topic's thread message ID
+                read_max_id=max_id if max_id > 0 else 2147483647,  # Max int for "all"
+            ))
+
+            log.info(f"Marked messages as read in group {group_id} topic {topic_id} up to {max_id}")
+            return True
+
+        except Exception as e:
+            log.error(f"Failed to mark topic messages as read: {e}", exc_info=True)
             return False
 
     # =========================================================================

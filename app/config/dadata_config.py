@@ -1,29 +1,33 @@
 # =============================================================================
 # File: app/config/dadata_config.py — DaData API Configuration
+# UPDATED: Using BaseConfig pattern with Pydantic v2
 # =============================================================================
 
-import os
-import logging
-from dataclasses import dataclass
-from typing import Optional
+from functools import lru_cache
+from pydantic import Field, SecretStr
+from pydantic_settings import SettingsConfigDict
 
-log = logging.getLogger("wellwon.config.dadata")
+from app.common.base.base_config import BaseConfig
+from app.config.logging_config import get_logger
+
+log = get_logger("wellwon.config.dadata")
 
 
-@dataclass
-class DaDataConfig:
+class DaDataConfig(BaseConfig):
     """DaData API configuration"""
-    api_key: str
-    secret_key: str
-    base_url: str = "https://suggestions.dadata.ru/suggestions/api/4_1/rs"
-    timeout_seconds: int = 10
 
-    def __post_init__(self):
-        """Validate configuration"""
-        if not self.api_key:
-            raise ValueError("DADATA_API_KEY is required")
-        if not self.secret_key:
-            raise ValueError("DADATA_SECRET_KEY is required")
+    model_config = SettingsConfigDict(
+        **BaseConfig.model_config,
+        env_prefix='DADATA_',
+    )
+
+    api_key: SecretStr = Field(default=SecretStr(""), description="DaData API key")
+    secret_key: SecretStr = Field(default=SecretStr(""), description="DaData secret key")
+    base_url: str = Field(
+        default="https://suggestions.dadata.ru/suggestions/api/4_1/rs",
+        description="DaData base URL"
+    )
+    timeout_seconds: int = Field(default=10, description="Request timeout")
 
     @property
     def find_by_id_url(self) -> str:
@@ -35,35 +39,35 @@ class DaDataConfig:
         """URL for suggest/party endpoint"""
         return f"{self.base_url}/suggest/party"
 
+    def get_api_key(self) -> str:
+        """Get API key as plain string"""
+        return self.api_key.get_secret_value()
 
-# Global config instance
-_config: Optional[DaDataConfig] = None
+    def get_secret_key(self) -> str:
+        """Get secret key as plain string"""
+        return self.secret_key.get_secret_value()
+
+    def is_configured(self) -> bool:
+        """Check if DaData is properly configured"""
+        return bool(self.get_api_key() and self.get_secret_key())
 
 
+@lru_cache(maxsize=1)
 def get_dadata_config() -> DaDataConfig:
-    """Get DaData configuration (cached)"""
-    global _config
+    """Get DaData configuration singleton (cached)."""
+    config = DaDataConfig()
+    if not config.is_configured():
+        log.warning("DaData API keys not configured. Company lookup will not work.")
+    else:
+        log.info("DaData configuration loaded successfully")
+    return config
 
-    if _config is None:
-        api_key = os.getenv("DADATA_API_KEY", "")
-        secret_key = os.getenv("DADATA_SECRET_KEY", "")
 
-        if not api_key or not secret_key:
-            log.warning("DaData API keys not configured. Company lookup will not work.")
-            # Return config with empty keys - will fail on actual use
-            _config = DaDataConfig(
-                api_key=api_key or "not-configured",
-                secret_key=secret_key or "not-configured"
-            )
-        else:
-            _config = DaDataConfig(api_key=api_key, secret_key=secret_key)
-            log.info("DaData configuration loaded successfully")
-
-    return _config
+def reset_dadata_config() -> None:
+    """Reset config singleton (for testing)."""
+    get_dadata_config.cache_clear()
 
 
 def is_dadata_configured() -> bool:
     """Check if DaData is properly configured"""
-    api_key = os.getenv("DADATA_API_KEY", "")
-    secret_key = os.getenv("DADATA_SECRET_KEY", "")
-    return bool(api_key and secret_key)
+    return get_dadata_config().is_configured()

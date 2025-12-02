@@ -61,15 +61,26 @@ export function useProfile() {
   const queryClient = useQueryClient();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isTokenExpired = useAuthStore((state) => state.isTokenExpired);
+  const cachedProfile = useAuthStore((state) => state.cachedProfile);
+  const cachedProfileUpdatedAt = useAuthStore((state) => state.cachedProfileUpdatedAt);
+  const setCachedProfile = useAuthStore((state) => state.setCachedProfile);
 
-  // Profile query - only runs when authenticated
+  // Profile query with Zustand cache for instant page refresh
   const query = useQuery({
     queryKey: authKeys.profile(),
     queryFn: async () => {
       const data = await fetchMe();
-      return mapToProfile(data);
+      const profile = mapToProfile(data);
+      // Persist to Zustand for instant load on refresh
+      setCachedProfile(profile);
+      return profile;
     },
     enabled: isAuthenticated && !isTokenExpired(),
+
+    // Use cached profile as initial data (instant render on page refresh!)
+    initialData: cachedProfile ?? undefined,
+    initialDataUpdatedAt: cachedProfileUpdatedAt ?? 0,
+
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 30 * 60 * 1000, // 30 minutes
     retry: (failureCount, error: any) => {
@@ -103,7 +114,7 @@ export function useProfile() {
           return oldData;
         }
 
-        return {
+        const updatedProfile = {
           ...oldData,
           is_developer: detail.isDeveloper ?? oldData.is_developer,
           role: detail.role ?? oldData.role,
@@ -112,6 +123,11 @@ export function useProfile() {
           email_verified: detail.emailVerified ?? oldData.email_verified,
           user_type: detail.userType ?? oldData.user_type,
         };
+
+        // Also update Zustand cache
+        setCachedProfile(updatedProfile);
+
+        return updatedProfile;
       });
     };
 
@@ -122,7 +138,7 @@ export function useProfile() {
       window.removeEventListener('userProfileUpdated', handleProfileUpdate as EventListener);
       window.removeEventListener('userAdminChange', handleAdminChange as EventListener);
     };
-  }, [isAuthenticated, queryClient]);
+  }, [isAuthenticated, queryClient, setCachedProfile]);
 
   return {
     profile: query.data ?? null,

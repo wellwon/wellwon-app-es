@@ -11,6 +11,8 @@ import { subscribeWithSelector, persist } from 'zustand/middleware';
 // Types
 // -----------------------------------------------------------------------------
 
+import type { Profile } from '@/types/auth';
+
 interface AuthStorage {
   token: string | null;
   refresh_token: string | null;
@@ -26,6 +28,10 @@ interface AuthStoreState {
   expiresAt: number | null;
   sessionId: string | null;
 
+  // Profile cache (persisted) - for instant page refresh
+  cachedProfile: Profile | null;
+  cachedProfileUpdatedAt: number | null;
+
   // Derived state
   isAuthenticated: boolean;
   isTokenExpired: () => boolean;
@@ -33,6 +39,7 @@ interface AuthStoreState {
   // Actions
   setTokens: (tokens: AuthStorage) => void;
   clearTokens: () => void;
+  setCachedProfile: (profile: Profile) => void;
 
   // Helpers
   getAccessToken: () => string | null;
@@ -51,6 +58,8 @@ export const useAuthStore = create<AuthStoreState>()(
         refreshToken: null,
         expiresAt: null,
         sessionId: null,
+        cachedProfile: null,
+        cachedProfileUpdatedAt: null,
         isAuthenticated: false,
 
         // Check if token is expired
@@ -78,7 +87,17 @@ export const useAuthStore = create<AuthStoreState>()(
             refreshToken: null,
             expiresAt: null,
             sessionId: null,
+            cachedProfile: null,
+            cachedProfileUpdatedAt: null,
             isAuthenticated: false,
+          });
+        },
+
+        // Cache profile for instant page refresh
+        setCachedProfile: (profile) => {
+          set({
+            cachedProfile: profile,
+            cachedProfileUpdatedAt: Date.now(),
           });
         },
 
@@ -97,6 +116,8 @@ export const useAuthStore = create<AuthStoreState>()(
           expiresAt: state.expiresAt,
           sessionId: state.sessionId,
           isAuthenticated: state.isAuthenticated,
+          cachedProfile: state.cachedProfile,
+          cachedProfileUpdatedAt: state.cachedProfileUpdatedAt,
         }),
       }
     )

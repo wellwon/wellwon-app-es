@@ -48,6 +48,12 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import {
+  useDeclarantUIStore,
+  useDeclarantIsDark,
+  useDeclarantSidebarCollapsed,
+  useDeclarantRowsPerPage,
+} from '@/stores/useDeclarantUIStore';
 
 // =============================================================================
 // Mock Data
@@ -487,19 +493,16 @@ const HeaderBarMock = ({
 // =============================================================================
 
 const DeclarantContent: React.FC = () => {
-  const [isDark, setIsDark] = useState(() => {
-    const saved = localStorage.getItem('declarant_theme');
-    return saved === 'dark';
-  });
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    const saved = localStorage.getItem('declarant_sidebarCollapsed');
-    return saved ? JSON.parse(saved) : false;
-  });
+  // UI state from Zustand store (persisted automatically)
+  const isDark = useDeclarantIsDark();
+  const sidebarCollapsed = useDeclarantSidebarCollapsed();
+  const rowsPerPage = Number(useDeclarantRowsPerPage());
+  const toggleTheme = useDeclarantUIStore((s) => s.toggleTheme);
+  const toggleSidebar = useDeclarantUIStore((s) => s.toggleSidebar);
+  const setRowsPerPage = useDeclarantUIStore((s) => s.setRowsPerPage);
+
+  // Local state (ephemeral - not persisted)
   const [activeSection, setActiveSection] = useState('dashboard');
-  const [rowsPerPage, setRowsPerPage] = useState(() => {
-    const saved = localStorage.getItem('declarant_rowsPerPage');
-    return saved ? Number(saved) : 10;
-  });
   const [currentPage, setCurrentPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -517,18 +520,6 @@ const DeclarantContent: React.FC = () => {
   const [documentFilter, setDocumentFilter] = useState('all');
   const [documentDateFilter, setDocumentDateFilter] = useState('all');
 
-  const toggleTheme = () => {
-    const newValue = !isDark;
-    setIsDark(newValue);
-    localStorage.setItem('declarant_theme', newValue ? 'dark' : 'light');
-  };
-
-  const toggleSidebar = () => {
-    const newValue = !sidebarCollapsed;
-    setSidebarCollapsed(newValue);
-    localStorage.setItem('declarant_sidebarCollapsed', JSON.stringify(newValue));
-  };
-
   // Пагинация
   const totalItems = mockBatches.length;
   const totalPages = Math.ceil(totalItems / rowsPerPage);
@@ -537,10 +528,8 @@ const DeclarantContent: React.FC = () => {
   const paginatedBatches = mockBatches.slice(startIndex, endIndex);
 
   const handleRowsPerPageChange = (value: string) => {
-    const newValue = Number(value);
-    setRowsPerPage(newValue);
+    setRowsPerPage(value); // Store handles persistence
     setCurrentPage(1);
-    localStorage.setItem('declarant_rowsPerPage', value);
   };
 
   const goToPage = (page: number) => {

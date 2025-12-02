@@ -1,12 +1,16 @@
 # =============================================================================
 # File: app/config/redis_config.py
 # Description: Configuration for Redis client with Pydantic v2
+# UPDATED: Using BaseConfig pattern
 # =============================================================================
 import asyncio
+from functools import lru_cache
 from typing import Optional, Tuple, Type, Dict, Any
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import SettingsConfigDict
 from enum import Enum
+
+from app.common.base.base_config import BaseConfig
 
 
 class RedisMode(str, Enum):
@@ -24,7 +28,7 @@ class CircuitBreakerState(str, Enum):
 
 
 # noinspection PyMethodParameters
-class RedisConfig(BaseSettings):
+class RedisConfig(BaseConfig):
     """
     Comprehensive configuration for Redis client.
 
@@ -35,6 +39,11 @@ class RedisConfig(BaseSettings):
     - Performance tuning
     - Monitoring and metrics
     """
+
+    model_config = SettingsConfigDict(
+        **BaseConfig.model_config,
+        env_prefix='REDIS_',
+    )
 
     # =========================================================================
     # Connection Settings
@@ -255,7 +264,7 @@ class RedisConfig(BaseSettings):
     # Security
     # =========================================================================
 
-    redis_password: Optional[str] = Field(
+    redis_password: Optional[SecretStr] = Field(
         default=None,
         description="Redis password"
     )
@@ -284,17 +293,6 @@ class RedisConfig(BaseSettings):
         default=None,
         description="SSL CA certificates file"
     )
-
-    # =========================================================================
-    # Environment Configuration
-    # =========================================================================
-
-    model_config = {
-        "env_prefix": "REDIS_",
-        "env_file": ".env",
-        "case_sensitive": False,
-        "extra": "allow"
-    }
 
     # =========================================================================
     # Validators
@@ -342,7 +340,7 @@ class RedisConfig(BaseSettings):
         }
 
         if self.redis_password:
-            kwargs['password'] = self.redis_password
+            kwargs['password'] = self.redis_password.get_secret_value()
 
         if self.redis_username:
             kwargs['username'] = self.redis_username
@@ -521,17 +519,15 @@ def validate_config(config: RedisConfig) -> None:
 
 
 # =============================================================================
-# Environment Variable Helper
+# Factory Function
 # =============================================================================
 
-def load_redis_config_from_env() -> RedisConfig:
-    """
-    Load Redis configuration from environment variables.
-
-    Environment variables should be prefixed with REDIS_
-    For example:
-    - REDIS_URL=redis://localhost:6379/0
-    - REDIS_MAX_CONNECTIONS=100
-    - REDIS_CIRCUIT_BREAKER_ENABLED=enabled
-    """
+@lru_cache(maxsize=1)
+def get_redis_config() -> RedisConfig:
+    """Get Redis configuration singleton (cached)."""
     return RedisConfig()
+
+
+def reset_redis_config() -> None:
+    """Reset config singleton (for testing)."""
+    get_redis_config.cache_clear()

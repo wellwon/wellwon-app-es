@@ -823,6 +823,12 @@ class EventProcessor:
                         except:
                             continue
 
+                    # DEBUG: Log decorator detection for troubleshooting
+                    log.debug(
+                        f"Decorator check for {event_type} in {domain.name}: "
+                        f"has_decorators={has_projection_decorators}"
+                    )
+
                     if has_projection_decorators:
                         # Use projection decorators (SYNC and ASYNC)
                         from app.infra.event_store.event_envelope import EventEnvelope
@@ -958,6 +964,18 @@ class EventProcessor:
                             self._projection_errors_by_connection[broker_connection_id][domain.name] = 0
 
             if not processed_successfully:
+                # DEBUG: Log why processing failed
+                registered_domains = [d.name for d in domains]
+                domains_with_projector = [d.name for d in domains if d.has_projector()]
+                domains_handling_event = [d.name for d in domains if event_type in d.event_models]
+                log.warning(
+                    f"No domain processed {event_type}: "
+                    f"registered={registered_domains}, "
+                    f"with_projector={domains_with_projector}, "
+                    f"handles_event={domains_handling_event}, "
+                    f"errors={len(processing_errors)}"
+                )
+
                 # No domain could process the event
                 error_msg = f"No domain could process event type '{event_type}' from topic '{topic}'"
                 if processing_errors:

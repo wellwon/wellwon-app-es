@@ -1,6 +1,7 @@
 # app/config/outbox_config.py
 # =============================================================================
 # Outbox Service Configuration - OPTIMIZED FOR LOW LATENCY
+# UPDATED: Using BaseConfig pattern
 # =============================================================================
 
 """
@@ -13,13 +14,15 @@ OPTIMIZED (2025-11-05): Tuned for ~500ms total latency while maintaining
 100% CQRS/ES/DDD architectural compliance.
 """
 
-import os
-from typing import Dict, Optional, Set
+from functools import lru_cache
+from typing import Dict, Set
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import SettingsConfigDict
+
+from app.common.base.base_config import BaseConfig
 
 
-class OutboxConfig(BaseSettings):
+class OutboxConfig(BaseConfig):
     """
     Configuration for Transport Outbox Service.
 
@@ -200,26 +203,30 @@ class OutboxConfig(BaseSettings):
         description="Compress events larger than this (bytes)"
     )
 
-    # =========================================================================
-    # Environment Configuration
-    # =========================================================================
-
-    model_config = {
-        "env_prefix": "OUTBOX_",
-        "env_file": ".env",
-        "case_sensitive": False,
-        "extra": "allow"
-    }
+    model_config = SettingsConfigDict(
+        **BaseConfig.model_config,
+        env_prefix='OUTBOX_',
+    )
 
 
 # =============================================================================
-# Factory Functions
+# Factory Function
 # =============================================================================
 
-def create_default_outbox_config() -> OutboxConfig:
-    """Create default outbox configuration (optimized for latency)"""
+@lru_cache(maxsize=1)
+def get_outbox_config() -> OutboxConfig:
+    """Get outbox configuration singleton (cached)."""
     return OutboxConfig()
 
+
+def reset_outbox_config() -> None:
+    """Reset config singleton (for testing)."""
+    get_outbox_config.cache_clear()
+
+
+# =============================================================================
+# Profile Factory Functions (for specific environments)
+# =============================================================================
 
 def create_production_config() -> OutboxConfig:
     """
@@ -286,16 +293,6 @@ def create_high_throughput_config() -> OutboxConfig:
     )
 
 
-def load_from_env() -> OutboxConfig:
-    """Load configuration from environment variables"""
-    return OutboxConfig()
-
-
-# =============================================================================
-# Default Config Instance
-# =============================================================================
-
-DEFAULT_OUTBOX_CONFIG = create_default_outbox_config()
 
 
 # =============================================================================
