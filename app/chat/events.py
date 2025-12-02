@@ -206,7 +206,12 @@ class MessageReadStatusUpdated(BaseEvent):
 
 @domain_event(category="domain")
 class MessagesMarkedAsRead(BaseEvent):
-    """Event emitted when multiple messages are marked as read (batch)"""
+    """Event emitted when multiple messages are marked as read (batch).
+
+    Bidirectional sync:
+    - source='web': User read on WellWon -> Listener syncs to Telegram
+    - source='telegram': User read on Telegram -> Already synced, no action needed
+    """
     event_type: Literal["MessagesMarkedAsRead"] = "MessagesMarkedAsRead"
     chat_id: uuid.UUID
     user_id: uuid.UUID
@@ -214,6 +219,10 @@ class MessagesMarkedAsRead(BaseEvent):
     read_count: int
     read_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     source: str = "web"  # 'web' or 'telegram' - prevents bidirectional sync loop
+    # Telegram sync data (enriched by command, used by listener)
+    telegram_message_id: Optional[int] = None  # Telegram message ID for sync
+    telegram_chat_id: Optional[int] = None  # From aggregate state
+    telegram_topic_id: Optional[int] = None  # From aggregate state
 
 
 @domain_event(category="domain")

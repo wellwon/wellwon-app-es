@@ -544,7 +544,17 @@ log = logging.getLogger("wellwon.broker_account.lifecycle_handlers")
 
 @command_handler(LinkDiscoveredBrokerAccountCommand)
 class LinkDiscoveredBrokerAccountHandler(BaseCommandHandler):
-    """Handler for linking discovered broker accounts"""
+    """
+    Handler for linking discovered broker accounts.
+
+    DOCUMENTED EXCEPTION: Uses QueryBus to find existing aggregate by external ID.
+    This is necessary because:
+    - Adapter discovers accounts by broker_account_id (external identifier)
+    - We need to find the aggregate ID from external identifier
+    - Alternative: Caller enriches command with aggregate_id after query
+
+    For most handlers, use pure Event Sourcing (load_aggregate, version check).
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -552,6 +562,7 @@ class LinkDiscoveredBrokerAccountHandler(BaseCommandHandler):
             transport_topic="broker_account_events",
             event_store=deps.event_store
         )
+        # EXCEPTION: Query needed to find aggregate by external ID
         self.query_bus = deps.query_bus
         self.aggregate_repository = deps.aggregate_repository
 
@@ -559,7 +570,8 @@ class LinkDiscoveredBrokerAccountHandler(BaseCommandHandler):
         """Link or update discovered broker account"""
         log.info(f"Linking broker account: {command.broker_account_id_from_adapter}")
 
-        # Check if account already exists (CQRS query)
+        # EXCEPTION: Find aggregate by external broker_account_id
+        # (can't use load_aggregate because we don't have our internal aggregate_id)
         existing_account = await self.query_bus.query(GetAccountByDetailsQuery(
             user_id=command.user_id,
             broker_id=command.broker_id_from_adapter,
@@ -1152,45 +1164,56 @@ class PositionSizingConfig:
 ### Good Example: Command Handler
 
 ```python
-# ✅ CORRECT
-@command_handler(CreateAccountCommand)
-class CreateAccountHandler(BaseCommandHandler):
+# ✅ CORRECT - Pure Event Sourcing
+@command_handler(UpdateAccountCommand)
+class UpdateAccountHandler(BaseCommandHandler):
+    """Pure Event Sourcing handler - NO QueryBus!"""
+
     def __init__(self, deps: HandlerDependencies):
         super().__init__(
             event_bus=deps.event_bus,
             transport_topic="broker_account_events",
             event_store=deps.event_store
         )
-        self.query_bus = deps.query_bus  # ✅ Use QueryBus for reads
+        # NO query_bus! Pure handlers don't need it
 
-    async def handle(self, command: CreateAccountCommand) -> UUID:
-        # ✅ Query via QueryBus (CQRS)
-        existing = await self.query_bus.query(GetAccountQuery(...))
+    async def handle(self, command: UpdateAccountCommand) -> UUID:
+        # ✅ Load aggregate from Event Store
+        aggregate = await self.load_aggregate(
+            command.account_id, "BrokerAccount", AccountAggregate
+        )
+
+        # ✅ Check existence via version
+        if aggregate.version == 0:
+            raise ValueError(f"Account {command.account_id} not found")
 
         # ✅ Business logic in aggregate
-        aggregate = AccountAggregate(UUID())
-        aggregate.create_account(...)
+        aggregate.update_settings(...)
 
-        # ✅ Save via repository
-        await self.aggregate_repository.save(aggregate)
-        return aggregate.id
+        # ✅ Publish events
+        await self.publish_events(
+            aggregate=aggregate,
+            aggregate_id=command.account_id,
+            command=command
+        )
+        return command.account_id
 ```
 
 ### Bad Example: Command Handler
 
 ```python
-# ❌ WRONG
-class CreateAccountHandler:
-    def __init__(self, db_client):
-        self.db = db_client  # ❌ Direct database access!
+# ❌ WRONG - QueryBus in command handler
+class UpdateAccountHandler:
+    def __init__(self, deps):
+        self.query_bus = deps.query_bus  # ❌ DON'T DO THIS!
 
     async def handle(self, command):
-        # ❌ Direct SQL query (not CQRS)
-        existing = await self.db.execute("SELECT * FROM accounts WHERE ...")
+        # ❌ Query in command handler (eventual consistency race condition!)
+        existing = await self.query_bus.query(GetAccountQuery(...))
 
-        # ❌ Business logic in handler (not aggregate)
-        if existing:
-            raise ValueError("Account exists")
+        # ❌ Checking via query instead of aggregate version
+        if not existing:
+            raise ValueError("Account not found")
 
         # ❌ Direct database insert (not event sourcing)
         await self.db.execute("INSERT INTO accounts ...")
@@ -1356,7 +1379,8 @@ Use this checklist to ensure your domain is complete:
 - [ ] Value objects use `@dataclass(frozen=True)`
 - [ ] Business logic in aggregates, NOT handlers
 - [ ] All I/O operations are async
-- [ ] Use QueryBus for reads (CQRS compliance)
+- [ ] **Command handlers use load_aggregate() - NO QueryBus!**
+- [ ] QueryBus used in query handlers and routers (READ side only)
 - [ ] Use CommandBus for writes (CQRS compliance)
 
 ### Registration
@@ -1454,7 +1478,7 @@ async def handle(self, command):
     await self.aggregate_repository.save(aggregate)
 ```
 
-### 5. Direct Database Access
+### 5. Direct Database Access in Command Handler
 
 **Problem:**
 ```python
@@ -1466,9 +1490,17 @@ async def handle(self, command):
 **Solution:**
 ```python
 async def handle(self, command):
-    # ✅ Use QueryBus (CQRS)
-    account = await self.query_bus.query(GetAccountQuery(...))
+    # ✅ Load aggregate from Event Store
+    aggregate = await self.load_aggregate(
+        command.account_id, "BrokerAccount", AccountAggregate
+    )
+
+    # ✅ Check existence via version
+    if aggregate.version == 0:
+        raise ValueError("Account not found")
 ```
+
+**Note:** QueryBus is for the READ side (query handlers, routers), NOT for command handlers!
 
 ### 6. Too Many SYNC Events
 

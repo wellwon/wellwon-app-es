@@ -701,14 +701,17 @@ class TelegramEventListener:
         - WellWon -> Telegram: This handler
         - Telegram -> WellWon: incoming_handler.handle_read_event
 
-        Event payload:
+        Event payload (now includes Telegram data from aggregate):
         {
             "chat_id": UUID,
             "user_id": UUID,
             "last_read_message_id": int (Snowflake ID),
             "read_count": int,
             "read_at": datetime,
-            "source": str  # 'web' or 'telegram'
+            "source": str,  # 'web' or 'telegram'
+            "telegram_message_id": int | None,  # For sync (from command)
+            "telegram_chat_id": int | None,     # From aggregate state
+            "telegram_topic_id": int | None,    # From aggregate state
         }
         """
         if not self._initialized or not self._telegram:
@@ -724,60 +727,46 @@ class TelegramEventListener:
 
         try:
             chat_id = event.get("chat_id")
-            last_read_message_id = event.get("last_read_message_id")  # Snowflake ID
-
             if not chat_id:
                 log.debug("No chat_id in MessagesMarkedAsRead event")
                 return
 
-            # Lookup chat to get telegram_chat_id and telegram_topic_id
-            from app.chat.queries import GetChatByIdQuery
-            chat = await self._query_bus.query(
-                GetChatByIdQuery(
-                    chat_id=UUID(chat_id) if isinstance(chat_id, str) else chat_id
-                )
-            )
-
-            if not chat:
-                log.debug(f"Chat {chat_id} not found for read sync")
-                return
-
-            telegram_chat_id = getattr(chat, 'telegram_chat_id', None) or getattr(chat, 'telegram_supergroup_id', None)
-            telegram_topic_id = getattr(chat, 'telegram_topic_id', None)
+            # Get Telegram data directly from event (no query needed!)
+            telegram_chat_id = event.get("telegram_chat_id")
+            telegram_topic_id = event.get("telegram_topic_id")
+            telegram_message_id = event.get("telegram_message_id")
 
             if not telegram_chat_id:
                 log.debug(f"Chat {chat_id} not linked to Telegram, skipping read sync")
                 return
 
-            # Look up the telegram_message_id from the Snowflake message ID
-            max_id = 0  # Default to 0 (mark all as read) if lookup fails
-            if last_read_message_id:
-                telegram_message_id = await self._get_telegram_message_id(
-                    chat_id=UUID(chat_id) if isinstance(chat_id, str) else chat_id,
-                    message_id=last_read_message_id,
-                )
-                if telegram_message_id:
-                    max_id = telegram_message_id
-                    log.debug(f"Found telegram_message_id={max_id} for snowflake={last_read_message_id}")
+            if not telegram_message_id:
+                log.debug(f"No telegram_message_id in event, skipping Telegram sync")
+                return
+
+            log.info(
+                f"Syncing read status to Telegram: chat_id={telegram_chat_id}, "
+                f"topic_id={telegram_topic_id}, max_id={telegram_message_id}"
+            )
 
             if telegram_topic_id:
                 # Forum topic - use topic-specific read method
                 success = await self._telegram.mark_topic_messages_read(
                     group_id=telegram_chat_id,
                     topic_id=telegram_topic_id,
-                    max_id=max_id
+                    max_id=telegram_message_id
                 )
             else:
                 # Regular chat/group
                 success = await self._telegram.mark_messages_read(
                     chat_id=telegram_chat_id,
-                    max_id=max_id
+                    max_id=telegram_message_id
                 )
 
             if success:
                 log.info(
                     f"Synced read status to Telegram: chat={telegram_chat_id}, "
-                    f"topic={telegram_topic_id}, max_id={max_id}"
+                    f"topic={telegram_topic_id}, max_id={telegram_message_id}"
                 )
             else:
                 log.warning(

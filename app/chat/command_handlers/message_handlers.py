@@ -327,14 +327,15 @@ class MarkMessageAsReadHandler(BaseCommandHandler):
 @command_handler(MarkMessagesAsReadCommand)
 class MarkMessagesAsReadHandler(BaseCommandHandler):
     """
-    Handle MarkMessagesAsReadCommand (batch read) with bidirectional Telegram sync.
+    Handle MarkMessagesAsReadCommand (batch read) - Pure Event Sourcing.
 
     When a user marks messages as read in WellWon:
     1. Update aggregate state (idempotent)
-    2. Sync read status to Telegram (if chat is linked)
+    2. Emit MessagesMarkedAsRead event with Telegram sync data
+    3. TelegramListener handles actual sync to Telegram (separate concern)
 
     telegram_message_id comes in the command (enriched by router).
-    telegram_chat_id/topic_id come from aggregate state.
+    telegram_chat_id/topic_id come from aggregate state and are included in event.
     """
 
     def __init__(self, deps: 'HandlerDependencies'):
@@ -343,9 +344,9 @@ class MarkMessagesAsReadHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
+        # NO telegram_adapter - listener handles sync
 
-    async def handle(self, command: MarkMessagesAsReadCommand) -> uuid.UUID:
+    async def handle(self, command: MarkMessagesAsReadCommand) -> int:
         log.debug(f"Marking messages as read in chat {command.chat_id} by {command.user_id}")
 
         chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
@@ -354,11 +355,13 @@ class MarkMessagesAsReadHandler(BaseCommandHandler):
         # For now, use 0 as placeholder - projector will calculate actual count
         read_count = 0
 
+        # Pass telegram_message_id to aggregate - it will include all Telegram data in event
         chat_aggregate.mark_messages_as_read(
             user_id=command.user_id,
             last_read_message_id=command.last_read_message_id,
             read_count=read_count,
             source=command.source,
+            telegram_message_id=command.telegram_message_id,  # For bidirectional sync
         )
 
         # Check if events were actually emitted (idempotency check passed)
@@ -373,65 +376,10 @@ class MarkMessagesAsReadHandler(BaseCommandHandler):
             command=command
         )
 
-        # Bidirectional sync: Mark as read on Telegram if:
-        # 1. Source is web/api (not from Telegram itself)
-        # 2. Chat is linked to Telegram
-        # 3. TelegramAdapter is available
-        source = getattr(command, 'source', 'web')
-        if source != 'telegram' and self.telegram_adapter:
-            await self._sync_read_to_telegram(command, chat_aggregate)
+        # Telegram sync is handled by TelegramListener.on_messages_marked_as_read()
+        # Event contains telegram_chat_id, telegram_topic_id, telegram_message_id
 
         return command.last_read_message_id
-
-    async def _sync_read_to_telegram(
-        self,
-        command: MarkMessagesAsReadCommand,
-        chat_aggregate: ChatAggregate
-    ) -> None:
-        """Sync read status to Telegram (using data from command and aggregate state)"""
-        try:
-            # Get Telegram IDs from aggregate state
-            telegram_chat_id = chat_aggregate.state.telegram_chat_id
-            telegram_topic_id = chat_aggregate.state.telegram_topic_id
-
-            if not telegram_chat_id:
-                log.debug(f"Chat {command.chat_id} not linked to Telegram, skipping read sync")
-                return
-
-            # Get telegram_message_id from command (enriched by router)
-            telegram_message_id = command.telegram_message_id
-
-            if not telegram_message_id:
-                log.debug(f"No telegram_message_id in command, skipping Telegram sync")
-                return
-
-            log.info(
-                f"Syncing read status to Telegram: chat_id={telegram_chat_id}, "
-                f"topic_id={telegram_topic_id}, max_id={telegram_message_id}"
-            )
-
-            if telegram_topic_id:
-                # Forum group with topic
-                success = await self.telegram_adapter.mark_topic_messages_read(
-                    group_id=telegram_chat_id,
-                    topic_id=telegram_topic_id,
-                    max_id=telegram_message_id,
-                )
-            else:
-                # Regular chat or group without topics
-                success = await self.telegram_adapter.mark_messages_read(
-                    chat_id=telegram_chat_id,
-                    max_id=telegram_message_id,
-                )
-
-            if success:
-                log.info(f"Read status synced to Telegram: max_id={telegram_message_id}")
-            else:
-                log.warning(f"Failed to sync read status to Telegram")
-
-        except Exception as e:
-            # Don't fail the command if Telegram sync fails
-            log.error(f"Error syncing read status to Telegram: {e}", exc_info=True)
 
 
 @command_handler(StartTypingCommand)

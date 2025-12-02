@@ -65,6 +65,9 @@ class IncomingTelegramMessage:
     # Reply info
     reply_to_message_id: Optional[int] = None
 
+    # Voice/audio specific
+    voice_duration: Optional[int] = None  # seconds
+
     # Timestamps
     date: Optional[datetime] = None
 
@@ -204,6 +207,7 @@ class TelegramIncomingHandler:
         file_size = None
         file_name = None
         mime_type = None
+        voice_duration = None
 
         if msg.get("text"):
             message_type = "text"
@@ -232,6 +236,7 @@ class TelegramIncomingHandler:
             file_unique_id = voice.get("file_unique_id")
             file_size = voice.get("file_size")
             mime_type = voice.get("mime_type")
+            voice_duration = voice.get("duration")  # Voice duration in seconds
         elif msg.get("video"):
             message_type = "video"
             video = msg["video"]
@@ -278,6 +283,7 @@ class TelegramIncomingHandler:
             file_name=file_name,
             mime_type=mime_type,
             reply_to_message_id=msg.get("reply_to_message", {}).get("message_id"),
+            voice_duration=voice_duration,
             date=date,
             raw_data=msg,
         )
@@ -342,16 +348,12 @@ class TelegramIncomingHandler:
                 content=message.text or "",
                 message_type=message.message_type,
                 file_url=file_url,
+                file_name=message.file_name,
+                file_size=message.file_size,
+                file_type=message.mime_type,
+                voice_duration=message.voice_duration,  # For voice messages
                 source="telegram",  # Mark source so listener ignores it
-                metadata={
-                    "telegram_message_id": message.telegram_message_id,
-                    "telegram_chat_id": message.telegram_chat_id,
-                    "telegram_topic_id": message.telegram_topic_id,
-                    "telegram_user_id": message.telegram_user_id,
-                    "telegram_username": message.telegram_username,
-                    "telegram_file_id": message.file_id,
-                    "telegram_file_unique_id": message.file_unique_id,
-                },
+                telegram_message_id=message.telegram_message_id,  # For bidirectional tracking
             )
 
             result = await self._command_bus.send(command)
@@ -602,6 +604,7 @@ class TelegramIncomingHandler:
                 user_id=user_id,
                 last_read_message_id=wellwon_message_id,
                 source="telegram",  # Prevents sync loop back to Telegram
+                telegram_message_id=read_event.max_id,  # Include for completeness
             )
 
             await self._command_bus.send(command)

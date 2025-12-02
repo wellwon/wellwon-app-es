@@ -523,14 +523,16 @@ class ChatAggregate:
         last_read_message_id: int,  # Snowflake ID (bigint)
         read_count: int,
         source: str = "web",
+        telegram_message_id: Optional[int] = None,  # For bidirectional sync
     ) -> None:
-        """Mark all messages up to a point as read
+        """Mark all messages up to a point as read.
 
         Args:
             user_id: User who read the messages
             last_read_message_id: Snowflake ID of the last read message (bigint)
             read_count: Number of messages marked as read
             source: Origin of read event ('web', 'telegram') - prevents sync loops
+            telegram_message_id: Telegram message ID for syncing (enriched by command)
         """
         # Soft check - don't fail if participant not in aggregate state
         # (may happen with snapshot loading issues or legacy data)
@@ -550,12 +552,17 @@ class ChatAggregate:
             )
             return  # No-op, already at this read position
 
+        # Include Telegram data from aggregate state for listener to use
         event = MessagesMarkedAsRead(
             chat_id=self.id,
             user_id=user_id,
             last_read_message_id=last_read_message_id,
             read_count=read_count,
             source=source,
+            # Telegram sync data - listener will use this instead of querying
+            telegram_message_id=telegram_message_id,
+            telegram_chat_id=self.state.telegram_chat_id,
+            telegram_topic_id=self.state.telegram_topic_id,
         )
         self._apply_and_record(event)
 

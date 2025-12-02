@@ -440,65 +440,69 @@ async def handle(self, command: UpdateCompanyCommand) -> None:
 
 ```python
 # ❌ WRONG - Business logic in handler
-async def handle(self, command: PlaceOrderCommand):
-    order = await self._load_aggregate(command.order_id)
+async def handle(self, command: ActivateCompanyCommand):
+    company = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
 
     # DON'T DO THIS IN HANDLER!
-    if order.status != OrderStatus.PENDING:
-        raise InvalidOrderStateError("Can only place pending orders")
+    if company.state.status != CompanyStatus.PENDING:
+        raise InvalidStateError("Can only activate pending companies")
 
-    order.status = OrderStatus.PLACED  # Direct mutation - NO!
-    order.placed_at = datetime.now(UTC)
+    company.state.status = CompanyStatus.ACTIVE  # Direct mutation - NO!
+    company.state.activated_at = datetime.now(UTC)
 
 # ✅ CORRECT - Business logic in aggregate
-async def handle(self, command: PlaceOrderCommand):
-    order = await self._load_aggregate(command.order_id)
+async def handle(self, command: ActivateCompanyCommand):
+    company = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
+
+    if company.version == 0:
+        raise ValueError("Company not found")
 
     # Delegate to aggregate method
-    order.place(
-        broker_order_id=command.broker_order_id,
-        placed_at=command.placed_at
+    company.activate(
+        activated_by=command.user_id
     )
 
     # Aggregate method handles validation and emits events
+
+    # Publish events
+    await self.publish_events(
+        aggregate=company,
+        aggregate_id=command.company_id,
+        command=command
+    )
 ```
 
 **Aggregate Implementation:**
 
 ```python
-# app/order/aggregate.py
-class Order(Aggregate):
-    def place(
-        self,
-        broker_order_id: str,
-        placed_at: datetime
-    ) -> None:
+# app/company/aggregate.py
+class CompanyAggregate(Aggregate):
+    def activate(self, activated_by: UUID) -> None:
         """
-        Place order with broker
+        Activate company
 
         Business Rules:
-        - Order must be in PENDING state
-        - Must have valid broker_order_id
+        - Company must be in PENDING state
+        - Must have valid owner
         """
         # Validate state
-        if self.status != OrderStatus.PENDING:
-            raise InvalidOrderStateError(
-                f"Cannot place order in {self.status} state"
+        if self.state.status != CompanyStatus.PENDING:
+            raise InvalidStateError(
+                f"Cannot activate company in {self.state.status} state"
             )
 
         # Emit event (applies via _apply)
-        event = OrderPlacedEvent(
-            order_id=self.id,
-            broker_order_id=broker_order_id,
-            placed_at=placed_at
+        event = CompanyActivated(
+            company_id=self.id,
+            activated_by=activated_by,
+            activated_at=datetime.now(UTC)
         )
         self.apply(event)
 
-    def _on_order_placed_event(self, event: OrderPlacedEvent) -> None:
+    def _on_company_activated(self, event: CompanyActivated) -> None:
         """Apply event to state"""
-        self.status = OrderStatus.PLACED
-        self.broker_order_id = event.broker_order_id
-        self.placed_at = event.placed_at
+        self.state.status = CompanyStatus.ACTIVE
+        self.state.activated_at = event.activated_at
 ```
 
 ---
@@ -1142,19 +1146,29 @@ order.add_fill(quantity=Decimal("50"), price=Decimal("150.50"))
 await self.publish_and_commit_events(aggregate=order, ...)
 ```
 
-### 3. Use Query Bus for Reads
+### 3. NEVER Use Query Bus in Command Handlers
 
 ```python
-# ❌ BAD - Direct repository access
-async def handle(self, command: CreateOrderCommand):
-    automation = await self.automation_repo.get_by_id(command.automation_id)
-
-# ✅ GOOD - Query bus (cached, consistent)
-async def handle(self, command: CreateOrderCommand):
-    automation = await self.query_bus.query(
-        GetAutomationQuery(automation_id=command.automation_id)
+# ❌ WRONG - Query bus in command handler
+async def handle(self, command: UpdateCompanyCommand):
+    company = await self.query_bus.query(
+        GetCompanyQuery(company_id=command.company_id)
     )
+    if not company:
+        raise ValueError("Company not found")
+    # This violates CQRS - using read side in write side!
+
+# ✅ CORRECT - Load aggregate from Event Store
+async def handle(self, command: UpdateCompanyCommand):
+    company = await self.load_aggregate(
+        command.company_id, "Company", CompanyAggregate
+    )
+    if company.version == 0:
+        raise ValueError("Company not found")
+    # Pure Event Sourcing - aggregate is source of truth!
 ```
+
+**Remember:** Queries are for the READ side (API endpoints, projections). Commands work with aggregates from Event Store.
 
 ### 4. Optimize Event Replay
 
@@ -1190,120 +1204,145 @@ async def _load_aggregate(self, order_id: UUID) -> Order:
 
 ## Common Mistakes
 
-### Mistake 1: Business Logic in Handler
+### Mistake 1: Using QueryBus in Command Handler (CRITICAL!)
+
+```python
+# ❌ WRONG - Query bus in command handler
+async def handle(self, command: UpdateCompanyCommand):
+    # DON'T DO THIS! Query bus is for READ side only!
+    company = await self.query_bus.query(GetCompanyQuery(company_id=command.company_id))
+    if not company:
+        raise ValueError("Company not found")
+
+    aggregate = CompanyAggregate(company_id=command.company_id)
+    aggregate.update(...)
+
+# ✅ CORRECT - Load aggregate from Event Store
+async def handle(self, command: UpdateCompanyCommand):
+    # Load from Event Store - source of truth
+    aggregate = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
+
+    # Check version instead of querying
+    if aggregate.version == 0:
+        raise ValueError("Company not found")
+
+    aggregate.update(...)
+```
+
+**Why this matters:** QueryBus reads from eventually consistent read models. Your command might make decisions based on stale data!
+
+### Mistake 2: Business Logic in Handler
 
 ```python
 # ❌ WRONG - Logic in handler
-async def handle(self, command: CancelOrderCommand):
-    order = await self._load_aggregate(command.order_id)
+async def handle(self, command: DeactivateCompanyCommand):
+    company = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
 
     # Business logic in handler - NO!
-    if order.status not in [OrderStatus.PENDING, OrderStatus.PLACED]:
-        raise InvalidOrderStateError("Cannot cancel")
+    if company.state.status != CompanyStatus.ACTIVE:
+        raise InvalidStateError("Cannot deactivate")
 
-    order.status = OrderStatus.CANCELLED
-    order.cancelled_at = datetime.now(UTC)
+    company.state.status = CompanyStatus.INACTIVE  # Direct mutation!
+    company.state.deactivated_at = datetime.now(UTC)
 
 # ✅ CORRECT - Logic in aggregate
-async def handle(self, command: CancelOrderCommand):
-    order = await self._load_aggregate(command.order_id)
+async def handle(self, command: DeactivateCompanyCommand):
+    company = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
+
+    if company.version == 0:
+        raise ValueError("Company not found")
 
     # Delegate to aggregate
-    order.cancel(reason=command.reason)
+    company.deactivate(reason=command.reason)
 
-    await self.publish_and_commit_events(...)
+    await self.publish_events(aggregate=company, aggregate_id=command.company_id, command=command)
 ```
 
-### Mistake 2: Forgetting Version Check
+### Mistake 3: Forgetting Existence Check
 
 ```python
 # ❌ WRONG - No version check
-async def handle(self, command: UpdateOrderCommand):
-    order = await self._load_aggregate(command.order_id)
-    order.update(limit_price=command.limit_price)
+async def handle(self, command: UpdateCompanyCommand):
+    company = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
+    # If company doesn't exist, version == 0, but we proceed anyway!
+    company.update(name=command.name)
+    await self.publish_events(...)
 
-    # No expected_version - concurrency issues!
-    await self.publish_and_commit_events(
-        aggregate=order,
-        aggregate_type="order"
-    )
+# ✅ CORRECT - Check version
+async def handle(self, command: UpdateCompanyCommand):
+    company = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
 
-# ✅ CORRECT - Use original version
-async def handle(self, command: UpdateOrderCommand):
-    order = await self._load_aggregate(command.order_id)
-    original_version = order.version  # BEFORE mutation
+    # version == 0 means no events exist = aggregate never created
+    if company.version == 0:
+        raise ValueError(f"Company {command.company_id} not found")
 
-    order.update(limit_price=command.limit_price)
-
-    await self.publish_and_commit_events(
-        aggregate=order,
-        aggregate_type="order",
-        expected_version=original_version  # Optimistic locking
-    )
+    company.update(name=command.name)
+    await self.publish_events(...)
 ```
 
-### Mistake 3: Direct Database Writes
+### Mistake 4: Direct Database Writes
 
 ```python
 # ❌ WRONG - Direct database write
-async def handle(self, command: DeleteOrderCommand):
+async def handle(self, command: DeleteCompanyCommand):
     await self.db.execute(
-        "DELETE FROM orders WHERE id = $1",
-        command.order_id
+        "DELETE FROM companies WHERE id = $1",
+        command.company_id
     )
 
 # ✅ CORRECT - Event sourcing
-async def handle(self, command: DeleteOrderCommand):
-    order = await self._load_aggregate(command.order_id)
+async def handle(self, command: DeleteCompanyCommand):
+    company = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
 
-    # Emit event
-    order.delete()
+    if company.version == 0:
+        raise ValueError("Company not found")
 
-    await self.publish_and_commit_events(
-        aggregate=order,
-        aggregate_type="order"
-    )
+    # Emit event (aggregate marks as deleted)
+    company.delete(reason=command.reason)
 
-    # Projector handles database deletion
+    await self.publish_events(aggregate=company, aggregate_id=command.company_id, command=command)
+
+    # Projector handles database deletion!
 ```
 
-### Mistake 4: Not Handling Saga Context
+### Mistake 5: Not Handling Saga Context
 
 ```python
 # ❌ WRONG - Ignoring saga_id
-async def handle(self, command: CreateOrderCommand):
-    order = Order.create(...)
+async def handle(self, command: CreateCompanyCommand):
+    company = CompanyAggregate(company_id=command.company_id)
+    company.create_new_company(...)
 
     await self.publish_and_commit_events(
-        aggregate=order,
-        aggregate_type="order"
+        aggregate=company,
+        aggregate_type="Company"
         # Missing saga_id!
     )
 
-# ✅ CORRECT - Pass saga context
-async def handle(self, command: CreateOrderCommand):
-    order = Order.create(...)
+# ✅ CORRECT - Pass saga context when present
+async def handle(self, command: CreateCompanyCommand):
+    company = CompanyAggregate(company_id=command.company_id)
+    company.create_new_company(...)
 
     await self.publish_and_commit_events(
-        aggregate=order,
-        aggregate_type="order",
-        saga_id=command.saga_id  # For saga coordination
+        aggregate=company,
+        aggregate_type="Company",
+        saga_id=getattr(command, 'saga_id', None)  # For saga coordination
     )
 ```
 
-### Mistake 5: Synchronous I/O
+### Mistake 6: Synchronous I/O
 
 ```python
 # ❌ WRONG - Blocking call
-async def handle(self, command: CreateOrderCommand):
+async def handle(self, command: UpdateCompanyCommand):
     # Blocks event loop!
-    automation = self.automation_repo.get_by_id_sync(command.automation_id)
+    company = self.company_repo.get_by_id_sync(command.company_id)
 
 # ✅ CORRECT - Async all the way
-async def handle(self, command: CreateOrderCommand):
-    automation = await self.query_bus.query(
-        GetAutomationQuery(automation_id=command.automation_id)
-    )
+async def handle(self, command: UpdateCompanyCommand):
+    # Use async load_aggregate method
+    company = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
 ```
 
 ---
@@ -1312,36 +1351,37 @@ async def handle(self, command: CreateOrderCommand):
 
 When implementing a command handler:
 
-- [ ] Define command as `@dataclass` with validation
+- [ ] Define command as Pydantic model (or `@dataclass`) with validation
 - [ ] Create handler class with `@command_handler` decorator
 - [ ] Inherit from `BaseCommandHandler`
 - [ ] Initialize base with `event_bus`, `transport_topic`, `event_store`
-- [ ] Load or create aggregate
-- [ ] Store original version BEFORE mutations
+- [ ] **DO NOT store query_bus** (unless documented exception)
+- [ ] Use `load_aggregate()` to load from Event Store
+- [ ] Check `aggregate.version == 0` for existence
 - [ ] Delegate business logic to aggregate methods
-- [ ] Handle concurrency with retry logic
-- [ ] Publish events with `publish_and_commit_events`
-- [ ] Include `saga_id` for saga coordination
+- [ ] Publish events with `publish_events` or `publish_and_commit_events`
+- [ ] Include `saga_id` for saga coordination (when applicable)
 - [ ] Write unit and integration tests
-- [ ] Use query bus for reads, command bus for writes
 - [ ] Keep handlers stateless (no instance variables)
 - [ ] Log important operations
 - [ ] Handle errors gracefully
+- [ ] **Document any QueryBus usage as EXCEPTION** in docstring
 
 ---
 
 ## References
 
-- **BaseCommandHandler**: `/Users/silvermpx/PycharmProjects/TradeCore/app/common/base/base_command_handler.py`
-- **Automation Handlers**: `/Users/silvermpx/PycharmProjects/TradeCore/app/automation/command_handlers/lifecycle_handlers.py`
-- **Broker Connection Handlers**: `/Users/silvermpx/PycharmProjects/TradeCore/app/broker_connection/command_handlers/connection_handlers.py`
-- **Batch Handlers**: `/Users/silvermpx/PycharmProjects/TradeCore/app/broker_account/command_handlers/batch_handlers.py`
-- **Event Store**: `/Users/silvermpx/PycharmProjects/TradeCore/app/infra/event_store/kurrentdb_event_store.py`
-- **Command Bus**: `/Users/silvermpx/PycharmProjects/TradeCore/app/infra/cqrs/command_bus.py`
+- **BaseCommandHandler**: `app/common/base/base_command_handler.py`
+- **User Account Handlers**: `app/user_account/command_handlers/`
+- **Company Handlers**: `app/company/command_handlers/`
+- **Chat Handlers**: `app/chat/command_handlers/`
+- **Event Store**: `app/infra/event_store/kurrentdb_event_store.py`
+- **Command Bus**: `app/infra/cqrs/command_bus.py`
+- **Domain Creation Guide**: `docs/reference/01_DOMAIN_CREATION_GUIDE.md`
 
 ---
 
 **Next Steps:**
 - Read [Query Handler Guide](QUERY_HANDLER_GUIDE.md) for read side
 - Read [Projector Guide](PROJECTOR_GUIDE.md) for event projections
-- Review [CQRS Documentation](../cqrs.md) for architecture overview
+- Read [Domain Creation Guide](01_DOMAIN_CREATION_GUIDE.md) for full domain setup
