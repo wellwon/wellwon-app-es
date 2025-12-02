@@ -242,13 +242,12 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
     // Handle messages read - bidirectional (Web ↔ Telegram)
     const handleMessagesRead = (event: CustomEvent) => {
       const data = event.detail;
-      if (data.chat_id !== chatId) return;
+      // Compare as strings since chatId from hook is string, data might have UUID
+      if (String(data.chat_id) !== String(chatId)) return;
 
       logger.debug('WSE: Messages read event received', {
         chatId,
-        messageIds: data.message_ids,
-        readBy: data.read_by,
-        telegramReadAt: data.telegram_read_at,
+        data,
       });
 
       queryClient.setQueryData(
@@ -256,29 +255,41 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
         (oldData: any) => {
           if (!oldData) return oldData;
 
-          // Get the message IDs that were read
-          const readMessageIds = data.message_ids || (data.message_id ? [data.message_id] : []);
-          const readByEntry = data.read_by;
+          // Extract data - handle both formats:
+          // Backend sends: user_id, last_read_message_id, read_at
+          // Also support: read_by object, telegram_read_at
+          const readUserId = data.user_id;
+          const lastReadMessageId = data.last_read_message_id;
+          const readAt = data.read_at || new Date().toISOString();
           const telegramReadAt = data.telegram_read_at;
+
+          // Build read_by entry from user_id if not provided directly
+          const readByEntry = data.read_by || (readUserId ? {
+            user_id: readUserId,
+            read_at: readAt,
+          } : null);
 
           const newPages = oldData.pages.map((page: any) => ({
             ...page,
             messages: page.messages.map((m: Message) => {
-              // Check if this message should be marked as read
-              const shouldUpdate = readMessageIds.includes(m.id) ||
-                                   (data.last_read_message_id &&
-                                    new Date(m.created_at) <= new Date(data.last_read_at));
+              // Mark as read if:
+              // 1. Message ID matches last_read_message_id
+              // 2. Or message was created before/at the read time
+              const messageId = String(m.id);
+              const isLastReadMessage = lastReadMessageId && messageId === String(lastReadMessageId);
+              const isBeforeLastRead = lastReadMessageId &&
+                new Date(m.created_at) <= new Date(readAt);
 
-              if (!shouldUpdate) return m;
+              if (!isLastReadMessage && !isBeforeLastRead) return m;
 
               // Update read status
               const updatedMessage = { ...m };
 
-              // Add read_by entry if provided (WellWon user read)
-              if (readByEntry) {
+              // Add read_by entry (WellWon user read)
+              if (readByEntry && readByEntry.user_id) {
                 const existingReadBy = m.read_by || [];
                 const alreadyRead = existingReadBy.some(
-                  (r: any) => r.user_id === readByEntry.user_id
+                  (r: any) => String(r.user_id) === String(readByEntry.user_id)
                 );
                 if (!alreadyRead) {
                   updatedMessage.read_by = [...existingReadBy, readByEntry];

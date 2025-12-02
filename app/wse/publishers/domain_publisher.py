@@ -411,7 +411,7 @@ class WSEDomainPublisher:
 
             # For message events, publish to ALL participant user topics
             # This enables real-time message delivery to all chat members
-            if event_type in ("MessageSent", "TelegramMessageReceived", "MessageEdited", "MessageDeleted"):
+            if event_type in ("MessageSent", "TelegramMessageReceived", "MessageEdited", "MessageDeleted", "MessagesMarkedAsRead", "MessageSyncedToTelegram"):
                 # Get participant_ids from event (MessageSent includes them to avoid read model race condition)
                 participant_ids = event.get("participant_ids")
                 # Convert UUID objects to strings if needed
@@ -632,9 +632,12 @@ class WSEDomainPublisher:
             # Typing fields
             "typing_user_id": event.get("typing_user_id"),
             "typing_user_name": event.get("typing_user_name"),
-            # Read status
+            # Read status (MessagesMarkedAsRead event fields)
             "read_message_ids": event.get("message_ids"),
             "read_by": event.get("read_by"),
+            "last_read_message_id": event.get("last_read_message_id"),
+            "read_at": event.get("read_at"),
+            "read_count": event.get("read_count"),
             # Telegram integration (full support)
             "telegram_chat_id": event.get("telegram_chat_id"),
             "telegram_topic_id": event.get("telegram_topic_id"),
