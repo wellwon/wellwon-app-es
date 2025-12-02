@@ -44,6 +44,7 @@ from app.chat.queries import (
     GetChatsByUserQuery,
     GetChatParticipantsQuery,
     GetChatMessagesQuery,
+    GetMessageByIdQuery,
     GetUnreadMessagesCountQuery,
     GetUnreadChatsCountQuery,
     SearchChatsQuery,
@@ -657,9 +658,29 @@ async def mark_messages_as_read(
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
 ):
-    """Mark messages as read with retry on concurrency conflicts"""
+    """Mark messages as read with retry on concurrency conflicts.
+
+    Enriches command with telegram_message_id for bidirectional sync.
+    """
     max_retries = 3
     last_error = None
+
+    # Enrich command with telegram_message_id for Telegram sync
+    # Query the message to get its telegram_message_id (if any)
+    telegram_message_id = None
+    try:
+        message = await query_bus.query(
+            GetMessageByIdQuery(
+                chat_id=chat_id,
+                snowflake_id=request.last_read_message_id
+            )
+        )
+        if message:
+            telegram_message_id = message.telegram_message_id
+            log.debug(f"Enriched mark as read with telegram_message_id={telegram_message_id}")
+    except Exception as e:
+        # Don't fail mark as read if enrichment fails - just skip Telegram sync
+        log.debug(f"Could not enrich telegram_message_id: {e}")
 
     for attempt in range(max_retries):
         try:
@@ -667,6 +688,8 @@ async def mark_messages_as_read(
                 chat_id=chat_id,
                 user_id=current_user["user_id"],
                 last_read_message_id=request.last_read_message_id,
+                source="web",  # Explicitly mark as web source
+                telegram_message_id=telegram_message_id,  # For Telegram sync
             )
 
             await command_bus.send(command)
