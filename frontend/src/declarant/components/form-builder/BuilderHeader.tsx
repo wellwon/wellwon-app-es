@@ -77,18 +77,14 @@ export const BuilderHeader: React.FC<BuilderHeaderProps> = ({
         tabInactive: 'text-gray-500 hover:text-gray-900 hover:bg-gray-50',
       };
 
-  // Табы без "Структура" - это экран по умолчанию
-  // Повторное нажатие на Предпросмотр возвращает к структуре
-  const tabs: { key: BuilderTab; label: string; icon?: boolean }[] = [
-    { key: 'preview', label: 'Предпросмотр', icon: true },
+  // Только таб Версии в хедере (Предпросмотр перенесён в левую панель)
+  const tabs: { key: BuilderTab; label: string }[] = [
     { key: 'versions', label: 'Версии' },
   ];
 
-  // Обработчик клика по табу - повторное нажатие на preview возвращает на structure
+  // Обработчик клика по табу - повторное нажатие возвращает на structure
   const handleTabClick = (tabKey: BuilderTab) => {
-    if (tabKey === activeTab && tabKey === 'preview') {
-      onTabChange('structure');
-    } else if (tabKey === activeTab && tabKey === 'versions') {
+    if (tabKey === activeTab) {
       onTabChange('structure');
     } else {
       onTabChange(tabKey);
@@ -99,10 +95,10 @@ export const BuilderHeader: React.FC<BuilderHeaderProps> = ({
   const handleBack = () => {
     if (isDirty) {
       if (window.confirm('Есть несохраненные изменения. Вы уверены, что хотите выйти?')) {
-        navigate('/declarant/references?tab=json-templates', { replace: true });
+        navigate('/platform-pro/declarant?section=references&ref=json-templates', { replace: true });
       }
     } else {
-      navigate('/declarant/references?tab=json-templates', { replace: true });
+      navigate('/platform-pro/declarant?section=references&ref=json-templates', { replace: true });
     }
   };
 
@@ -146,7 +142,6 @@ export const BuilderHeader: React.FC<BuilderHeaderProps> = ({
                   activeTab === tab.key ? theme.tabActive : theme.tabInactive
                 )}
               >
-                {tab.icon && <Eye className="w-4 h-4 inline mr-1.5" />}
                 {tab.label}
               </button>
             ))}

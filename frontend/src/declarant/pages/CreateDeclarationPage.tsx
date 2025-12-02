@@ -3,9 +3,10 @@
  * Интегрирована в DeclarantContent для Platform Pro
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { createDocflow, type CreateDocflowRequest, type DocflowResponse } from '../api';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,6 +32,8 @@ import {
   ArrowUpFromLine,
   Route,
   ChevronDown,
+  Loader2,
+  Send,
 } from 'lucide-react';
 
 // Типы
@@ -363,6 +366,70 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
     if (type === 'text') return colorSet.text;
     if (type === 'bg') return colorSet.bg;
     return colorSet.hoverBg;
+  };
+
+  // ========== Docflow API State ==========
+  const [isCreatingDocflow, setIsCreatingDocflow] = useState(false);
+  const [docflowResponse, setDocflowResponse] = useState<DocflowResponse | null>(null);
+  const [docflowError, setDocflowError] = useState<string | null>(null);
+
+  // Маппинг направления на type для API
+  const directionToType: Record<string, number> = {
+    'IM': 0,  // Импорт
+    'EK': 1,  // Экспорт
+    'TT': 2,  // Транзит (возможно другой код, уточнить в API)
+  };
+
+  // Маппинг таможенных органов (мок-данные -> коды)
+  const customsCodeMap: Record<string, number> = {
+    'central': 10000000,
+    'moscow': 10129000,
+    'sheremetyevo': 10005000,
+    'domodedovo': 10002000,
+    'vnukovo': 10001000,
+    'baltiysk': 10216000,
+    'spb': 10210000,
+  };
+
+  // Функция создания пакета декларации
+  const handleCreateDocflow = async () => {
+    // Валидация обязательных полей
+    if (!createDirection || !createCustomsOffice || !createOrganization || !createDeclarant) {
+      setDocflowError('Заполните все обязательные поля: тип декларации, таможенный орган, организация, декларант');
+      return;
+    }
+
+    // Для ИМ/ЭК нужна процедура
+    if ((createDirection === 'IM' || createDirection === 'EK') && !createCustomsProcedure) {
+      setDocflowError('Заполните таможенную процедуру');
+      return;
+    }
+
+    setIsCreatingDocflow(true);
+    setDocflowError(null);
+    setDocflowResponse(null);
+
+    try {
+      const request: CreateDocflowRequest = {
+        type: directionToType[createDirection] ?? 0,
+        procedure: parseInt(createCustomsProcedure) || 0,
+        customs: customsCodeMap[createCustomsOffice] || 10000000,
+        organization_id: createOrganization,  // TODO: нужен реальный UUID из справочника
+        employee_id: createDeclarant,  // TODO: нужен реальный UUID из справочника
+      };
+
+      // Добавляем особенности если выбраны
+      if (createFeature && createFeature !== 'none') {
+        // TODO: маппинг особенностей на singularity ID
+      }
+
+      const response = await createDocflow(request);
+      setDocflowResponse(response);
+    } catch (error) {
+      setDocflowError(error instanceof Error ? error.message : 'Произошла ошибка при создании пакета');
+    } finally {
+      setIsCreatingDocflow(false);
+    }
   };
 
   // Стили для Select
@@ -1217,27 +1284,77 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
 
       {/* Кнопки действий */}
       <div className={`rounded-2xl p-6 border ${theme.card.background} ${theme.card.border}`}>
-        <div className="flex justify-end gap-3">
+        <div className="flex justify-between items-center gap-3">
+          {/* Кнопка создания пакета в Kontur */}
           <button
-            onClick={onCancel}
+            onClick={handleCreateDocflow}
+            disabled={isCreatingDocflow}
             className={`
-              px-6 py-2 rounded-lg text-sm font-medium
-              ${isDark ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
-            `}
-          >
-            Отменить
-          </button>
-          <button
-            onClick={onSave}
-            className={`
-              px-6 py-2 rounded-lg text-sm font-medium text-white
+              px-6 py-2 rounded-lg text-sm font-medium text-white flex items-center gap-2
               ${createDirection === 'IM' ? 'bg-accent-green hover:bg-accent-green/90' : createDirection === 'EK' ? 'bg-blue-600 hover:bg-blue-600/90' : 'bg-orange-500 hover:bg-orange-500/90'}
+              disabled:opacity-50 disabled:cursor-not-allowed
             `}
           >
-            Сохранить изменения
+            {isCreatingDocflow ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                Создание...
+              </>
+            ) : (
+              <>
+                <Send size={16} />
+                Создать пакет декларации
+              </>
+            )}
           </button>
+
+          <div className="flex gap-3">
+            <button
+              onClick={onCancel}
+              className={`
+                px-6 py-2 rounded-lg text-sm font-medium
+                ${isDark ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
+              `}
+            >
+              Отменить
+            </button>
+            <button
+              onClick={onSave}
+              className={`
+                px-6 py-2 rounded-lg text-sm font-medium text-white
+                ${createDirection === 'IM' ? 'bg-accent-green hover:bg-accent-green/90' : createDirection === 'EK' ? 'bg-blue-600 hover:bg-blue-600/90' : 'bg-orange-500 hover:bg-orange-500/90'}
+              `}
+            >
+              Сохранить изменения
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* API Response / Error Display */}
+      {(docflowError || docflowResponse) && (
+        <div className={`rounded-2xl p-6 border ${theme.card.background} ${theme.card.border}`}>
+          <h3 className={`text-lg font-semibold mb-4 ${theme.text.primary}`}>
+            Ответ API
+          </h3>
+
+          {docflowError && (
+            <div className={`p-4 rounded-lg ${isDark ? 'bg-red-500/10 border border-red-500/30' : 'bg-red-50 border border-red-200'}`}>
+              <p className="text-accent-red font-medium">Ошибка</p>
+              <p className={`text-sm mt-1 ${theme.text.secondary}`}>{docflowError}</p>
+            </div>
+          )}
+
+          {docflowResponse && (
+            <div className={`p-4 rounded-lg ${isDark ? 'bg-accent-green/10 border border-accent-green/30' : 'bg-green-50 border border-green-200'}`}>
+              <p className="text-accent-green font-medium mb-2">Пакет успешно создан!</p>
+              <pre className={`text-xs overflow-auto p-3 rounded ${isDark ? 'bg-black/30' : 'bg-gray-100'} ${theme.text.primary}`}>
+                {JSON.stringify(docflowResponse, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

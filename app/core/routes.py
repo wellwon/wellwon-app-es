@@ -16,6 +16,7 @@ from app.api.routers.telegram_router import router as telegram_router
 
 # Declarant module
 from app.declarant.routes import router as declarant_router
+from app.declarant.routes import docflows_router as declarant_docflows_router
 from app.declarant.form_routes import router as declarant_form_router
 from app.declarant.form_templates_routes import router as form_templates_router
 
@@ -47,6 +48,7 @@ def register_core_routers(app: FastAPI) -> None:
     app.include_router(chat_router, tags=["Chat"])
     app.include_router(telegram_router, tags=["Telegram"])
     app.include_router(declarant_router, tags=["Declarant"])
+    app.include_router(declarant_docflows_router, tags=["Declarant Docflows"])
     app.include_router(declarant_form_router, tags=["Declarant Forms"])
     app.include_router(form_templates_router, prefix="/api/v1", tags=["Declarant Form Templates"])
 

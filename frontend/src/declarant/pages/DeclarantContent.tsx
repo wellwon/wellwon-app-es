@@ -4,7 +4,8 @@
 // Полная копия верстки "Декларация AI" с мок-данными
 // Включает собственный sidebar, header и переключатель темы
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { usePlatformPro } from '@/contexts/PlatformProContext';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
@@ -593,6 +594,8 @@ const DeclarantContent: React.FC = () => {
     navigateToDeclarantList,
   } = usePlatformPro();
 
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     const saved = localStorage.getItem('declarant_sidebarCollapsed');
     return saved ? JSON.parse(saved) : false;
@@ -634,6 +637,33 @@ const DeclarantContent: React.FC = () => {
   const [documentDateFilter, setDocumentDateFilter] = useState('all');
 
   const toggleTheme = contextToggleTheme;
+
+  // Handle URL query parameters for navigation from Form Builder
+  useEffect(() => {
+    const section = searchParams.get('section');
+    const ref = searchParams.get('ref');
+
+    if (section === 'references') {
+      // First set references section (this adds to history)
+      setActiveSection('references');
+      setNavigationHistory([
+        { section: 'dashboard', viewMode: 'list' },
+        { section: 'references', viewMode: 'list', referenceId: null }
+      ]);
+
+      if (ref === 'json-templates') {
+        setActiveReferenceId('json-templates');
+        // Add the specific reference to history
+        setNavigationHistory([
+          { section: 'dashboard', viewMode: 'list' },
+          { section: 'references', viewMode: 'list', referenceId: null },
+          { section: 'references', viewMode: 'list', referenceId: 'json-templates' }
+        ]);
+      }
+      // Clear query params after handling
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const toggleSidebar = () => {
     const newValue = !sidebarCollapsed;

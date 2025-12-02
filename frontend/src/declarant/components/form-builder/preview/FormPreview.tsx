@@ -61,7 +61,7 @@ export const FormPreview: React.FC<FormPreviewProps> = ({ isDark, formWidth = 10
         <button
           onClick={() => setViewport('desktop')}
           className={cn(
-            'p-2 rounded-lg transition-colors',
+            'p-2 rounded-lg ',
             viewport === 'desktop'
               ? 'bg-accent-red text-white'
               : cn(theme.textMuted, 'hover:bg-white/10')
@@ -73,7 +73,7 @@ export const FormPreview: React.FC<FormPreviewProps> = ({ isDark, formWidth = 10
         <button
           onClick={() => setViewport('tablet')}
           className={cn(
-            'p-2 rounded-lg transition-colors',
+            'p-2 rounded-lg ',
             viewport === 'tablet'
               ? 'bg-accent-red text-white'
               : cn(theme.textMuted, 'hover:bg-white/10')
@@ -85,7 +85,7 @@ export const FormPreview: React.FC<FormPreviewProps> = ({ isDark, formWidth = 10
         <button
           onClick={() => setViewport('mobile')}
           className={cn(
-            'p-2 rounded-lg transition-colors',
+            'p-2 rounded-lg ',
             viewport === 'mobile'
               ? 'bg-accent-red text-white'
               : cn(theme.textMuted, 'hover:bg-white/10')
@@ -331,7 +331,7 @@ function useFieldStyles(
     : '';
 
   return cn(
-    'w-full h-10 px-3 py-2 rounded-xl border text-sm transition-colors',
+    'w-full h-10 px-3 py-2 rounded-xl border text-sm ',
     'focus:outline-none focus:ring-0',
     showRequiredStyle ? requiredStyle : theme.input,
     readonly && 'opacity-60 cursor-not-allowed'
@@ -594,7 +594,7 @@ const DateMaskedInput: React.FC<DateMaskedInputProps> = ({
     : '';
 
   const baseInputClass = cn(
-    'w-full h-10 px-3 py-2 rounded-xl border text-sm transition-colors',
+    'w-full h-10 px-3 py-2 rounded-xl border text-sm ',
     'focus:outline-none focus:ring-0',
     showRequiredStyle ? requiredStyle : (theme?.input || ''),
     readonly && 'opacity-60 cursor-not-allowed'

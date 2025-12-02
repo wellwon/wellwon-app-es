@@ -223,18 +223,24 @@ export const CanvasField: React.FC<CanvasFieldProps> = ({ field, sectionId, inde
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Required indicator */}
-        {isRequired && (
-          <div
-            className={cn(
-              'flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded',
-              'bg-accent-red/20 text-accent-red'
-            )}
-            title="Обязательное поле"
-          >
-            <Asterisk className="w-3 h-3" />
-          </div>
-        )}
+        {/* Required toggle button */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            updateFieldInSection(sectionId, field.id, { required: !isRequired });
+          }}
+          className={cn(
+            'flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded ',
+            isRequired
+              ? 'bg-accent-red/20 text-accent-red hover:bg-accent-red/30'
+              : isDark
+                ? 'bg-white/10 text-gray-400 hover:bg-white/20 hover:text-gray-300'
+                : 'bg-gray-200 text-gray-400 hover:bg-gray-300 hover:text-gray-500'
+          )}
+          title={isRequired ? 'Убрать обязательность' : 'Сделать обязательным'}
+        >
+          <Asterisk className="w-3 h-3" />
+        </button>
 
         {/* Width selector dropdown */}
         <div className="relative">
@@ -244,7 +250,7 @@ export const CanvasField: React.FC<CanvasFieldProps> = ({ field, sectionId, inde
               setShowWidthMenu(!showWidthMenu);
             }}
             className={cn(
-              'text-xs px-1.5 py-0.5 rounded flex items-center gap-0.5 transition-colors',
+              'text-xs px-1.5 py-0.5 rounded flex items-center gap-0.5 ',
               isDark ? 'bg-white/10 hover:bg-white/20' : 'bg-gray-200 hover:bg-gray-300',
               theme.textMuted
             )}
@@ -272,7 +278,7 @@ export const CanvasField: React.FC<CanvasFieldProps> = ({ field, sectionId, inde
                     setShowWidthMenu(false);
                   }}
                   className={cn(
-                    'w-full px-3 py-1 text-xs text-left transition-colors',
+                    'w-full px-3 py-1 text-xs text-left ',
                     field.width === option.value
                       ? 'bg-accent-red/20 text-accent-red'
                       : isDark
@@ -293,7 +299,7 @@ export const CanvasField: React.FC<CanvasFieldProps> = ({ field, sectionId, inde
             e.stopPropagation();
             removeFieldFromSection(sectionId, field.id);
           }}
-          className={cn('p-1 rounded opacity-50 hover:opacity-100 transition-opacity', theme.hover)}
+          className={cn('p-1 rounded opacity-50 hover:opacity-100 ', theme.hover)}
           title="Удалить"
         >
           <Trash2 className="w-3.5 h-3.5 text-accent-red" />

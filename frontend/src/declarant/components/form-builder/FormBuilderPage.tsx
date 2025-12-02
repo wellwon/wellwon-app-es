@@ -287,10 +287,10 @@ export const FormBuilderPage: React.FC<FormBuilderPageProps> = ({ defaultIsDark 
   const handleBack = useCallback(() => {
     if (isDirty || isFormWidthDirty) {
       if (window.confirm('Есть несохраненные изменения. Вы уверены, что хотите выйти?')) {
-        navigate('/declarant/references?tab=json-templates', { replace: true });
+        navigate('/platform-pro/declarant?section=references&ref=json-templates', { replace: true });
       }
     } else {
-      navigate('/declarant/references?tab=json-templates', { replace: true });
+      navigate('/platform-pro/declarant?section=references&ref=json-templates', { replace: true });
     }
   }, [isDirty, isFormWidthDirty, navigate]);
 
@@ -485,7 +485,7 @@ export const FormBuilderPage: React.FC<FormBuilderPageProps> = ({ defaultIsDark 
             Выберите форму из справочника "Шаблоны JSON"
           </span>
           <button
-            onClick={() => navigate('/declarant/references?tab=json-templates', { replace: true })}
+            onClick={() => navigate('/platform-pro/declarant?section=references&ref=json-templates', { replace: true })}
             className="px-4 py-2 bg-accent-red text-white rounded-lg hover:bg-accent-red/90"
           >
             Вернуться назад

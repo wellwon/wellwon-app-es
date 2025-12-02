@@ -506,16 +506,16 @@ export const useFormBuilderStore = create<FormBuilderState & FormBuilderActions>
 
   setSchemaSearchQuery: (query) => set({ schemaSearchQuery: query }),
 
-  toggleNodeExpanded: (path) =>
-    set(
-      produce((draft: FormBuilderState) => {
-        if (draft.expandedNodes.has(path)) {
-          draft.expandedNodes.delete(path);
-        } else {
-          draft.expandedNodes.add(path);
-        }
-      })
-    ),
+  toggleNodeExpanded: (path) => {
+    const state = get();
+    const newExpandedNodes = new Set(state.expandedNodes);
+    if (newExpandedNodes.has(path)) {
+      newExpandedNodes.delete(path);
+    } else {
+      newExpandedNodes.add(path);
+    }
+    set({ expandedNodes: newExpandedNodes });
+  },
 
   expandAllNodes: () => {
     const state = get();

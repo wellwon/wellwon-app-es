@@ -115,7 +115,7 @@ export const BuilderLayout: React.FC<BuilderLayoutProps> = ({
         {/* Left Resizer */}
         <div
           className={cn(
-            'w-1.5 cursor-col-resize transition-colors group relative',
+            'w-1.5 cursor-col-resize  group relative',
             isResizingLeft ? theme.resizerActive : theme.resizer
           )}
           onMouseDown={handleLeftMouseDown}
@@ -124,7 +124,7 @@ export const BuilderLayout: React.FC<BuilderLayoutProps> = ({
           <div className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize" />
           {/* Visual indicator on hover */}
           <div className={cn(
-            'absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity',
+            'absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full opacity-0 group-hover:opacity-100 ',
             isDark ? 'bg-white/30' : 'bg-gray-400'
           )} />
         </div>
@@ -139,7 +139,7 @@ export const BuilderLayout: React.FC<BuilderLayoutProps> = ({
         {/* Right Resizer */}
         <div
           className={cn(
-            'w-1.5 cursor-col-resize transition-colors group relative',
+            'w-1.5 cursor-col-resize  group relative',
             isResizingRight ? theme.resizerActive : theme.resizer
           )}
           onMouseDown={handleRightMouseDown}
@@ -148,7 +148,7 @@ export const BuilderLayout: React.FC<BuilderLayoutProps> = ({
           <div className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize" />
           {/* Visual indicator on hover */}
           <div className={cn(
-            'absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity',
+            'absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full opacity-0 group-hover:opacity-100 ',
             isDark ? 'bg-white/30' : 'bg-gray-400'
           )} />
         </div>

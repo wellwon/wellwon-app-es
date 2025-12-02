@@ -88,7 +88,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({ isDark }) => {
             onClick={undo}
             disabled={!canUndo}
             className={cn(
-              'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors',
+              'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border ',
               theme.border,
               canUndo ? theme.hover : 'opacity-50 cursor-not-allowed'
             )}
@@ -100,7 +100,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({ isDark }) => {
             onClick={redo}
             disabled={!canRedo}
             className={cn(
-              'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors',
+              'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border ',
               theme.border,
               canRedo ? theme.hover : 'opacity-50 cursor-not-allowed'
             )}
@@ -131,7 +131,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({ isDark }) => {
                 <div
                   key={reverseIndex}
                   className={cn(
-                    'flex items-center gap-3 px-3 py-2 rounded-lg border transition-colors cursor-pointer',
+                    'flex items-center gap-3 px-3 py-2 rounded-lg border  cursor-pointer',
                     isCurrent
                       ? theme.current
                       : cn(theme.border, theme.hover, isPast && theme.past)

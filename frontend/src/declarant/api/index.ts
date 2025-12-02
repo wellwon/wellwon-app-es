@@ -184,3 +184,52 @@ export async function getDeclarantBatchById(batchId: string): Promise<DeclarantB
   const batches = await getDeclarantBatches();
   return batches.find((b) => b.id === batchId) || null;
 }
+
+// =============================================================================
+// Docflow API (пакеты деклараций)
+// =============================================================================
+
+export interface CreateDocflowRequest {
+  type: number;  // Declaration type: 0=ИМ, 1=ЭК, etc.
+  procedure: number;  // Customs procedure ID
+  customs: number;  // Customs office code
+  organization_id: string;  // Organization UUID
+  employee_id: string;  // Employee UUID
+  singularity?: number;  // Optional singularity ID
+  name?: string;  // Optional docflow name
+}
+
+export interface DocflowResponse {
+  id: string;
+  version: number;
+  state: number;
+  type: number;
+  procedure: number;
+  singularity?: number;
+  customs: number;
+  name?: string;
+  organization_id: string;
+  employee_id: string;
+  create_date?: string;
+  update_date?: string;
+}
+
+/**
+ * Create new docflow (пакет декларации) via Kontur API
+ */
+export async function createDocflow(request: CreateDocflowRequest): Promise<DocflowResponse> {
+  const response = await fetch('/declarant/docflows', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ detail: 'Неизвестная ошибка' }));
+    throw new Error(errorData.detail || `HTTP error: ${response.status}`);
+  }
+
+  return response.json();
+}

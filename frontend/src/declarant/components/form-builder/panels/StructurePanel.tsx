@@ -76,7 +76,7 @@ export const StructurePanel: React.FC<StructurePanelProps> = ({ isDark, isPrevie
       <button
         onClick={onTogglePreview}
         className={cn(
-          'w-full h-9 px-3 flex items-center justify-center gap-2 rounded-xl border text-sm font-medium transition-colors',
+          'w-full h-9 px-3 flex items-center justify-center gap-2 rounded-xl border text-sm font-medium ',
           isPreviewActive
             ? 'bg-blue-500/20 text-blue-400 border-blue-500/30 hover:bg-blue-500/30'
             : isDark
@@ -250,8 +250,8 @@ const FieldProperties: React.FC<FieldPropertiesProps> = ({ field, schemaField, s
           Промпт
         </label>
         <textarea
-          value={field.prompt || ''}
-          onChange={(e) => handleUpdate({ prompt: e.target.value || undefined })}
+          value={field.prompt !== undefined ? field.prompt : (schemaField?.label_ru || '')}
+          onChange={(e) => handleUpdate({ prompt: e.target.value })}
           placeholder="Инструкция для извлечения значения из документа..."
           rows={3}
           className={cn(
@@ -275,7 +275,7 @@ const FieldProperties: React.FC<FieldPropertiesProps> = ({ field, schemaField, s
               key={option.value}
               onClick={() => handleUpdate({ width: option.value })}
               className={cn(
-                'py-2 px-2 rounded-lg border text-xs font-medium transition-colors',
+                'py-2 px-2 rounded-lg border text-xs font-medium ',
                 field.width === option.value
                   ? 'bg-accent-red text-white border-accent-red'
                   : cn(theme.input, 'hover:border-accent-red/50')
@@ -312,28 +312,29 @@ const FieldProperties: React.FC<FieldPropertiesProps> = ({ field, schemaField, s
         <label className={cn('flex items-center gap-3 cursor-pointer group', theme.text)}>
           <input
             type="checkbox"
-            checked={field.readonly || false}
-            onChange={(e) => handleUpdate({ readonly: e.target.checked })}
+            checked={field.required !== undefined ? field.required : (schemaField?.required || false)}
+            onChange={(e) => handleUpdate({ required: e.target.checked })}
             className="rounded border-gray-300 text-accent-red focus:ring-accent-red"
           />
           <div className="flex items-center gap-2">
-            <EyeOff className={cn('w-4 h-4', theme.textMuted)} />
-            <span className="text-sm">Только для чтения</span>
+            <span className="text-sm">Обязательное</span>
+            <span className="text-accent-red text-sm font-medium">*</span>
+            {schemaField?.required && field.required === undefined && (
+              <span className={cn('text-xs', theme.textMuted)}>(из схемы)</span>
+            )}
           </div>
         </label>
 
         <label className={cn('flex items-center gap-3 cursor-pointer group', theme.text)}>
           <input
             type="checkbox"
-            checked={field.required !== undefined ? field.required : (schemaField?.required || false)}
-            onChange={(e) => handleUpdate({ required: e.target.checked })}
+            checked={field.readonly || false}
+            onChange={(e) => handleUpdate({ readonly: e.target.checked })}
             className="rounded border-gray-300 text-accent-red focus:ring-accent-red"
           />
           <div className="flex items-center gap-2">
-            <span className="text-sm">Обязательное поле</span>
-            {schemaField?.required && field.required === undefined && (
-              <span className={cn('text-xs', theme.textMuted)}>(из схемы)</span>
-            )}
+            <span className="text-sm">Только для чтения</span>
+            <EyeOff className={cn('w-4 h-4', theme.textMuted)} />
           </div>
         </label>
 
@@ -350,8 +351,8 @@ const FieldProperties: React.FC<FieldPropertiesProps> = ({ field, schemaField, s
             className="rounded border-gray-300 text-accent-red focus:ring-accent-red"
           />
           <div className="flex items-center gap-2">
+            <span className="text-sm">Список</span>
             <List className={cn('w-4 h-4', theme.textMuted)} />
-            <span className="text-sm">Поле-список (select)</span>
           </div>
         </label>
       </div>
@@ -419,7 +420,7 @@ const SelectOptionsEditor: React.FC<SelectOptionsEditorProps> = ({ options, onCh
         <button
           onClick={handleAddOption}
           className={cn(
-            'flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors',
+            'flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium ',
             'bg-accent-red text-white hover:bg-accent-red/90'
           )}
         >
@@ -467,7 +468,7 @@ const SelectOptionsEditor: React.FC<SelectOptionsEditorProps> = ({ options, onCh
               <button
                 onClick={() => handleRemoveOption(index)}
                 className={cn(
-                  'p-1.5 rounded-lg transition-colors',
+                  'p-1.5 rounded-lg ',
                   'text-accent-red hover:bg-accent-red/10'
                 )}
                 title="Удалить опцию"
@@ -560,7 +561,7 @@ const SectionProperties: React.FC<SectionPropertiesProps> = ({ section, isDark, 
               key={cols}
               onClick={() => handleUpdate({ columns: cols as 1 | 2 | 3 | 4 })}
               className={cn(
-                'py-2 rounded-lg border text-sm font-medium transition-colors',
+                'py-2 rounded-lg border text-sm font-medium ',
                 section.columns === cols
                   ? 'bg-accent-red text-white border-accent-red'
                   : cn(theme.input, 'hover:border-accent-red/50')

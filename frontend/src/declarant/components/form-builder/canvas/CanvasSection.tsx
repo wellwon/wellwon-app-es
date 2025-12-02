@@ -67,7 +67,7 @@ export const CanvasSection: React.FC<CanvasSectionProps> = ({ section, index, is
     <div
       ref={setDropRef}
       className={cn(
-        'rounded-2xl border transition-shadow',
+        'rounded-2xl border ',
         theme.cardBg,
         theme.border,
         isOver && theme.dropActive
@@ -118,7 +118,7 @@ export const CanvasSection: React.FC<CanvasSectionProps> = ({ section, index, is
         </span>
 
         {/* Actions */}
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 ">
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -216,7 +216,7 @@ const DropZone: React.FC<DropZoneProps> = ({ sectionId, isDark, isActive, minima
       <div
         ref={setNodeRef}
         className={cn(
-          'mt-4 py-2 rounded-lg transition-colors text-center',
+          'mt-4 py-2 rounded-lg  text-center',
           theme.dropZoneActive
         )}
       >
@@ -232,7 +232,7 @@ const DropZone: React.FC<DropZoneProps> = ({ sectionId, isDark, isActive, minima
     <div
       ref={setNodeRef}
       className={cn(
-        'py-8 rounded-xl transition-colors flex flex-col items-center justify-center',
+        'py-8 rounded-xl  flex flex-col items-center justify-center',
         theme.dropZone,
         (isOver || isActive) && theme.dropZoneActive
       )}

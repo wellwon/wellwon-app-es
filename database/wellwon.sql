@@ -1321,6 +1321,7 @@ CREATE TABLE IF NOT EXISTS dc_json_templates (
     gf_code TEXT NOT NULL,                       -- Внутренний код Kontur (например "18003")
     document_mode_id TEXT NOT NULL,              -- ID формы по альбому ФТС (например "1006107E")
     type_name TEXT NOT NULL,                     -- Название варианта шаблона
+    document_type_code VARCHAR(10),              -- Код вида документа (связь с dc_document_types.code)
     is_active BOOLEAN DEFAULT TRUE,              -- Активен ли шаблон
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -1337,6 +1338,8 @@ CREATE INDEX IF NOT EXISTS idx_dc_json_templates_is_active
     ON dc_json_templates(is_active) WHERE is_active = TRUE;
 CREATE INDEX IF NOT EXISTS idx_dc_json_templates_type_name
     ON dc_json_templates USING gin(type_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_dc_json_templates_document_type_code
+    ON dc_json_templates(document_type_code) WHERE document_type_code IS NOT NULL;
 
 -- Триггер для updated_at
 CREATE TRIGGER set_dc_json_templates_updated_at

@@ -29,7 +29,7 @@ from app.declarant.references_service import (
     EmployeesService,
     SyncResult,
 )
-from app.declarant.kontur_client import KonturClientError
+from app.declarant.kontur_client import KonturClientError, get_kontur_client
 
 log = logging.getLogger("wellwon.declarant.routes")
 
@@ -50,6 +50,7 @@ class JsonTemplateResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     sections_count: int = 0  # Количество настроенных секций в форме
+    document_type_code: Optional[str] = None  # Код вида документа (связь с dc_document_types)
 
     class Config:
         from_attributes = True
@@ -1975,4 +1976,92 @@ async def search_employees(q: str, limit: int = 50):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error searching: {str(e)}"
+        )
+
+
+# =============================================================================
+# Docflows API (документооборот / пакеты деклараций)
+# =============================================================================
+
+docflows_router = APIRouter(prefix="/declarant/docflows", tags=["Declarant Docflows"])
+
+
+class CreateDocflowRequest(BaseModel):
+    """Request model for creating a docflow"""
+    type: int  # Declaration type: 0=ИМ, 1=ЭК, etc.
+    procedure: int  # Customs procedure ID
+    customs: int  # Customs office code (e.g., 10130010)
+    organization_id: str  # Organization UUID
+    employee_id: str  # Employee (signer) UUID
+    singularity: Optional[int] = None  # Optional singularity ID
+    name: Optional[str] = None  # Optional docflow name
+
+
+class DocflowResponse(BaseModel):
+    """Response model for docflow"""
+    id: str
+    version: int
+    state: int
+    type: int
+    procedure: int
+    singularity: Optional[int] = None
+    customs: int
+    name: Optional[str] = None
+    organization_id: str
+    employee_id: str
+    create_date: Optional[datetime] = None
+    update_date: Optional[datetime] = None
+
+
+@docflows_router.post("", response_model=DocflowResponse)
+async def create_docflow(request: CreateDocflowRequest):
+    """
+    Create a new docflow (пакет декларации) in Kontur API
+
+    Args:
+        request: Docflow creation data
+
+    Returns:
+        Created docflow data
+    """
+    try:
+        log.info(f"Creating docflow: type={request.type}, procedure={request.procedure}")
+
+        client = get_kontur_client()
+        result = await client.create_docflow(
+            declaration_type=request.type,
+            procedure=request.procedure,
+            customs=request.customs,
+            organization_id=request.organization_id,
+            employee_id=request.employee_id,
+            singularity=request.singularity,
+            name=request.name
+        )
+
+        return DocflowResponse(
+            id=result.get("id", ""),
+            version=result.get("version", 1),
+            state=result.get("state", 0),
+            type=result.get("type", request.type),
+            procedure=result.get("procedure", request.procedure),
+            singularity=result.get("singularity"),
+            customs=result.get("customs", request.customs),
+            name=result.get("name"),
+            organization_id=result.get("organizationId", request.organization_id),
+            employee_id=result.get("employeeId", request.employee_id),
+            create_date=result.get("createDate"),
+            update_date=result.get("updateDate")
+        )
+
+    except KonturClientError as e:
+        log.error(f"Kontur API error creating docflow: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Ошибка Kontur API: {str(e)}"
+        )
+    except Exception as e:
+        log.error(f"Error creating docflow: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка создания пакета: {str(e)}"
         )

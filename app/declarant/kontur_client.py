@@ -533,6 +533,97 @@ class KonturClient:
 
             return data
 
+    # =========================================================================
+    # Docflow API (документооборот)
+    # =========================================================================
+
+    async def create_docflow(
+        self,
+        declaration_type: int,
+        procedure: int,
+        customs: int,
+        organization_id: str,
+        employee_id: str,
+        singularity: Optional[int] = None,
+        name: Optional[str] = None
+    ) -> dict:
+        """
+        Create new docflow (документооборот / пакет декларации)
+
+        Endpoint: POST /common/v1/docflows
+
+        Args:
+            declaration_type: Declaration type (0=ИМ, 1=ЭК, etc.)
+            procedure: Customs procedure ID
+            customs: Customs office code (e.g., 10130010)
+            organization_id: Organization UUID
+            employee_id: Employee (signer) UUID
+            singularity: Optional singularity ID
+            name: Optional docflow name
+
+        Returns:
+            dict: Created docflow data (DocflowDto)
+
+        Example response:
+            {
+                "id": "uuid",
+                "version": 1,
+                "state": 0,
+                "type": 0,
+                "procedure": 0,
+                "singularity": 0,
+                "customs": 10130010,
+                "name": "Docflow name",
+                "organizationId": "uuid",
+                "employeeId": "uuid",
+                "createDate": "2024-01-01T00:00:00Z",
+                "updateDate": "2024-01-01T00:00:00Z"
+            }
+        """
+        await self.ensure_authenticated()
+
+        url = f"{self.base_url}/common/v1/docflows"
+
+        # Build request body
+        body = {
+            "type": declaration_type,
+            "procedure": procedure,
+            "customs": customs,
+            "organizationId": organization_id,
+            "employeeId": employee_id,
+        }
+
+        if singularity is not None:
+            body["singularity"] = singularity
+
+        if name:
+            body["name"] = name
+
+        log.info(f"Creating docflow: type={declaration_type}, procedure={procedure}, customs={customs}")
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                url,
+                headers=self._get_headers(),
+                json=body
+            )
+
+            if response.status_code == 401:
+                log.warning("Session expired, re-authenticating...")
+                await self.authenticate()
+                response = await client.post(
+                    url,
+                    headers=self._get_headers(),
+                    json=body
+                )
+
+            response.raise_for_status()
+
+            data = response.json()
+            log.info(f"Successfully created docflow with ID: {data.get('id')}")
+
+            return data
+
 
 # Singleton instance for convenience
 _client: Optional[KonturClient] = None

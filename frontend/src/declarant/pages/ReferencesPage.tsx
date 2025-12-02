@@ -64,6 +64,7 @@ interface JsonTemplate {
   created_at: string;
   updated_at: string;
   sections_count?: number; // Количество секций в форме (0 = форма не настроена)
+  document_type_code?: string | null; // Код вида документа (связь с dc_document_types)
 }
 
 interface CustomsOffice {
@@ -852,6 +853,9 @@ const JsonTemplatesDetail: React.FC<JsonTemplatesDetailProps> = ({ isDark }) => 
                   <th className="py-3 px-4 text-left text-xs font-medium uppercase tracking-wider">
                     Название шаблона
                   </th>
+                  <th className="py-3 px-4 text-left text-xs font-medium uppercase tracking-wider w-24">
+                    Код док.
+                  </th>
                   <th className="py-3 px-4 text-left text-xs font-medium uppercase tracking-wider w-40">
                     Обновлено
                   </th>
@@ -894,6 +898,9 @@ const JsonTemplatesDetail: React.FC<JsonTemplatesDetailProps> = ({ isDark }) => 
                         <td className={`py-3 px-4 text-sm ${theme.table.cell}`}>
                           {template.type_name}
                         </td>
+                        <td className={`py-3 px-4 text-sm font-mono ${template.document_type_code ? 'text-emerald-500' : theme.text.muted}`}>
+                          {template.document_type_code || '—'}
+                        </td>
                         <td className={`py-3 px-4 text-sm ${theme.text.secondary}`}>
                           {formatDate(template.updated_at)}
                         </td>
@@ -923,7 +930,7 @@ const JsonTemplatesDetail: React.FC<JsonTemplatesDetailProps> = ({ isDark }) => 
                       {/* Expanded content */}
                       {isExpanded && (
                         <tr className={!isLast ? `border-b ${theme.table.row}` : ''}>
-                          <td colSpan={6} className="p-0 max-w-0">
+                          <td colSpan={7} className="p-0 max-w-0">
                             <div className={`p-4 ${isDark ? 'bg-white/[0.02]' : 'bg-gray-50'}`}>
                               {/* JSON Schema */}
                               <div>

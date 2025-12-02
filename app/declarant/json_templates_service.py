@@ -27,6 +27,7 @@ class JsonTemplate:
     created_at: datetime
     updated_at: datetime
     sections_count: int = 0  # Количество настроенных секций в форме
+    document_type_code: Optional[str] = None  # Код вида документа (связь с dc_document_types)
 
 
 @dataclass
@@ -63,7 +64,7 @@ class JsonTemplatesService:
         # Подзапрос для подсчёта секций через dc_form_definitions
         query = f"""
             SELECT t.id, t.gf_code, t.document_mode_id, t.type_name,
-                   t.is_active, t.created_at, t.updated_at,
+                   t.is_active, t.created_at, t.updated_at, t.document_type_code,
                    COALESCE(s.sections_count, 0) as sections_count
             FROM {cls.TABLE_NAME} t
             LEFT JOIN (
@@ -89,6 +90,7 @@ class JsonTemplatesService:
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
                 sections_count=row["sections_count"] or 0,
+                document_type_code=row["document_type_code"],
             )
             for row in rows
         ]
@@ -208,7 +210,7 @@ class JsonTemplatesService:
         rows = await pg_client.fetch(
             f"""
             SELECT t.id, t.gf_code, t.document_mode_id, t.type_name,
-                   t.is_active, t.created_at, t.updated_at,
+                   t.is_active, t.created_at, t.updated_at, t.document_type_code,
                    COALESCE(s.sections_count, 0) as sections_count
             FROM {cls.TABLE_NAME} t
             LEFT JOIN (
@@ -236,6 +238,7 @@ class JsonTemplatesService:
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
                 sections_count=row["sections_count"] or 0,
+                document_type_code=row["document_type_code"],
             )
             for row in rows
         ]
