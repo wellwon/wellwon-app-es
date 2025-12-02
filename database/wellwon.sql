@@ -1626,6 +1626,28 @@ CREATE TRIGGER set_dc_measurement_units_updated_at
 COMMENT ON TABLE dc_measurement_units IS 'Справочник единиц измерения';
 
 
+-- Виды документов (статический справочник)
+CREATE TABLE IF NOT EXISTS dc_document_types (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(10) NOT NULL UNIQUE,            -- Код документа (01011, 02011, etc.)
+    name TEXT NOT NULL,                          -- Наименование документа
+    ed_documents TEXT,                           -- ЭД-документы (типы электронных документов)
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_document_types_code ON dc_document_types(code);
+CREATE INDEX IF NOT EXISTS idx_dc_document_types_is_active ON dc_document_types(is_active) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_dc_document_types_name ON dc_document_types USING gin(name gin_trgm_ops);
+
+CREATE TRIGGER set_dc_document_types_updated_at
+    BEFORE UPDATE ON dc_document_types
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_document_types IS 'Справочник видов документов';
+
+
 -- =============================================================================
 -- INITIAL DATA
 -- =============================================================================

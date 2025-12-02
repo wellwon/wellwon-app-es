@@ -44,6 +44,7 @@ const CookiePolicyPage = createLazyComponent(() => import('./pages/CookiePolicyP
 const PlatformPage = createLazyComponent(() => import('./pages/PlatformPage'));
 const PlatformProPage = createLazyComponent(() => import('./pages/PlatformProPage'));
 const DeclarantPage = createLazyComponent(() => import('./pages/declarant/DeclarantPage'));
+const FormBuilderPage = createLazyComponent(() => import('./declarant/components/form-builder/FormBuilderPage'));
 
 const AppContentWithProfile = () => {
   const { isProfileModalOpen, closeProfileModal } = useProfileModal();
@@ -137,6 +138,16 @@ const AppContent = () => {
               <ProtectedRoute>
                 <DeclarantPage />
               </ProtectedRoute>
+            }
+          />
+
+          {/* Form Builder - Template constructor for declarations */}
+          <Route
+            path="/declarant/form-builder/:templateId?"
+            element={
+              <DeveloperRoute>
+                <FormBuilderPage />
+              </DeveloperRoute>
             }
           />
 
