@@ -1,15 +1,17 @@
 // =============================================================================
 // File: src/hooks/chat/useChatList.ts
 // Description: React Query hook for chat list with WSE integration
+// Pattern: TkDodo's "Using WebSockets with React Query" + proper cleanup
 // =============================================================================
 
-import { useEffect } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as chatApi from '@/api/chat';
 import type { ChatListItem } from '@/api/chat';
 import { chatKeys } from './useChatMessages';
 import { logger } from '@/utils/logger';
 import { useChatsStore } from '@/stores/useChatsStore';
+import { useChatUIStore } from './useChatUIStore';
 
 // -----------------------------------------------------------------------------
 // useChatList - Fetch all user's chats
@@ -33,12 +35,34 @@ export function useChatList(options: UseChatListOptions = {}) {
   const cachedUpdatedAt = useChatsStore((s) => s.cachedUpdatedAt);
   const setCachedChats = useChatsStore((s) => s.setCachedChats);
 
+  // Track pending retries for cleanup (prevents stale writes after unmount)
+  const pendingRetriesRef = useRef<Map<string, AbortController>>(new Map());
+
+  // Cleanup function for pending retries
+  const cancelPendingRetry = useCallback((chatId: string) => {
+    const controller = pendingRetriesRef.current.get(chatId);
+    if (controller) {
+      controller.abort();
+      pendingRetriesRef.current.delete(chatId);
+    }
+  }, []);
+
+  // Helper to sync Zustand after any cache update
+  const syncZustandCache = useCallback(() => {
+    const currentChats = queryClient.getQueryData<ChatListItem[]>(
+      chatKeys.list({ includeArchived, limit })
+    );
+    if (currentChats) {
+      setCachedChats(currentChats);
+    }
+  }, [queryClient, includeArchived, limit, setCachedChats]);
+
   const query = useQuery({
     queryKey: chatKeys.list({ includeArchived, limit }),
     queryFn: async () => {
       const apiChats = await chatApi.getChats(includeArchived, limit, 0);
 
-      // CRITICAL: Preserve optimistic entries that were added via WSE events
+      // CRITICAL: Preserve optimistic entries and their telegram_supergroup_id
       const existingData = queryClient.getQueryData<OptimisticChatListItem[]>(chatKeys.list({ includeArchived, limit }));
       if (existingData && Array.isArray(existingData)) {
         const optimisticEntries = existingData.filter(e => e._isOptimistic);
@@ -47,10 +71,27 @@ export function useChatList(options: UseChatListOptions = {}) {
             optimisticCount: optimisticEntries.length,
             apiCount: apiChats.length
           });
-          // Merge: keep optimistic entries that aren't in API response yet
+
+          // Build a map of optimistic entries for quick lookup
+          const optimisticMap = new Map(optimisticEntries.map(o => [o.id, o]));
+
+          // Merge API data with optimistic entries, preserving telegram_supergroup_id
+          const mergedApiChats = apiChats.map(apiChat => {
+            const optimistic = optimisticMap.get(apiChat.id);
+            if (optimistic && !apiChat.telegram_supergroup_id && optimistic.telegram_supergroup_id) {
+              // API doesn't have telegram_supergroup_id yet, preserve from optimistic
+              return {
+                ...apiChat,
+                telegram_supergroup_id: optimistic.telegram_supergroup_id,
+              };
+            }
+            return apiChat;
+          });
+
+          // Keep optimistic entries that aren't in API response yet
           const apiIds = new Set(apiChats.map(c => c.id));
           const uniqueOptimistic = optimisticEntries.filter(o => !apiIds.has(o.id));
-          const result = [...uniqueOptimistic, ...apiChats];
+          const result = [...uniqueOptimistic, ...mergedApiChats];
           setCachedChats(result); // Save to Zustand for instant refresh
           return result;
         }
@@ -75,7 +116,28 @@ export function useChatList(options: UseChatListOptions = {}) {
       const newChatData = event.detail;
       const chatId = newChatData.chat_id || newChatData.id;
 
-      logger.info('WSE: Chat created, adding optimistically', { chatId, newChatData });
+      // Cancel any existing retry for this chat (idempotent handling)
+      cancelPendingRetry(chatId);
+
+      // Get current chat scope to inherit telegram_supergroup_id if not in event
+      // This fixes the issue where chat_created fires before chat_telegram_linked
+      const chatScope = useChatUIStore.getState().chatScope;
+      const selectedSupergroupId = useChatUIStore.getState().selectedSupergroupId;
+
+      // Determine the best telegram_supergroup_id to use:
+      // 1. Use event data if available
+      // 2. Fall back to current chatScope.supergroupId (user is creating within a supergroup)
+      // 3. Fall back to selectedSupergroupId (user has a supergroup selected)
+      const telegram_supergroup_id =
+        newChatData.telegram_supergroup_id ||
+        (chatScope.type === 'supergroup' ? chatScope.supergroupId : null) ||
+        selectedSupergroupId ||
+        null;
+
+      logger.info('WSE: Chat created, adding optimistically', {
+        chatId,
+        inheritedSupergroupId: telegram_supergroup_id,
+      });
 
       // TanStack best practice: Cancel any in-flight refetches to prevent race conditions
       await queryClient.cancelQueries({
@@ -90,9 +152,9 @@ export function useChatList(options: UseChatListOptions = {}) {
         chat_type: newChatData.chat_type || 'company',
         is_active: true,
         created_at: newChatData.created_at || new Date().toISOString(),
-        company_id: newChatData.company_id || null,
+        company_id: newChatData.company_id || chatScope.companyId || null,
         telegram_chat_id: newChatData.telegram_chat_id || null,
-        telegram_supergroup_id: newChatData.telegram_supergroup_id || null, // Important for filtering
+        telegram_supergroup_id: telegram_supergroup_id, // Important for filtering - inherits from scope if not in event
         telegram_topic_id: newChatData.telegram_topic_id || null,
         last_message_at: newChatData.created_at || new Date().toISOString(),
         last_message_content: null,
@@ -109,7 +171,7 @@ export function useChatList(options: UseChatListOptions = {}) {
         (oldData: ChatListItem[] | undefined) => {
           if (!oldData) return [optimisticChat];
 
-          // Check if already exists
+          // Check if already exists (idempotent)
           if (oldData.some((c) => c.id === chatId)) {
             return oldData;
           }
@@ -119,51 +181,86 @@ export function useChatList(options: UseChatListOptions = {}) {
         }
       );
 
-      // Also update Zustand cache immediately
-      const currentChats = queryClient.getQueryData<ChatListItem[]>(
-        chatKeys.list({ includeArchived, limit })
-      );
-      if (currentChats) {
-        setCachedChats(currentChats);
-      }
+      // Sync Zustand immediately
+      syncZustandCache();
 
-      // Retry logic with exponential backoff (TkDodo pattern for projection delays)
+      // Create AbortController for this retry sequence
+      const abortController = new AbortController();
+      pendingRetriesRef.current.set(chatId, abortController);
+
+      // Retry logic with exponential backoff and proper cancellation
       const fetchWithRetry = async (attempts = 3, baseDelay = 1000) => {
         for (let i = 0; i < attempts; i++) {
+          // Check if aborted before waiting
+          if (abortController.signal.aborted) {
+            logger.debug('WSE: Retry cancelled for chat', { chatId });
+            return;
+          }
+
           const delay = baseDelay * Math.pow(2, i); // 1s, 2s, 4s
-          await new Promise(r => setTimeout(r, delay));
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(resolve, delay);
+            abortController.signal.addEventListener('abort', () => {
+              clearTimeout(timeout);
+              reject(new Error('Aborted'));
+            }, { once: true });
+          }).catch(() => {
+            // Aborted during wait
+            return;
+          });
+
+          // Check again after wait
+          if (abortController.signal.aborted) {
+            return;
+          }
 
           try {
             const fullChat = await chatApi.getChatById(chatId);
-            if (fullChat) {
+            if (fullChat && !abortController.signal.aborted) {
               queryClient.setQueryData(
                 chatKeys.list({ includeArchived, limit }),
                 (oldData: ChatListItem[] | undefined) => {
                   if (!oldData) return [fullChat];
-                  const updated = oldData.map((c) =>
-                    c.id === chatId ? { ...fullChat, _isOptimistic: false } : c
-                  );
-                  setCachedChats(updated); // Sync Zustand cache
-                  return updated;
+                  return oldData.map((c) => {
+                    if (c.id !== chatId) return c;
+
+                    // CRITICAL: Preserve telegram_supergroup_id from optimistic entry
+                    // if API doesn't have it yet (TelegramChatLinked event hasn't fired)
+                    // This prevents the chat from disappearing from filtered view
+                    const preservedSupergroupId = fullChat.telegram_supergroup_id ||
+                      (c as OptimisticChatListItem).telegram_supergroup_id;
+
+                    return {
+                      ...fullChat,
+                      telegram_supergroup_id: preservedSupergroupId,
+                      _isOptimistic: false,
+                    };
+                  });
                 }
               );
+              syncZustandCache();
               logger.info('WSE: Full chat fetched after retry', { chatId, attempt: i + 1 });
+              pendingRetriesRef.current.delete(chatId);
               return;
             }
           } catch (error) {
+            if (abortController.signal.aborted) return;
             if (i === attempts - 1) {
               logger.warn('WSE: Failed to fetch full chat after all retries, keeping optimistic', {
                 chatId,
                 attempts,
-                error
               });
+              // IMPORTANT: Still sync Zustand to persist optimistic entry
+              syncZustandCache();
             } else {
               logger.debug('WSE: Chat fetch attempt failed, retrying...', { chatId, attempt: i + 1 });
             }
           }
         }
+        pendingRetriesRef.current.delete(chatId);
       };
 
+      // Fire and track (not truly fire-and-forget anymore)
       fetchWithRetry();
     };
 
@@ -192,11 +289,7 @@ export function useChatList(options: UseChatListOptions = {}) {
         }
       );
 
-      // Sync Zustand cache after update
-      const currentChats = queryClient.getQueryData<ChatListItem[]>(
-        chatKeys.list({ includeArchived, limit })
-      );
-      if (currentChats) setCachedChats(currentChats);
+      syncZustandCache();
     };
 
     const handleChatArchived = (event: CustomEvent) => {
@@ -204,6 +297,9 @@ export function useChatList(options: UseChatListOptions = {}) {
       const chatId = archivedChat.chat_id || archivedChat.id;
 
       logger.debug('WSE: Chat archived', { chatId });
+
+      // Cancel any pending retries for this chat
+      cancelPendingRetry(chatId);
 
       if (!includeArchived) {
         // Remove from list if not showing archived
@@ -227,11 +323,7 @@ export function useChatList(options: UseChatListOptions = {}) {
         );
       }
 
-      // Sync Zustand cache
-      const currentChats = queryClient.getQueryData<ChatListItem[]>(
-        chatKeys.list({ includeArchived, limit })
-      );
-      if (currentChats) setCachedChats(currentChats);
+      syncZustandCache();
     };
 
     const handleChatDeleted = (event: CustomEvent) => {
@@ -239,6 +331,9 @@ export function useChatList(options: UseChatListOptions = {}) {
       const chatId = deletedChat.chat_id || deletedChat.id;
 
       logger.debug('WSE: Chat deleted', { chatId });
+
+      // Cancel any pending retries for this chat
+      cancelPendingRetry(chatId);
 
       // Remove from cache
       queryClient.setQueryData(
@@ -252,11 +347,7 @@ export function useChatList(options: UseChatListOptions = {}) {
       // Also remove detail cache
       queryClient.removeQueries({ queryKey: chatKeys.detail(chatId) });
 
-      // Sync Zustand cache
-      const currentChats = queryClient.getQueryData<ChatListItem[]>(
-        chatKeys.list({ includeArchived, limit })
-      );
-      if (currentChats) setCachedChats(currentChats);
+      syncZustandCache();
     };
 
     // OPTIMISTIC UPDATE: Update last_message when message is created
@@ -285,11 +376,7 @@ export function useChatList(options: UseChatListOptions = {}) {
         }
       );
 
-      // Sync Zustand cache
-      const currentChats = queryClient.getQueryData<ChatListItem[]>(
-        chatKeys.list({ includeArchived, limit })
-      );
-      if (currentChats) setCachedChats(currentChats);
+      syncZustandCache();
     };
 
     // CRITICAL: Update telegram_supergroup_id when chat is linked to telegram
@@ -303,6 +390,9 @@ export function useChatList(options: UseChatListOptions = {}) {
         chatId,
         telegramSupergroupId
       });
+
+      // Cancel pending retry - we have the real data now
+      cancelPendingRetry(chatId);
 
       queryClient.setQueryData(
         chatKeys.list({ includeArchived, limit }),
@@ -321,11 +411,32 @@ export function useChatList(options: UseChatListOptions = {}) {
         }
       );
 
-      // Sync Zustand cache
-      const currentChats = queryClient.getQueryData<ChatListItem[]>(
-        chatKeys.list({ includeArchived, limit })
+      syncZustandCache();
+    };
+
+    // Handle group deletion saga completion - remove all chats for the deleted company
+    const handleGroupDeletionCompleted = (event: CustomEvent) => {
+      const data = event.detail;
+      const companyId = data.company_id;
+
+      logger.debug('WSE: Group deletion completed, removing all chats for company', { companyId });
+
+      // Cancel any pending retries for chats being deleted
+      pendingRetriesRef.current.forEach((controller, chatId) => {
+        controller.abort();
+        pendingRetriesRef.current.delete(chatId);
+      });
+
+      // Remove all chats belonging to this company
+      queryClient.setQueryData(
+        chatKeys.list({ includeArchived, limit }),
+        (oldData: ChatListItem[] | undefined) => {
+          if (!oldData) return oldData;
+          return oldData.filter((chat) => chat.company_id !== companyId);
+        }
       );
-      if (currentChats) setCachedChats(currentChats);
+
+      syncZustandCache();
     };
 
     // Subscribe to WSE events
@@ -335,16 +446,25 @@ export function useChatList(options: UseChatListOptions = {}) {
     window.addEventListener('chatDeleted', handleChatDeleted as EventListener);
     window.addEventListener('messageCreated', handleMessageCreated as EventListener);
     window.addEventListener('chatTelegramLinked', handleChatTelegramLinked as EventListener);
+    window.addEventListener('groupDeletionCompleted', handleGroupDeletionCompleted as EventListener);
 
     return () => {
+      // Cleanup event listeners
       window.removeEventListener('chatCreated', handleChatCreated as EventListener);
       window.removeEventListener('chatUpdated', handleChatUpdated as EventListener);
       window.removeEventListener('chatArchived', handleChatArchived as EventListener);
       window.removeEventListener('chatDeleted', handleChatDeleted as EventListener);
       window.removeEventListener('messageCreated', handleMessageCreated as EventListener);
       window.removeEventListener('chatTelegramLinked', handleChatTelegramLinked as EventListener);
+      window.removeEventListener('groupDeletionCompleted', handleGroupDeletionCompleted as EventListener);
+
+      // CRITICAL: Cancel all pending retries on unmount to prevent stale writes
+      pendingRetriesRef.current.forEach((controller) => {
+        controller.abort();
+      });
+      pendingRetriesRef.current.clear();
     };
-  }, [queryClient, includeArchived, limit, setCachedChats]);
+  }, [queryClient, includeArchived, limit, syncZustandCache, cancelPendingRetry]);
 
   return {
     chats: query.data ?? [],

@@ -44,14 +44,29 @@ export function useCompany(companyId: string | null) {
       }
     };
 
+    // CRITICAL: Handle company deletion - remove from cache and disable query
+    const handleCompanyDeleted = (event: CustomEvent) => {
+      const detail = event.detail;
+      const deletedId = detail?.companyId || detail?.company_id || detail?.id;
+      if (deletedId === companyId) {
+        logger.debug('WSE: Company deleted, removing from cache', { companyId });
+        // Remove the data from cache - this stops further fetches
+        queryClient.setQueryData(companyKeys.detail(companyId), null);
+        // Also cancel any in-flight queries
+        queryClient.cancelQueries({ queryKey: companyKeys.detail(companyId) });
+      }
+    };
+
     window.addEventListener('companyUpdated', handleCompanyUpdate as EventListener);
     window.addEventListener('companyArchived', handleCompanyUpdate as EventListener);
     window.addEventListener('companyRestored', handleCompanyUpdate as EventListener);
+    window.addEventListener('companyDeleted', handleCompanyDeleted as EventListener);
 
     return () => {
       window.removeEventListener('companyUpdated', handleCompanyUpdate as EventListener);
       window.removeEventListener('companyArchived', handleCompanyUpdate as EventListener);
       window.removeEventListener('companyRestored', handleCompanyUpdate as EventListener);
+      window.removeEventListener('companyDeleted', handleCompanyDeleted as EventListener);
     };
   }, [companyId, queryClient]);
 
@@ -60,6 +75,17 @@ export function useCompany(companyId: string | null) {
     queryFn: () => companyApi.getCompanyById(companyId!),
     enabled: !!companyId,
     staleTime: 5 * 60 * 1000, // 5 minutes
+    // Don't retry 404 errors - company was deleted
+    retry: (failureCount, error) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const status = (error as any)?.response?.status;
+      if (status === 404) {
+        logger.debug('useCompany: 404 received, not retrying', { companyId });
+        return false;
+      }
+      // Default: retry up to 3 times
+      return failureCount < 3;
+    },
   });
 
   return {

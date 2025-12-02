@@ -26,8 +26,7 @@ class CompanyProjector:
     Projects company domain events to PostgreSQL read models.
 
     Handles all company-related events and updates the corresponding
-    read model tables (companies, user_companies, telegram_supergroups,
-    company_balance_transactions).
+    read model tables (companies, user_companies, telegram_supergroups).
 
     SYNC vs ASYNC projections:
     - SYNC: CompanyCreated, UserAddedToCompany, CompanyBalanceUpdated
@@ -378,16 +377,4 @@ class CompanyProjector:
             company_id=company_id,
             new_balance=Decimal(event_data['new_balance']),
             updated_at=envelope.stored_at,
-        )
-
-        # Insert balance transaction record
-        await self.company_read_repo.insert_balance_transaction(
-            company_id=company_id,
-            old_balance=Decimal(event_data['old_balance']),
-            new_balance=Decimal(event_data['new_balance']),
-            change_amount=Decimal(event_data['change_amount']),
-            reason=event_data['reason'],
-            reference_id=event_data.get('reference_id'),
-            updated_by=uuid.UUID(event_data['updated_by']),
-            created_at=envelope.stored_at,
         )

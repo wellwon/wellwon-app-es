@@ -34,6 +34,22 @@ class ServerType(str, Enum):
     UNKNOWN = "unknown"
 
 
+class Database(str, Enum):
+    """Database identifiers for multi-database support
+
+    Add new databases here as needed. Each database requires:
+    1. Enum entry (e.g., ANALYTICS = "analytics")
+    2. DSN in PostgresConfig (e.g., analytics_dsn)
+    3. Pool config method (e.g., @property analytics_pool)
+    4. Environment variable (e.g., POSTGRES_ANALYTICS_DSN)
+    """
+    MAIN = "main"
+    REFERENCE = "reference"
+    # Add more databases here in future:
+    # ANALYTICS = "analytics"
+    # REPORTING = "reporting"
+
+
 class PoolConfig(BaseModel):
     """PostgreSQL connection pool configuration (nested model)"""
     # Basic pool settings
@@ -97,18 +113,30 @@ class PostgresConfig(BaseConfig):
         env_prefix='PG_',
     )
 
-    # Connection string
+    # Connection strings
     main_dsn: Optional[str] = Field(
         default=None,
         alias="POSTGRES_DSN",
         description="Main database DSN"
     )
 
-    # Pool configuration
-    pool_min_size: int = Field(default=20, description="Pool min size")
-    pool_max_size: int = Field(default=100, description="Pool max size")
-    pool_timeout: float = Field(default=5.0, description="Pool timeout")
-    pool_command_timeout: float = Field(default=10.0, description="Pool command timeout")
+    reference_dsn: Optional[str] = Field(
+        default=None,
+        alias="POSTGRES_REFERENCE_DSN",
+        description="Reference database DSN (Declarant/Customs module)"
+    )
+
+    # Pool configuration (main database)
+    pool_min_size: int = Field(default=20, description="Main pool min size")
+    pool_max_size: int = Field(default=100, description="Main pool max size")
+    pool_timeout: float = Field(default=5.0, description="Main pool timeout")
+    pool_command_timeout: float = Field(default=10.0, description="Main pool command timeout")
+
+    # Pool configuration (reference database - smaller, read-heavy)
+    reference_pool_min_size: int = Field(default=10, description="Reference pool min size")
+    reference_pool_max_size: int = Field(default=50, description="Reference pool max size")
+    reference_pool_timeout: float = Field(default=5.0, description="Reference pool timeout")
+    reference_pool_command_timeout: float = Field(default=10.0, description="Reference pool command timeout")
 
     # Features
     run_schemas_on_startup: bool = Field(default=True)
@@ -150,8 +178,66 @@ class PostgresConfig(BaseConfig):
             max_queries=self.max_queries,
         )
 
+    @property
+    def reference_pool(self) -> PoolConfig:
+        """Get reference pool configuration (smaller, read-heavy)"""
+        return PoolConfig(
+            min_size=self.reference_pool_min_size,
+            max_size=self.reference_pool_max_size,
+            timeout=self.reference_pool_timeout,
+            command_timeout=self.reference_pool_command_timeout,
+            statement_cache_size=self.statement_cache_size,
+            max_cached_statement_lifetime=self.max_cached_statement_lifetime,
+            max_queries=self.max_queries,
+        )
+
+    def get_dsn(self, database: "Database" = None) -> Optional[str]:
+        """Get DSN for specified database (scalable for future databases)
+
+        Maps database enum to DSN attribute dynamically.
+        Example: Database.MAIN -> self.main_dsn
+                 Database.REFERENCE -> self.reference_dsn
+        """
+        if database is None:
+            database = Database.MAIN
+
+        # Dynamic attribute lookup: "main" -> "main_dsn"
+        dsn_attr = f"{database.value}_dsn"
+        dsn = getattr(self, dsn_attr, None)
+
+        if dsn is None:
+            raise ValueError(
+                f"DSN not configured for database '{database.value}'. "
+                f"Set {dsn_attr.upper()} or POSTGRES_{database.value.upper()}_DSN in environment."
+            )
+
+        return dsn
+
+    def get_pool_config(self, database: "Database" = None) -> PoolConfig:
+        """Get pool configuration for specified database (scalable)
+
+        Maps database enum to pool property dynamically.
+        Example: Database.MAIN -> self.main_pool
+                 Database.REFERENCE -> self.reference_pool
+        """
+        if database is None:
+            database = Database.MAIN
+
+        # Dynamic property lookup: "main" -> "main_pool"
+        pool_attr = f"{database.value}_pool"
+
+        try:
+            pool_config = getattr(self, pool_attr)
+        except AttributeError:
+            raise ValueError(
+                f"Pool configuration not defined for database '{database.value}'. "
+                f"Add @property {pool_attr}() to PostgresConfig class."
+            )
+
+        return pool_config
+
     def get_main_dsn(self) -> Optional[str]:
-        """Get main DSN"""
+        """Get main DSN (backward compatibility)"""
         return self.main_dsn
 
 

@@ -228,12 +228,11 @@ class GroupDeletionSaga(BaseSaga):
         - preserve_company=True: Skip company deletion, keep for re-linking
         - Default: preserve_company=False (delete everything)
         """
-        # DEBUG: Log all context to trace preserve_company value
-        log.error(
-            f"Saga {self.saga_id}: _delete_company STEP STARTED - "
+        # Log step start for tracing
+        log.debug(
+            f"Saga {self.saga_id}: _delete_company step - "
             f"preserve_company={context.get('preserve_company')}, "
-            f"company_id={context.get('company_id')}, "
-            f"context_keys={list(context.keys())}"
+            f"company_id={context.get('company_id')}"
         )
 
         # Check preserve_company flag (default: False = delete company)
@@ -248,9 +247,9 @@ class GroupDeletionSaga(BaseSaga):
 
         # FUTURE FLEXIBILITY: Skip company deletion if preserve_company=True
         if preserve_company:
-            log.error(
-                f"Saga {self.saga_id}: SKIPPING company deletion - preserve_company=True! "
-                f"Company {company_id} will be PRESERVED for re-linking"
+            log.info(
+                f"Saga {self.saga_id}: Skipping company deletion - preserve_company=True, "
+                f"company {company_id} will be preserved for re-linking"
             )
             return {
                 'company_deleted': False,
@@ -261,7 +260,7 @@ class GroupDeletionSaga(BaseSaga):
         # Get command_bus from context (TRUE SAGA: only CommandBus allowed)
         command_bus = context['command_bus']
 
-        log.error(f"Saga {self.saga_id}: DELETING company {company_id} via DeleteCompanyCommand")
+        log.info(f"Saga {self.saga_id}: Deleting company {company_id}")
 
         try:
             from app.company.commands import DeleteCompanyCommand

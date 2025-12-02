@@ -69,6 +69,7 @@ INTERNAL_TO_WS_EVENT_TYPE_MAP = {
     'TelegramSupergroupLinked': 'company_telegram_linked',
     'TelegramSupergroupUnlinked': 'company_telegram_unlinked',
     'TelegramSupergroupUpdated': 'company_telegram_updated',
+    'TelegramSupergroupDeleted': 'company_telegram_deleted',  # Telegram group deleted
     'CompanyBalanceUpdated': 'company_balance_updated',
 
     # =========================================================================
@@ -78,6 +79,7 @@ INTERNAL_TO_WS_EVENT_TYPE_MAP = {
     'ChatUpdated': 'chat_updated',
     'ChatArchived': 'chat_archived',
     'ChatDeleted': 'chat_deleted',
+    'ChatHardDeleted': 'chat_deleted',  # Hard delete also triggers deletion UI
     'MessageSent': 'message_created',
     'MessageEdited': 'message_updated',
     'MessageDeleted': 'message_deleted',
@@ -93,6 +95,15 @@ INTERNAL_TO_WS_EVENT_TYPE_MAP = {
     'TelegramChatLinked': 'chat_telegram_linked',
     'TelegramChatUnlinked': 'chat_telegram_unlinked',
     'TelegramMessageReceived': 'message_created',  # Telegram message → same as regular message
+
+    # =========================================================================
+    # SAGA COMPLETION EVENTS
+    # These notify frontend when long-running sagas complete
+    # =========================================================================
+    'GroupCreationSagaCompleted': 'group_creation_completed',
+    'GroupDeletionSagaCompleted': 'group_deletion_completed',
+    'GroupCreationSagaFailed': 'group_creation_failed',
+    'GroupDeletionSagaFailed': 'group_deletion_failed',
 
     # =========================================================================
     # SYSTEM EVENTS

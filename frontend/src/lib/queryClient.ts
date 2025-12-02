@@ -58,7 +58,21 @@ export const queryClient = new QueryClient({
       refetchOnReconnect: true,
 
       // Retry failed queries with exponential backoff
-      retry: 3,
+      // BUT: Don't retry 404/410 errors - resource was deleted or doesn't exist
+      retry: (failureCount, error) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const status = (error as any)?.response?.status;
+        // Don't retry 404 (Not Found) or 410 (Gone) - resource deleted
+        if (status === 404 || status === 410) {
+          return false;
+        }
+        // Don't retry 401/403 - auth issues won't be fixed by retry
+        if (status === 401 || status === 403) {
+          return false;
+        }
+        // Default: retry up to 3 times
+        return failureCount < 3;
+      },
       retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
     },
     mutations: {

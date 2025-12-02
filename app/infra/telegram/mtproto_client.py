@@ -1466,7 +1466,16 @@ class TelegramMTProtoClient:
             log.info(f"Topic {topic_id} deleted from group {group_id}")
             return True
         except Exception as e:
-            log.error(f"Failed to delete forum topic: {e}", exc_info=True)
+            error_str = str(e)
+            # TOPIC_ID_INVALID means topic already deleted or doesn't exist - this is success
+            if "TOPIC_ID_INVALID" in error_str:
+                log.debug(f"Topic {topic_id} already deleted or doesn't exist (idempotent success)")
+                return True
+            # CHAT_NOT_MODIFIED or similar - topic state already matches
+            if "NOT_MODIFIED" in error_str:
+                log.debug(f"Topic {topic_id} state unchanged (idempotent success)")
+                return True
+            log.error(f"Failed to delete forum topic: {e}")
             return False
 
     async def pin_forum_topic(self, group_id: int, topic_id: int, pinned: bool = True) -> bool:

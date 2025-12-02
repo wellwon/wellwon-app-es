@@ -67,6 +67,7 @@ class WSEDomainPublisher:
         enable_user_events: bool = True,
         enable_company_events: bool = True,
         enable_chat_events: bool = True,
+        enable_saga_events: bool = True,
         chat_read_repo: Optional['ChatReadRepo'] = None,
     ):
         """
@@ -78,6 +79,7 @@ class WSEDomainPublisher:
             enable_user_events: Enable user event forwarding
             enable_company_events: Enable company event forwarding
             enable_chat_events: Enable chat event forwarding
+            enable_saga_events: Enable saga completion event forwarding
             chat_read_repo: Chat read repository for querying participants
         """
         self._event_bus = event_bus
@@ -88,6 +90,7 @@ class WSEDomainPublisher:
         self._enable_user_events = enable_user_events
         self._enable_company_events = enable_company_events
         self._enable_chat_events = enable_chat_events
+        self._enable_saga_events = enable_saga_events
 
         # Subscription management
         self._subscriptions: Dict[str, str] = {}  # topic -> subscription_id
@@ -107,6 +110,7 @@ class WSEDomainPublisher:
             f"Users: {enable_user_events}, "
             f"Companies: {enable_company_events}, "
             f"Chats: {enable_chat_events}, "
+            f"Sagas: {enable_saga_events}, "
             f"ChatReadRepo: {'enabled' if chat_read_repo else 'disabled'}"
         )
 
@@ -135,7 +139,8 @@ class WSEDomainPublisher:
         """Subscribe to all configured domain event topics"""
         log.debug(
             f"Subscribing to domain events - "
-            f"user={self._enable_user_events}, company={self._enable_company_events}, chat={self._enable_chat_events}"
+            f"user={self._enable_user_events}, company={self._enable_company_events}, "
+            f"chat={self._enable_chat_events}, saga={self._enable_saga_events}"
         )
         try:
             if self._enable_user_events:
@@ -146,6 +151,9 @@ class WSEDomainPublisher:
 
             if self._enable_chat_events:
                 await self._subscribe_to_chat_events()
+
+            if self._enable_saga_events:
+                await self._subscribe_to_saga_events()
 
             log.debug(f"WSE subscriptions complete - {len(self._subscriptions)} topics")
 
@@ -245,6 +253,26 @@ class WSEDomainPublisher:
             await self._event_bus.subscribe(
                 channel=topic,
                 handler=self._handle_chat_event,
+                group="wse-domain-publisher",
+                consumer=f"wse-publisher-{os.getpid()}",
+            )
+            self._subscriptions[topic] = f"{topic}::wse-domain-publisher"
+            log.info(f"Subscribed to {topic} for WSE forwarding")
+        except Exception as e:
+            log.error(f"Failed to subscribe to {topic}: {e}")
+
+    async def _subscribe_to_saga_events(self) -> None:
+        """Subscribe to saga completion events"""
+        if not self._running:
+            log.debug("Skipping saga event subscription - service not running")
+            return
+
+        topic = "saga.events"
+
+        try:
+            await self._event_bus.subscribe(
+                channel=topic,
+                handler=self._handle_saga_event,
                 group="wse-domain-publisher",
                 consumer=f"wse-publisher-{os.getpid()}",
             )
@@ -459,6 +487,76 @@ class WSEDomainPublisher:
             self._forwarding_errors += 1
             log.error(f"Error handling chat event: {e}", exc_info=True)
 
+    async def _handle_saga_event(self, event: Dict[str, Any]) -> None:
+        """
+        Handle saga completion events.
+
+        Saga completion events are published to the user who initiated the saga,
+        so they can update their UI accordingly (e.g., show success/failure).
+        """
+        try:
+            event_type = event.get("event_type")
+
+            if not event_type:
+                log.warning(f"Saga event missing event_type: {event}")
+                return
+
+            # Map to WebSocket event type
+            ws_event_type = self._event_type_map.get(event_type)
+            if not ws_event_type:
+                self._events_filtered += 1
+                log.debug(f"No WSE mapping for saga event type: {event_type}")
+                return
+
+            # Extract IDs from saga event
+            company_id = event.get("company_id")
+            chat_id = event.get("chat_id")
+            created_by = event.get("created_by")
+            deleted_by = event.get("deleted_by")
+
+            # Transform to WebSocket format
+            wse_event = {
+                "event_type": event_type,
+                "saga_id": event.get("saga_id"),
+                "company_id": company_id,
+                "company_name": event.get("company_name"),
+                "chat_id": chat_id,
+                "telegram_group_id": event.get("telegram_group_id"),
+                "telegram_invite_link": event.get("telegram_invite_link"),
+                "chats_deleted": event.get("chats_deleted"),
+                "messages_deleted": event.get("messages_deleted"),
+                "telegram_group_deleted": event.get("telegram_group_deleted"),
+                "created_by": created_by,
+                "deleted_by": deleted_by,
+                "timestamp": event.get("timestamp", datetime.now(timezone.utc).isoformat()),
+            }
+
+            # Publish to the user who initiated the saga
+            user_id = created_by or deleted_by
+            if user_id:
+                user_topic = f"user:{user_id}:events"
+                await self._pubsub_bus.publish(
+                    topic=user_topic,
+                    event=wse_event,
+                )
+                log.debug(f"Forwarded {event_type} to user topic {user_topic}")
+
+            # Also publish to company topic for other subscribers
+            if company_id:
+                company_topic = f"company:{company_id}:events"
+                await self._pubsub_bus.publish(
+                    topic=company_topic,
+                    event=wse_event,
+                )
+                log.debug(f"Also forwarded {event_type} to company topic {company_topic}")
+
+            self._events_forwarded += 1
+            log.info(f"Forwarded saga event {event_type} -> {ws_event_type}")
+
+        except Exception as e:
+            self._forwarding_errors += 1
+            log.error(f"Error handling saga event: {e}", exc_info=True)
+
     async def _publish_to_chat_participants(
         self,
         chat_id: str,
@@ -672,6 +770,7 @@ class WSEDomainPublisher:
                 "users": self._enable_user_events,
                 "companies": self._enable_company_events,
                 "chats": self._enable_chat_events,
+                "sagas": self._enable_saga_events,
             }
         }
 

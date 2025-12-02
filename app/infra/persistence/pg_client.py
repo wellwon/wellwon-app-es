@@ -22,7 +22,7 @@ import time
 import asyncpg
 from asyncpg.exceptions import PostgresError, ConnectionDoesNotExistError
 
-from app.config.pg_client_config import get_database_config, DatabaseConfig
+from app.config.pg_client_config import get_database_config, DatabaseConfig, Database
 from app.config.reliability_config import ReliabilityConfigs
 from app.infra.reliability.circuit_breaker import CircuitBreaker
 from app.infra.reliability.retry import retry_async
@@ -77,32 +77,32 @@ def _get_monitoring_thresholds():
 
 
 # =============================================================================
-# Database Names
+# Database Registry (Multi-Database Support)
 # =============================================================================
-class Database(str, Enum):
-    """Supported databases"""
-    MAIN = "main"
+# Database enum is imported from config (Database.MAIN, Database.REFERENCE, etc.)
+# To add new database:
+# 1. Add enum entry in app/config/pg_client_config.py
+# 2. Add DSN field and pool property in PostgresConfig
+# 3. Registry will auto-initialize on first use
 
+# Global pool registry and locks (dynamically populated)
+_POOLS: Dict[str, Optional[asyncpg.Pool]] = {}
+_POOL_LOCKS: Dict[str, asyncio.Lock] = {}
 
-# Global pool registry and locks
-_POOLS: Dict[str, Optional[asyncpg.Pool]] = {
-    Database.MAIN: None,
-}
-_POOL_LOCKS: Dict[str, asyncio.Lock] = {
-    Database.MAIN: asyncio.Lock(),
-}
+# Initialize known databases
+for db in Database:
+    _POOLS[db.value] = None
+    _POOL_LOCKS[db.value] = asyncio.Lock()
 
-# v0.3 compatibility: Global pool instance and lock
+# v0.3 compatibility: Global pool instance and lock for main database
 _POOL: Optional[asyncpg.Pool] = None
 _POOL_LOCK = asyncio.Lock()
 
-# Circuit breakers for each database
+# Circuit breakers for each database (lazily initialized)
 _CIRCUIT_BREAKERS: Dict[str, CircuitBreaker] = {}
 
-# Retry configurations for each database
-_RETRY_CONFIGS: Dict[str, Any] = {
-    Database.MAIN: None,
-}
+# Retry configurations for each database (lazily initialized)
+_RETRY_CONFIGS: Dict[str, Any] = {}
 
 # Global config instance
 _CONFIG: Optional[DatabaseConfig] = None

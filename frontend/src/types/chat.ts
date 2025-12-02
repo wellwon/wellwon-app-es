@@ -69,11 +69,12 @@ export interface TemplateData {
 // Telegram-specific types
 export interface TelegramSupergroup {
   id: number;
-  company_id?: number;
+  telegram_group_id?: number;  // Actual Telegram group ID (0 or missing = not yet linked)
+  company_id?: string;  // UUID string from backend
   title: string;
-  username?: string;
-  description?: string;
-  invite_link?: string;
+  username?: string | null;
+  description?: string | null;
+  invite_link?: string | null;
   member_count: number;
   is_forum: boolean;
   is_active: boolean;
@@ -83,10 +84,12 @@ export interface TelegramSupergroup {
   max_reaction_count?: number;
   accent_color_id?: number;
   created_at: string;
-  updated_at: string;
+  updated_at?: string;
   metadata?: Record<string, unknown>;
-  company_logo?: string;
-  group_type?: 'client' | 'payments' | 'logistics' | 'buyers' | 'others' | 'wellwon';
+  company_logo?: string | null;
+  group_type?: 'client' | 'payments' | 'logistics' | 'buyers' | 'others' | 'wellwon' | 'company';
+  // Optimistic UI marker - true when added via WSE before API confirmation
+  _isOptimistic?: boolean;
 }
 
 export interface TelegramGroupMember {

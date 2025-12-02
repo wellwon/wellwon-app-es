@@ -7,7 +7,6 @@ import { WSMessage } from '@/wse';
 import { useSystemStatusStore } from '@/stores/useSystemStatusStore';
 import { logger } from '@/wse';
 import { queryClient } from '@/lib/queryClient';
-import type { Chat } from '@/types/realtime-chat';
 import { playMessageSound } from '@/services/NotificationSoundService';
 
 // Interface for message processor registration
@@ -393,6 +392,21 @@ export class EventHandlers {
     }
   }
 
+  static handleCompanyTelegramDeleted(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Company Telegram group deleted:', data);
+
+      // Invalidate company telegram cache
+      void queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'telegram'] });
+
+      // Dispatch event for useSupergroups to remove from cache
+      window.dispatchEvent(new CustomEvent('companyTelegramDeleted', { detail: data }));
+    } catch (error) {
+      logger.error('Error handling company telegram deleted:', error);
+    }
+  }
+
   static handleCompanyBalanceUpdated(message: WSMessage): void {
     try {
       const data = message.p;
@@ -404,6 +418,101 @@ export class EventHandlers {
       window.dispatchEvent(new CustomEvent('companyBalanceUpdated', { detail: data }));
     } catch (error) {
       logger.error('Error handling company balance updated:', error);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Saga Completion Events
+  // ─────────────────────────────────────────────────────────────────────────
+
+  static handleGroupCreationCompleted(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Group creation saga completed:', data);
+
+      // Saga completed - all resources created
+      // Dispatch event for UI components to finalize optimistic entries
+      window.dispatchEvent(new CustomEvent('groupCreationCompleted', {
+        detail: {
+          saga_id: data.saga_id,
+          company_id: data.company_id,
+          company_name: data.company_name,
+          chat_id: data.chat_id,
+          telegram_group_id: data.telegram_group_id,
+          telegram_invite_link: data.telegram_invite_link,
+          created_by: data.created_by,
+          timestamp: data.timestamp,
+        }
+      }));
+    } catch (error) {
+      logger.error('Error handling group creation completed:', error);
+    }
+  }
+
+  static handleGroupDeletionCompleted(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Group deletion saga completed:', data);
+
+      // Saga completed - all resources deleted
+      // Remove any remaining cache entries for this company
+      if (data.company_id) {
+        // Remove company from all caches
+        queryClient.removeQueries({ queryKey: ['company', data.company_id] });
+      }
+
+      // Dispatch event for UI components to clean up
+      window.dispatchEvent(new CustomEvent('groupDeletionCompleted', {
+        detail: {
+          saga_id: data.saga_id,
+          company_id: data.company_id,
+          company_name: data.company_name,
+          chats_deleted: data.chats_deleted,
+          telegram_group_deleted: data.telegram_group_deleted,
+          deleted_by: data.deleted_by,
+          timestamp: data.timestamp,
+        }
+      }));
+    } catch (error) {
+      logger.error('Error handling group deletion completed:', error);
+    }
+  }
+
+  static handleGroupCreationFailed(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.error('Group creation saga failed:', data);
+
+      // Dispatch event for UI to show error and remove optimistic entries
+      window.dispatchEvent(new CustomEvent('groupCreationFailed', {
+        detail: {
+          saga_id: data.saga_id,
+          company_id: data.company_id,
+          error: data.error,
+          timestamp: data.timestamp,
+        }
+      }));
+    } catch (error) {
+      logger.error('Error handling group creation failed:', error);
+    }
+  }
+
+  static handleGroupDeletionFailed(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.error('Group deletion saga failed:', data);
+
+      // Dispatch event for UI to show error
+      window.dispatchEvent(new CustomEvent('groupDeletionFailed', {
+        detail: {
+          saga_id: data.saga_id,
+          company_id: data.company_id,
+          error: data.error,
+          timestamp: data.timestamp,
+        }
+      }));
+    } catch (error) {
+      logger.error('Error handling group deletion failed:', error);
     }
   }
 
@@ -701,17 +810,9 @@ export class EventHandlers {
       // Invalidate chat detail cache
       void queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id] });
 
-      // IMPORTANT: Use setQueryData to update the specific chat instead of invalidating
-      // invalidateQueries would destroy optimistic entries before projection completes
-      // This preserves any optimistically added chats while updating the linked one
-      queryClient.setQueryData<Chat[] | undefined>(['chats'], (oldChats) => {
-        if (!oldChats) return oldChats;
-        return oldChats.map(chat =>
-          chat.id === data.chat_id
-            ? { ...chat, telegram_supergroup_id: data.telegram_supergroup_id }
-            : chat
-        );
-      });
+      // NOTE: Chat list update is handled by useChatList via the CustomEvent below.
+      // The useChatList hook has access to the correct query key pattern ['chats', 'list', {...}]
+      // and will update the chat's telegram_supergroup_id appropriately.
 
       // Safe to invalidate counts - these are separate aggregation queries
       void queryClient.invalidateQueries({ queryKey: ['supergroup-chat-counts'] });
@@ -958,7 +1059,14 @@ export class EventHandlers {
         'company_telegram_created': this.handleCompanyTelegramCreated,
         'company_telegram_linked': this.handleCompanyTelegramLinked,
         'company_telegram_unlinked': this.handleCompanyTelegramUnlinked,
+        'company_telegram_deleted': this.handleCompanyTelegramDeleted,
         'company_balance_updated': this.handleCompanyBalanceUpdated,
+
+        // Saga completion events
+        'group_creation_completed': this.handleGroupCreationCompleted,
+        'group_deletion_completed': this.handleGroupDeletionCompleted,
+        'group_creation_failed': this.handleGroupCreationFailed,
+        'group_deletion_failed': this.handleGroupDeletionFailed,
 
         // Chat domain events
         'chat_created': this.handleChatCreated,

@@ -16,7 +16,6 @@ from app.company.read_models import (
     CompanyReadModel,
     UserCompanyReadModel,
     TelegramSupergroupReadModel,
-    BalanceTransactionReadModel,
     CompanyListItemReadModel,
     UserCompanyListItemReadModel,
 )
@@ -196,14 +195,7 @@ class CompanyReadRepo:
             "DELETE FROM user_companies WHERE company_id = $1",
             company_id
         )
-        # Delete company balance transactions (table may not exist yet)
-        try:
-            await pg_client.execute(
-                "DELETE FROM company_balance_transactions WHERE company_id = $1",
-                company_id
-            )
-        except Exception:
-            pass  # Table doesn't exist yet - skip
+        # NOTE: company_balance_transactions table removed - not needed for MVP
         # Delete telegram supergroups linked to this company
         await pg_client.execute(
             "DELETE FROM telegram_supergroups WHERE company_id = $1",
@@ -652,33 +644,8 @@ class CompanyReadRepo:
         return CompanyReadModel(**dict(row))
 
     # =========================================================================
-    # Balance Transaction Operations
+    # Balance Operations
     # =========================================================================
-
-    @staticmethod
-    async def insert_balance_transaction(
-        transaction_id: uuid.UUID,
-        company_id: uuid.UUID,
-        old_balance: Decimal,
-        new_balance: Decimal,
-        change_amount: Decimal,
-        reason: str,
-        reference_id: Optional[str],
-        updated_by: uuid.UUID,
-        created_at: datetime,
-    ) -> None:
-        """Insert a balance transaction record"""
-        await pg_client.execute(
-            """
-            INSERT INTO company_balance_transactions (
-                id, company_id, old_balance, new_balance, change_amount,
-                reason, reference_id, updated_by, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            ON CONFLICT (id) DO NOTHING
-            """,
-            transaction_id, company_id, old_balance, new_balance, change_amount,
-            reason, reference_id, updated_by, created_at
-        )
 
     @staticmethod
     async def get_company_balance(company_id: uuid.UUID) -> Optional[Decimal]:
@@ -688,25 +655,6 @@ class CompanyReadRepo:
             company_id
         )
         return result
-
-    @staticmethod
-    async def get_balance_history(
-        company_id: uuid.UUID,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> List[BalanceTransactionReadModel]:
-        """Get balance transaction history"""
-        rows = await pg_client.fetch(
-            """
-            SELECT * FROM company_balance_transactions
-            WHERE company_id = $1
-            ORDER BY created_at DESC
-            LIMIT $2 OFFSET $3
-            """,
-            company_id, limit, offset
-        )
-
-        return [BalanceTransactionReadModel(**dict(row)) for row in rows]
 
     # =========================================================================
     # Telegram Supergroup Global Operations

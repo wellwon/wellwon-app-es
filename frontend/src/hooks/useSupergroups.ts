@@ -1,11 +1,11 @@
 // =============================================================================
 // File: src/hooks/useSupergroups.ts
 // Description: React Query hooks for Telegram supergroups with WSE integration
-// Pattern: TkDodo's "Using WebSockets with React Query"
+// Pattern: TkDodo's "Using WebSockets with React Query" + proper cleanup
 // =============================================================================
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import * as telegramApi from '@/api/telegram';
 import * as companyApi from '@/api/company';
 import type { TelegramSupergroup } from '@/types/chat';
@@ -36,6 +36,17 @@ export function useActiveSupergroups() {
   const cachedUpdatedAt = useSupergroupsStore((s) => s.cachedUpdatedAt);
   const setCachedActiveSupergroups = useSupergroupsStore((s) => s.setCachedActiveSupergroups);
 
+  // Track pending timeouts for cleanup
+  const pendingTimeoutsRef = useRef<Set<NodeJS.Timeout>>(new Set());
+
+  // Helper to sync Zustand after cache updates
+  const syncZustandCache = useCallback(() => {
+    const currentData = queryClient.getQueryData<TelegramSupergroup[]>(supergroupKeys.active);
+    if (currentData) {
+      setCachedActiveSupergroups(currentData);
+    }
+  }, [queryClient, setCachedActiveSupergroups]);
+
   useEffect(() => {
     // Optimistic delete - immediately remove from cache
     const handleDeleted = (event: CustomEvent) => {
@@ -50,6 +61,7 @@ export function useActiveSupergroups() {
           return oldData.filter((group) => group.company_id !== companyId);
         }
       );
+      syncZustandCache();
     };
 
     // Optimistic archive - remove from active list
@@ -65,15 +77,21 @@ export function useActiveSupergroups() {
           return oldData.filter((group) => group.company_id !== companyId);
         }
       );
+      syncZustandCache();
     };
 
     // OPTIMISTIC CREATE: Immediately add new company to cache
     const handleCreated = (event: CustomEvent) => {
       const data = event.detail;
-      logger.info('WSE: Company created, adding to cache optimistically', { data });
+      logger.info('WSE: Company created, adding to cache optimistically', {
+        companyId: data.company_id || data.id,
+        name: data.name || data.company_name,
+      });
 
       // Create optimistic supergroup entry from event data
+      // _isOptimistic: true marks this as not yet confirmed by API
       const newSupergroup: TelegramSupergroup = {
+        id: 0,  // Placeholder until Telegram group created
         telegram_group_id: data.telegram_group_id || 0,
         title: data.name || data.company_name || 'New Company',
         username: null,
@@ -87,6 +105,7 @@ export function useActiveSupergroups() {
         member_count: 1,
         is_active: true,
         bot_is_admin: false,
+        _isOptimistic: true,  // CRITICAL: Mark as optimistic entry
       };
 
       // Add to active cache immediately
@@ -94,18 +113,22 @@ export function useActiveSupergroups() {
         supergroupKeys.active,
         (oldData: TelegramSupergroup[] | undefined) => {
           if (!oldData) return [newSupergroup];
-          // Avoid duplicates
+          // Avoid duplicates (idempotent)
           const exists = oldData.some((g) => g.company_id === newSupergroup.company_id);
           if (exists) return oldData;
           return [newSupergroup, ...oldData];
         }
       );
+      syncZustandCache();
     };
 
     // OPTIMISTIC TELEGRAM LINKED: Update with real telegram data
     const handleTelegramCreated = (event: CustomEvent) => {
       const data = event.detail;
-      logger.info('WSE: Telegram supergroup created, updating cache', { data });
+      logger.info('WSE: Telegram supergroup created, updating cache', {
+        companyId: data.company_id,
+        telegramGroupId: data.telegram_group_id,
+      });
 
       const companyId = data.company_id;
       const telegramGroupId = data.telegram_group_id;
@@ -126,20 +149,70 @@ export function useActiveSupergroups() {
           );
         }
       );
+      syncZustandCache();
     };
 
-    // For restore/update - delay refetch to allow projection
+    // For restore/update - delay refetch to allow projection (with cleanup)
     const handleNeedsRefetchDelayed = () => {
       logger.debug('WSE: Supergroup needs refetch (delayed 300ms)');
-      setTimeout(() => {
+      const timeout = setTimeout(() => {
+        pendingTimeoutsRef.current.delete(timeout);
         queryClient.invalidateQueries({ queryKey: supergroupKeys.active });
       }, 300);
+      pendingTimeoutsRef.current.add(timeout);
+    };
+
+    // Handle telegram supergroup deletion (from saga)
+    const handleTelegramDeleted = (event: CustomEvent) => {
+      const data = event.detail;
+      const companyId = data.company_id;
+      logger.debug('WSE: Telegram supergroup deleted, removing from cache', { companyId });
+
+      queryClient.setQueryData(
+        supergroupKeys.active,
+        (oldData: TelegramSupergroup[] | undefined) => {
+          if (!oldData) return oldData;
+          return oldData.filter((group) => group.company_id !== companyId);
+        }
+      );
+      syncZustandCache();
+    };
+
+    // Handle group deletion saga completion - final cleanup
+    const handleGroupDeletionCompleted = (event: CustomEvent) => {
+      const data = event.detail;
+      const companyId = data.company_id;
+      logger.debug('WSE: Group deletion saga completed, ensuring cleanup', { companyId });
+
+      // Final cleanup - remove from all caches
+      queryClient.setQueryData(
+        supergroupKeys.active,
+        (oldData: TelegramSupergroup[] | undefined) => {
+          if (!oldData) return oldData;
+          return oldData.filter((group) => group.company_id !== companyId);
+        }
+      );
+
+      // Also remove from balances cache
+      queryClient.setQueryData(
+        supergroupKeys.balances,
+        (oldData: Record<string, unknown> | undefined) => {
+          if (!oldData) return oldData;
+          const newData = { ...oldData };
+          delete newData[companyId];
+          return newData;
+        }
+      );
+
+      syncZustandCache();
     };
 
     window.addEventListener('companyDeleted', handleDeleted as EventListener);
     window.addEventListener('companyArchived', handleArchived as EventListener);
     window.addEventListener('companyCreated', handleCreated as EventListener);
     window.addEventListener('companyTelegramCreated', handleTelegramCreated as EventListener);
+    window.addEventListener('companyTelegramDeleted', handleTelegramDeleted as EventListener);
+    window.addEventListener('groupDeletionCompleted', handleGroupDeletionCompleted as EventListener);
     window.addEventListener('companyRestored', handleNeedsRefetchDelayed);
     window.addEventListener('supergroupUpdated', handleNeedsRefetchDelayed);
 
@@ -148,10 +221,16 @@ export function useActiveSupergroups() {
       window.removeEventListener('companyArchived', handleArchived as EventListener);
       window.removeEventListener('companyCreated', handleCreated as EventListener);
       window.removeEventListener('companyTelegramCreated', handleTelegramCreated as EventListener);
+      window.removeEventListener('companyTelegramDeleted', handleTelegramDeleted as EventListener);
+      window.removeEventListener('groupDeletionCompleted', handleGroupDeletionCompleted as EventListener);
       window.removeEventListener('companyRestored', handleNeedsRefetchDelayed);
       window.removeEventListener('supergroupUpdated', handleNeedsRefetchDelayed);
+
+      // Cleanup pending timeouts on unmount
+      pendingTimeoutsRef.current.forEach(clearTimeout);
+      pendingTimeoutsRef.current.clear();
     };
-  }, [queryClient]);
+  }, [queryClient, syncZustandCache]);
 
   return useQuery({
     queryKey: supergroupKeys.active,
@@ -159,18 +238,21 @@ export function useActiveSupergroups() {
       const apiData = await telegramApi.getAllSupergroups(true);
 
       // CRITICAL: Preserve optimistic entries that were added via WSE events
-      // Optimistic entries have telegram_group_id === 0 (not yet linked to Telegram)
+      // These have _isOptimistic: true - not yet confirmed by API/projection
       const existingData = queryClient.getQueryData<TelegramSupergroup[]>(supergroupKeys.active);
       if (existingData && Array.isArray(existingData)) {
-        const optimisticEntries = existingData.filter(e => e.telegram_group_id === 0);
+        const optimisticEntries = existingData.filter(e => e._isOptimistic === true);
         if (optimisticEntries.length > 0) {
           logger.info('Preserving optimistic entries during fetch', {
             optimisticCount: optimisticEntries.length,
-            apiCount: apiData.length
+            apiCount: apiData.length,
+            optimisticIds: optimisticEntries.map(e => e.company_id),
           });
-          // Merge: optimistic entries first, then API data (excluding duplicates)
+          // Merge: Keep optimistic entries that aren't in API yet
           const apiCompanyIds = new Set(apiData.map(a => a.company_id));
           const uniqueOptimistic = optimisticEntries.filter(o => !apiCompanyIds.has(o.company_id));
+
+          // API entries don't have _isOptimistic (or it's false)
           const result = [...uniqueOptimistic, ...apiData];
           // Persist to Zustand for instant load on refresh
           setCachedActiveSupergroups(result);
@@ -300,6 +382,17 @@ export function useSupergroups() {
   const setCachedActiveSupergroups = useSupergroupsStore((s) => s.setCachedActiveSupergroups);
   const setCachedArchivedSupergroups = useSupergroupsStore((s) => s.setCachedArchivedSupergroups);
 
+  // Track pending timeouts for cleanup
+  const pendingTimeoutsRef = useRef<Set<NodeJS.Timeout>>(new Set());
+
+  // Helper to sync Zustand after cache updates
+  const syncZustandCaches = useCallback(() => {
+    const activeData = queryClient.getQueryData<TelegramSupergroup[]>(supergroupKeys.active);
+    const archivedData = queryClient.getQueryData<TelegramSupergroup[]>(supergroupKeys.archived);
+    if (activeData) setCachedActiveSupergroups(activeData);
+    if (archivedData) setCachedArchivedSupergroups(archivedData);
+  }, [queryClient, setCachedActiveSupergroups, setCachedArchivedSupergroups]);
+
   // Listen for WSE events with optimistic updates
   useEffect(() => {
     // Optimistic delete - immediately remove from both caches
@@ -333,6 +426,7 @@ export function useSupergroups() {
           return rest;
         }
       );
+      syncZustandCaches();
     };
 
     // Optimistic archive - move from active to archived (remove from active, invalidate archived)
@@ -349,8 +443,13 @@ export function useSupergroups() {
           return oldData.filter((group) => group.company_id !== companyId);
         }
       );
-      // Invalidate archived to refetch with new item
-      queryClient.invalidateQueries({ queryKey: supergroupKeys.archived });
+      syncZustandCaches();
+      // Invalidate archived to refetch with new item (with delay for projection)
+      const timeout = setTimeout(() => {
+        pendingTimeoutsRef.current.delete(timeout);
+        queryClient.invalidateQueries({ queryKey: supergroupKeys.archived });
+      }, 300);
+      pendingTimeoutsRef.current.add(timeout);
     };
 
     // Optimistic restore - move from archived to active (remove from archived, invalidate active)
@@ -367,15 +466,20 @@ export function useSupergroups() {
           return oldData.filter((group) => group.company_id !== companyId);
         }
       );
-      // Invalidate active to refetch with restored item
-      queryClient.invalidateQueries({ queryKey: supergroupKeys.active });
+      syncZustandCaches();
+      // Invalidate active to refetch with restored item (with delay for projection)
+      const timeout = setTimeout(() => {
+        pendingTimeoutsRef.current.delete(timeout);
+        queryClient.invalidateQueries({ queryKey: supergroupKeys.active });
+      }, 300);
+      pendingTimeoutsRef.current.add(timeout);
     };
 
     // Optimistic update - immediately update name/data in cache
     const handleUpdated = (event: CustomEvent) => {
       const data = event.detail;
       const companyId = data.company_id || data.id;
-      logger.info('WSE: Company updated, updating cache', { companyId, data });
+      logger.info('WSE: Company updated, updating cache', { companyId });
 
       // Update in active cache
       queryClient.setQueryData(
@@ -401,14 +505,20 @@ export function useSupergroups() {
           );
         }
       );
+      syncZustandCaches();
     };
 
     // OPTIMISTIC CREATE: Immediately add new company to cache
     const handleCreated = (event: CustomEvent) => {
       const data = event.detail;
-      logger.info('WSE: Company created, adding to active cache optimistically', { data });
+      logger.info('WSE: Company created, adding to active cache optimistically', {
+        companyId: data.company_id || data.id,
+        name: data.name || data.company_name,
+      });
 
+      // _isOptimistic: true marks this as not yet confirmed by API
       const newSupergroup: TelegramSupergroup = {
+        id: 0,  // Placeholder until Telegram group created
         telegram_group_id: data.telegram_group_id || 0,
         title: data.name || data.company_name || 'New Company',
         username: null,
@@ -422,23 +532,29 @@ export function useSupergroups() {
         member_count: 1,
         is_active: true,
         bot_is_admin: false,
+        _isOptimistic: true,  // CRITICAL: Mark as optimistic entry
       };
 
       queryClient.setQueryData(
         supergroupKeys.active,
         (oldData: TelegramSupergroup[] | undefined) => {
           if (!oldData) return [newSupergroup];
+          // Avoid duplicates (idempotent)
           const exists = oldData.some((g) => g.company_id === newSupergroup.company_id);
           if (exists) return oldData;
           return [newSupergroup, ...oldData];
         }
       );
+      syncZustandCaches();
     };
 
     // OPTIMISTIC TELEGRAM LINKED: Update with real telegram data
     const handleTelegramCreated = (event: CustomEvent) => {
       const data = event.detail;
-      logger.info('WSE: Telegram supergroup created, updating active cache', { data });
+      logger.info('WSE: Telegram supergroup created, updating active cache', {
+        companyId: data.company_id,
+        telegramGroupId: data.telegram_group_id,
+      });
 
       const companyId = data.company_id;
       const telegramGroupId = data.telegram_group_id;
@@ -459,14 +575,17 @@ export function useSupergroups() {
           );
         }
       );
+      syncZustandCaches();
     };
 
-    // For restore/update - delay refetch
+    // For restore/update - delay refetch (with cleanup)
     const handleNeedsRefetchDelayed = () => {
       logger.debug('WSE: Supergroups need refetch (delayed 300ms)');
-      setTimeout(() => {
+      const timeout = setTimeout(() => {
+        pendingTimeoutsRef.current.delete(timeout);
         queryClient.invalidateQueries({ queryKey: supergroupKeys.all });
       }, 300);
+      pendingTimeoutsRef.current.add(timeout);
     };
 
     window.addEventListener('companyDeleted', handleDeleted as EventListener);
@@ -485,8 +604,12 @@ export function useSupergroups() {
       window.removeEventListener('companyCreated', handleCreated as EventListener);
       window.removeEventListener('companyTelegramCreated', handleTelegramCreated as EventListener);
       window.removeEventListener('supergroupUpdated', handleNeedsRefetchDelayed);
+
+      // Cleanup pending timeouts on unmount
+      pendingTimeoutsRef.current.forEach(clearTimeout);
+      pendingTimeoutsRef.current.clear();
     };
-  }, [queryClient]);
+  }, [queryClient, syncZustandCaches]);
 
   // Fetch active supergroups
   const activeQuery = useQuery({
@@ -495,14 +618,17 @@ export function useSupergroups() {
       const apiData = await telegramApi.getAllSupergroups(true);
 
       // CRITICAL: Preserve optimistic entries that were added via WSE events
+      // These have _isOptimistic: true - not yet confirmed by API/projection
       const existingData = queryClient.getQueryData<TelegramSupergroup[]>(supergroupKeys.active);
       if (existingData && Array.isArray(existingData)) {
-        const optimisticEntries = existingData.filter(e => e.telegram_group_id === 0);
+        const optimisticEntries = existingData.filter(e => e._isOptimistic === true);
         if (optimisticEntries.length > 0) {
           logger.info('useSupergroups: Preserving optimistic entries', {
             optimisticCount: optimisticEntries.length,
-            apiCount: apiData.length
+            apiCount: apiData.length,
+            optimisticIds: optimisticEntries.map(e => e.company_id),
           });
+          // Keep optimistic entries that aren't in API yet
           const apiCompanyIds = new Set(apiData.map(a => a.company_id));
           const uniqueOptimistic = optimisticEntries.filter(o => !apiCompanyIds.has(o.company_id));
           const result = [...uniqueOptimistic, ...apiData];
