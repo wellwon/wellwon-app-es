@@ -8,6 +8,7 @@
 // Export Form Templates API
 export * from './form-templates-api';
 
+import { API } from '@/api/core';
 import { CheckCircle, AlertCircle } from 'lucide-react';
 import type {
   DeclarantBatch,
@@ -218,18 +219,6 @@ export interface DocflowResponse {
  * Create new docflow (пакет декларации) via Kontur API
  */
 export async function createDocflow(request: CreateDocflowRequest): Promise<DocflowResponse> {
-  const response = await fetch('/declarant/docflows', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(request),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ detail: 'Неизвестная ошибка' }));
-    throw new Error(errorData.detail || `HTTP error: ${response.status}`);
-  }
-
-  return response.json();
+  const response = await API.post<DocflowResponse>('/declarant/docflows', request);
+  return response.data;
 }

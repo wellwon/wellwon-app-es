@@ -16,6 +16,7 @@ import { SchemaTree } from './tree/SchemaTree';
 import { FormPreview } from './preview/FormPreview';
 import { HistoryPanel } from './panels/HistoryPanel';
 import { VersionsPanel } from './panels/VersionsPanel';
+import { DebugModal } from './DebugModal';
 import { useFormDefinition } from '../../hooks/useFormTemplates';
 import { saveSections, saveFormWidth } from '../../api/form-templates-api';
 import type { FormTemplate } from '../../types/form-builder';
@@ -111,6 +112,9 @@ export const FormBuilderPage: React.FC<FormBuilderPageProps> = ({ defaultIsDark 
   // Track if form width was changed from initial loaded value
   const [initialFormWidth, setInitialFormWidth] = useState<number | null>(null);
   const [isFormWidthDirty, setIsFormWidthDirty] = useState(false);
+
+  // Debug modal state
+  const [debugModalOpen, setDebugModalOpen] = useState(false);
 
   // Toggle theme handler
   const handleToggleTheme = useCallback(() => {
@@ -554,6 +558,7 @@ export const FormBuilderPage: React.FC<FormBuilderPageProps> = ({ defaultIsDark 
               onTabChange={setActiveTab}
               onToggleTheme={handleToggleTheme}
               onFormWidthChange={handleFormWidthChange}
+              onDebug={() => setDebugModalOpen(true)}
             />
           }
           leftPanel={
@@ -577,6 +582,13 @@ export const FormBuilderPage: React.FC<FormBuilderPageProps> = ({ defaultIsDark 
           />
         )}
       </DragOverlay>
+
+      {/* Debug Modal */}
+      <DebugModal
+        open={debugModalOpen}
+        onOpenChange={setDebugModalOpen}
+        isDark={isDark}
+      />
     </DndContext>
   );
 };

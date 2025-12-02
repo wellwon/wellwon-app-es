@@ -81,6 +81,9 @@ interface FormBuilderActions {
   isFieldUsed: (schemaPath: string) => boolean;
   getUsedFieldPaths: () => Set<string>;
 
+  // Debug import
+  addFieldsFromJson: (json: Record<string, unknown>) => number;
+
   // Version label
   setLoadedVersionLabel: (label: string | null) => void;
   clearLoadedVersionLabel: () => void;
@@ -617,6 +620,110 @@ export const useFormBuilderStore = create<FormBuilderState & FormBuilderActions>
       }
     }
     return paths;
+  },
+
+  // =========================================================================
+  // Debug import
+  // =========================================================================
+
+  addFieldsFromJson: (json: Record<string, unknown>) => {
+    const state = get();
+    if (!state.template) return 0;
+
+    // Get existing paths
+    const existingPaths = state.getUsedFieldPaths();
+
+    // Recursively extract all paths from JSON
+    const extractPaths = (obj: unknown, prefix = ''): string[] => {
+      const paths: string[] = [];
+
+      if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+          const path = prefix ? `${prefix}.${key}` : key;
+
+          if (value && typeof value === 'object' && !Array.isArray(value)) {
+            // For nested objects, add the path and recurse
+            paths.push(...extractPaths(value, path));
+          } else {
+            // Leaf node - add the path
+            paths.push(path);
+          }
+        }
+      }
+
+      return paths;
+    };
+
+    const jsonPaths = extractPaths(json);
+    const newPaths = jsonPaths.filter((path) => !existingPaths.has(path));
+
+    if (newPaths.length === 0) return 0;
+
+    // Create or find "Import" section
+    let importSectionId: string | null = null;
+
+    set(
+      produce((draft: FormBuilderState) => {
+        if (!draft.template) return;
+
+        // Find or create "Import" section
+        let importSection = draft.template.sections.find(
+          (s) => s.key === 'debug-import'
+        );
+
+        if (!importSection) {
+          importSection = {
+            id: uuidv4(),
+            key: 'debug-import',
+            titleRu: 'Импорт (Debug)',
+            descriptionRu: 'Поля, импортированные из JSON документа',
+            icon: 'Bug',
+            order: draft.template.sections.length,
+            columns: 2,
+            collapsible: true,
+            defaultExpanded: true,
+            fields: [],
+          };
+          draft.template.sections.push(importSection);
+        }
+
+        importSectionId = importSection.id;
+
+        // Add new fields
+        for (const path of newPaths) {
+          // Try to find in schema
+          const schemaField = state.getFieldByPath(path);
+          const pathParts = path.split('.');
+          const fieldName = pathParts[pathParts.length - 1];
+
+          const newField: FormFieldConfig = {
+            id: uuidv4(),
+            schemaPath: path,
+            customLabel: schemaField?.label_ru || fieldName,
+            width: 'half' as FieldWidth,
+            order: importSection.fields.length,
+          };
+
+          importSection.fields.push(newField);
+        }
+
+        // Save history
+        draft.history = draft.history.slice(0, draft.historyIndex + 1);
+        draft.history.push({
+          id: uuidv4(),
+          actionType: 'fields_imported',
+          description: `Импортировано ${newPaths.length} полей из JSON`,
+          timestamp: new Date().toISOString(),
+          beforeState: [...state.template!.sections],
+          afterState: draft.template.sections.map((s) => ({ ...s, fields: [...s.fields] })),
+        });
+        draft.historyIndex = draft.history.length - 1;
+
+        draft.isDirty = true;
+      })
+    );
+
+    return newPaths.length;
   },
 
   // =========================================================================

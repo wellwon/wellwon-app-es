@@ -15,6 +15,7 @@ import {
   Moon,
   Minus,
   Plus,
+  Bug,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -37,6 +38,7 @@ interface BuilderHeaderProps {
   onExport?: () => void;
   onImport?: () => void;
   onFormWidthChange: (width: number) => void;
+  onDebug?: () => void;
 }
 
 export const BuilderHeader: React.FC<BuilderHeaderProps> = ({
@@ -56,6 +58,7 @@ export const BuilderHeader: React.FC<BuilderHeaderProps> = ({
   onExport,
   onImport,
   onFormWidthChange,
+  onDebug,
 }) => {
   const navigate = useNavigate();
 
@@ -169,6 +172,20 @@ export const BuilderHeader: React.FC<BuilderHeaderProps> = ({
               <Upload className="w-4 h-4" />
               Импорт
             </button>
+
+            {/* Debug button */}
+            {onDebug && (
+              <button
+                onClick={onDebug}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5',
+                  theme.tabInactive
+                )}
+              >
+                <Bug className="w-4 h-4" />
+                Debug
+              </button>
+            )}
           </div>
         </div>
 

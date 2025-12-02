@@ -2065,3 +2065,39 @@ async def create_docflow(request: CreateDocflowRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Ошибка создания пакета: {str(e)}"
         )
+
+
+@docflows_router.get("/{docflow_id}/form/{form_id}/json")
+async def get_form_json(docflow_id: str, form_id: str):
+    """
+    Get JSON content of a document form from Kontur API
+
+    Debug endpoint for fetching document JSON data.
+
+    Args:
+        docflow_id: UUID of the docflow
+        form_id: UUID of the form
+
+    Returns:
+        JSON content of the document
+    """
+    try:
+        log.info(f"Fetching form JSON: docflow_id={docflow_id}, form_id={form_id}")
+
+        client = get_kontur_client()
+        json_content = await client.get_form_json(docflow_id, form_id)
+
+        return {"json": json_content}
+
+    except KonturClientError as e:
+        log.error(f"Kontur API error fetching form JSON: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Ошибка Kontur API: {str(e)}"
+        )
+    except Exception as e:
+        log.error(f"Error fetching form JSON: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка получения JSON: {str(e)}"
+        )

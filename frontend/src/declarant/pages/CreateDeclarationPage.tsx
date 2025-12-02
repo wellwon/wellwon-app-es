@@ -373,11 +373,32 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
   const [docflowResponse, setDocflowResponse] = useState<DocflowResponse | null>(null);
   const [docflowError, setDocflowError] = useState<string | null>(null);
 
-  // Маппинг направления на type для API
+  // Маппинг направления на kontur_id type для API
+  // Согласно справочнику: Ввоз=1, Вывоз=3, Транзит=24
   const directionToType: Record<string, number> = {
-    'IM': 0,  // Импорт
-    'EK': 1,  // Экспорт
-    'TT': 2,  // Транзит (возможно другой код, уточнить в API)
+    'IM': 1,   // Ввоз (kontur_id=1)
+    'EK': 3,   // Вывоз (kontur_id=3)
+    'TT': 24,  // Таможенный транзит (kontur_id=24)
+  };
+
+  // Маппинг процедур (код -> kontur_id)
+  // ИМ процедуры: 40->1, 51->2, 53->3, и т.д.
+  // ЭК процедуры: 10->7, 21->8, 22->9, и т.д.
+  const procedureToKonturId: Record<string, number> = {
+    // ИМ процедуры
+    '40': 1,   // Выпуск для внутреннего потребления
+    '51': 2,   // Переработка на таможенной территории
+    '53': 3,   // Временный ввоз
+    '63': 4,   // Реимпорт
+    '78': 5,   // Уничтожение (ИМ)
+    '41': 6,   // Свободная таможенная зона (ИМ)
+    '42': 2,   // Переработка на ТТ (аналог 51)
+    // ЭК процедуры
+    '10': 7,   // Экспорт
+    '21': 8,   // Реэкспорт
+    '22': 9,   // Временный вывоз
+    '23': 10,  // Переработка вне ТТ
+    '31': 11,  // Свободная таможенная зона (ЭК)
   };
 
   // Маппинг таможенных органов (мок-данные -> коды)
@@ -391,17 +412,48 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
     'spb': 10210000,
   };
 
-  // Функция создания пакета декларации
-  const handleCreateDocflow = async () => {
-    // Валидация обязательных полей
-    if (!createDirection || !createCustomsOffice || !createOrganization || !createDeclarant) {
-      setDocflowError('Заполните все обязательные поля: тип декларации, таможенный орган, организация, декларант');
-      return;
-    }
+  // Маппинг организаций и сотрудников (мок -> реальные kontur_id)
+  // TODO: Получать из справочников через API
+  const organizationKonturIdMap: Record<string, string> = {
+    'promtorg': '49e99c39-7ba1-48f0-a7be-0fcf92ed5c78',  // Демо-участник ВЭД
+    'techimport': '49e99c39-7ba1-48f0-a7be-0fcf92ed5c78',
+    'euroservice': '49e99c39-7ba1-48f0-a7be-0fcf92ed5c78',
+    'globallogistics': '49e99c39-7ba1-48f0-a7be-0fcf92ed5c78',
+    'transsnab': '49e99c39-7ba1-48f0-a7be-0fcf92ed5c78',
+  };
 
+  const employeeKonturIdMap: Record<string, string> = {
+    'ivanov': '223f7665-52f0-4b00-8fa2-ba8b0d6dd536',     // Иванов Иван Иванович
+    'petrov': '223f7665-52f0-4b00-8fa2-ba8b0d6dd536',
+    'sidorov': '223f7665-52f0-4b00-8fa2-ba8b0d6dd536',
+    'kuznetsova': '54355797-19d4-454c-967c-eef65b030b65', // Ладик Ольга Александровна
+    'sokolova': '54355797-19d4-454c-967c-eef65b030b65',
+  };
+
+  // Проверка заполненности всех обязательных полей для активации кнопки
+  const isFormValid = (): boolean => {
+    // Базовые обязательные поля
+    if (!createDirection || !createCustomsOffice || !createOrganization || !createDeclarant) {
+      return false;
+    }
     // Для ИМ/ЭК нужна процедура
     if ((createDirection === 'IM' || createDirection === 'EK') && !createCustomsProcedure) {
-      setDocflowError('Заполните таможенную процедуру');
+      return false;
+    }
+    // Для ТТ нужен вид перемещения
+    if (createDirection === 'TT' && !createTransitType) {
+      return false;
+    }
+    return true;
+  };
+
+  const canCreateDocflow = isFormValid();
+
+  // Функция создания пакета декларации
+  const handleCreateDocflow = async () => {
+    // Валидация обязательных полей (дополнительная проверка)
+    if (!canCreateDocflow) {
+      setDocflowError('Заполните все обязательные поля');
       return;
     }
 
@@ -411,11 +463,11 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
 
     try {
       const request: CreateDocflowRequest = {
-        type: directionToType[createDirection] ?? 0,
-        procedure: parseInt(createCustomsProcedure) || 0,
-        customs: customsCodeMap[createCustomsOffice] || 10000000,
-        organization_id: createOrganization,  // TODO: нужен реальный UUID из справочника
-        employee_id: createDeclarant,  // TODO: нужен реальный UUID из справочника
+        type: directionToType[createDirection] ?? 1,
+        procedure: procedureToKonturId[createCustomsProcedure] ?? 1,
+        customs: customsCodeMap[createCustomsOffice] || 10129000,
+        organization_id: organizationKonturIdMap[createOrganization] || createOrganization,
+        employee_id: employeeKonturIdMap[createDeclarant] || createDeclarant,
       };
 
       // Добавляем особенности если выбраны
@@ -423,9 +475,11 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
         // TODO: маппинг особенностей на singularity ID
       }
 
+      console.log('Creating docflow with request:', request);
       const response = await createDocflow(request);
       setDocflowResponse(response);
     } catch (error) {
+      console.error('Error creating docflow:', error);
       setDocflowError(error instanceof Error ? error.message : 'Произошла ошибка при создании пакета');
     } finally {
       setIsCreatingDocflow(false);
@@ -705,6 +759,44 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* Кнопка создания пакета декларации */}
+            <div className="grid grid-cols-[240px_1fr] items-center gap-4 pt-4 mt-4 border-t border-white/10">
+              <div></div>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={handleCreateDocflow}
+                  disabled={!canCreateDocflow || isCreatingDocflow}
+                  className={`
+                    px-6 py-3 rounded-xl text-sm font-medium text-white flex items-center justify-center gap-2 w-full
+                    ${canCreateDocflow
+                      ? (createDirection === 'IM' ? 'bg-accent-green hover:bg-accent-green/90' : createDirection === 'EK' ? 'bg-blue-600 hover:bg-blue-600/90' : 'bg-orange-500 hover:bg-orange-500/90')
+                      : (isDark ? 'bg-white/10 text-gray-500' : 'bg-gray-200 text-gray-400')
+                    }
+                    disabled:opacity-50 disabled:cursor-not-allowed transition-colors
+                  `}
+                >
+                  {isCreatingDocflow ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" />
+                      Создание пакета...
+                    </>
+                  ) : (
+                    <>
+                      <Send size={18} />
+                      Создать пакет декларации
+                    </>
+                  )}
+                </button>
+
+                {/* Подсказка когда кнопка неактивна */}
+                {!canCreateDocflow && (
+                  <p className={`text-xs ${theme.text.secondary}`}>
+                    Заполните все обязательные поля для создания пакета
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -820,6 +912,34 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
           )}
         </div>
       </div>
+
+      {/* DEBUG: API Response (временная плашка) */}
+      {(docflowError || docflowResponse) && (
+        <div className={`rounded-2xl p-6 border-2 border-dashed ${isDark ? 'border-yellow-500/50 bg-yellow-500/5' : 'border-yellow-400 bg-yellow-50'}`}>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-yellow-500 text-xs font-mono px-2 py-0.5 rounded bg-yellow-500/20">DEBUG</span>
+            <h3 className={`text-sm font-semibold ${theme.text.primary}`}>
+              Ответ API Kontur
+            </h3>
+          </div>
+
+          {docflowError && (
+            <div className={`p-4 rounded-lg ${isDark ? 'bg-red-500/10 border border-red-500/30' : 'bg-red-50 border border-red-200'}`}>
+              <p className="text-accent-red font-medium text-sm">Ошибка</p>
+              <p className={`text-sm mt-1 ${theme.text.secondary}`}>{docflowError}</p>
+            </div>
+          )}
+
+          {docflowResponse && (
+            <div className={`p-4 rounded-lg ${isDark ? 'bg-accent-green/10 border border-accent-green/30' : 'bg-green-50 border border-green-200'}`}>
+              <p className="text-accent-green font-medium text-sm mb-2">Пакет успешно создан!</p>
+              <pre className={`text-xs overflow-auto p-3 rounded font-mono ${isDark ? 'bg-black/50' : 'bg-gray-100'} ${theme.text.primary}`}>
+                {JSON.stringify(docflowResponse, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Основные документы */}
       <div className={`rounded-2xl p-6 border ${theme.card.background} ${theme.card.border}`}>
@@ -1284,77 +1404,27 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
 
       {/* Кнопки действий */}
       <div className={`rounded-2xl p-6 border ${theme.card.background} ${theme.card.border}`}>
-        <div className="flex justify-between items-center gap-3">
-          {/* Кнопка создания пакета в Kontur */}
+        <div className="flex justify-end gap-3">
           <button
-            onClick={handleCreateDocflow}
-            disabled={isCreatingDocflow}
+            onClick={onCancel}
             className={`
-              px-6 py-2 rounded-lg text-sm font-medium text-white flex items-center gap-2
-              ${createDirection === 'IM' ? 'bg-accent-green hover:bg-accent-green/90' : createDirection === 'EK' ? 'bg-blue-600 hover:bg-blue-600/90' : 'bg-orange-500 hover:bg-orange-500/90'}
-              disabled:opacity-50 disabled:cursor-not-allowed
+              px-6 py-2 rounded-lg text-sm font-medium
+              ${isDark ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
             `}
           >
-            {isCreatingDocflow ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                Создание...
-              </>
-            ) : (
-              <>
-                <Send size={16} />
-                Создать пакет декларации
-              </>
-            )}
+            Отменить
           </button>
-
-          <div className="flex gap-3">
-            <button
-              onClick={onCancel}
-              className={`
-                px-6 py-2 rounded-lg text-sm font-medium
-                ${isDark ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
-              `}
-            >
-              Отменить
-            </button>
-            <button
-              onClick={onSave}
-              className={`
-                px-6 py-2 rounded-lg text-sm font-medium text-white
-                ${createDirection === 'IM' ? 'bg-accent-green hover:bg-accent-green/90' : createDirection === 'EK' ? 'bg-blue-600 hover:bg-blue-600/90' : 'bg-orange-500 hover:bg-orange-500/90'}
-              `}
-            >
-              Сохранить изменения
-            </button>
-          </div>
+          <button
+            onClick={onSave}
+            className={`
+              px-6 py-2 rounded-lg text-sm font-medium text-white
+              ${createDirection === 'IM' ? 'bg-accent-green hover:bg-accent-green/90' : createDirection === 'EK' ? 'bg-blue-600 hover:bg-blue-600/90' : 'bg-orange-500 hover:bg-orange-500/90'}
+            `}
+          >
+            Сохранить изменения
+          </button>
         </div>
       </div>
-
-      {/* API Response / Error Display */}
-      {(docflowError || docflowResponse) && (
-        <div className={`rounded-2xl p-6 border ${theme.card.background} ${theme.card.border}`}>
-          <h3 className={`text-lg font-semibold mb-4 ${theme.text.primary}`}>
-            Ответ API
-          </h3>
-
-          {docflowError && (
-            <div className={`p-4 rounded-lg ${isDark ? 'bg-red-500/10 border border-red-500/30' : 'bg-red-50 border border-red-200'}`}>
-              <p className="text-accent-red font-medium">Ошибка</p>
-              <p className={`text-sm mt-1 ${theme.text.secondary}`}>{docflowError}</p>
-            </div>
-          )}
-
-          {docflowResponse && (
-            <div className={`p-4 rounded-lg ${isDark ? 'bg-accent-green/10 border border-accent-green/30' : 'bg-green-50 border border-green-200'}`}>
-              <p className="text-accent-green font-medium mb-2">Пакет успешно создан!</p>
-              <pre className={`text-xs overflow-auto p-3 rounded ${isDark ? 'bg-black/30' : 'bg-gray-100'} ${theme.text.primary}`}>
-                {JSON.stringify(docflowResponse, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 };

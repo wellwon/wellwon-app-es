@@ -608,8 +608,9 @@ class KonturClient:
                 json=body
             )
 
-            if response.status_code == 401:
-                log.warning("Session expired, re-authenticating...")
+            # Handle expired session (401 or 403)
+            if response.status_code in (401, 403):
+                log.warning(f"Session expired ({response.status_code}), re-authenticating...")
                 await self.authenticate()
                 response = await client.post(
                     url,
@@ -621,6 +622,40 @@ class KonturClient:
 
             data = response.json()
             log.info(f"Successfully created docflow with ID: {data.get('id')}")
+
+            return data
+
+    async def get_form_json(self, docflow_id: str, form_id: str) -> dict:
+        """
+        Get JSON content of a document form
+
+        Endpoint: GET /common/v1/docflows/{docflowId}/form/{formId}/json
+
+        Args:
+            docflow_id: UUID of the docflow
+            form_id: UUID of the form
+
+        Returns:
+            dict: JSON content of the document
+        """
+        await self.ensure_authenticated()
+
+        url = f"{self.base_url}/common/v1/docflows/{docflow_id}/form/{form_id}/json"
+
+        log.info(f"Fetching form JSON: docflow={docflow_id}, form={form_id}")
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(url, headers=self._get_headers())
+
+            if response.status_code == 401:
+                log.warning("Session expired, re-authenticating...")
+                await self.authenticate()
+                response = await client.get(url, headers=self._get_headers())
+
+            response.raise_for_status()
+
+            data = response.json()
+            log.info(f"Successfully fetched form JSON")
 
             return data
 
