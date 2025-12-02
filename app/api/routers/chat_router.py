@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 import logging
 import asyncio
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, UploadFile, File
 from pydantic import BaseModel, Field
@@ -129,10 +129,33 @@ class EditMessageRequest(BaseModel):
 class MarkAsReadRequest(BaseModel):
     """Request to mark messages as read.
 
-    Accepts the Snowflake message ID (bigint) as the last read position.
-    Frontend sends this as a string, we accept both int and str.
+    Accepts either:
+    - UUID string (from web frontend - normalized message.id)
+    - Snowflake ID as int or string (from Telegram sync)
+
+    Converts UUID to deterministic Snowflake using same formula as projector.
     """
-    last_read_message_id: int  # Snowflake ID (bigint)
+    last_read_message_id: Union[int, str]  # UUID or Snowflake ID
+
+    def get_snowflake_id(self) -> int:
+        """Convert last_read_message_id to Snowflake ID.
+
+        If it's a UUID string, converts using deterministic formula.
+        If it's a numeric string or int, returns as-is.
+        """
+        if isinstance(self.last_read_message_id, int):
+            return self.last_read_message_id
+
+        value = self.last_read_message_id
+
+        # Check if it looks like a UUID (36 chars with dashes)
+        if len(value) == 36 and value.count('-') == 4:
+            # Convert UUID to deterministic Snowflake ID (same formula as projector)
+            message_uuid = uuid.UUID(value)
+            return int.from_bytes(message_uuid.bytes[:8], byteorder='big') & 0x7FFFFFFFFFFFFFFF
+
+        # Otherwise treat as numeric Snowflake ID string
+        return int(value)
 
 
 class DeleteChatRequest(BaseModel):
@@ -665,6 +688,9 @@ async def mark_messages_as_read(
     max_retries = 3
     last_error = None
 
+    # Convert snowflake ID (frontend sends as string due to JS number limits)
+    snowflake_id = request.get_snowflake_id()
+
     # Enrich command with telegram_message_id for Telegram sync
     # Query the message to get its telegram_message_id (if any)
     telegram_message_id = None
@@ -672,7 +698,7 @@ async def mark_messages_as_read(
         message = await query_bus.query(
             GetMessageByIdQuery(
                 chat_id=chat_id,
-                snowflake_id=request.last_read_message_id
+                snowflake_id=snowflake_id
             )
         )
         if message:
@@ -687,7 +713,7 @@ async def mark_messages_as_read(
             command = MarkMessagesAsReadCommand(
                 chat_id=chat_id,
                 user_id=current_user["user_id"],
-                last_read_message_id=request.last_read_message_id,
+                last_read_message_id=snowflake_id,
                 source="web",  # Explicitly mark as web source
                 telegram_message_id=telegram_message_id,  # For Telegram sync
             )

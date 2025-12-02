@@ -8,6 +8,7 @@ import { useSystemStatusStore } from '@/stores/useSystemStatusStore';
 import { logger } from '@/wse';
 import { queryClient } from '@/lib/queryClient';
 import type { Chat } from '@/types/realtime-chat';
+import { playMessageSound } from '@/services/NotificationSoundService';
 
 // Interface for message processor registration
 interface MessageProcessorRegistrar {
@@ -489,6 +490,11 @@ export class EventHandlers {
         telegram_user_id: msg.telegram_user_id,
         has_telegram_user_data: !!msg.telegram_user_data
       });
+
+      // Play notification sound (skips own messages automatically)
+      console.log('[EventHandlers] Calling playMessageSound', { sender_id: msg.sender_id });
+      logger.info('EventHandlers: Calling playMessageSound', { sender_id: msg.sender_id });
+      playMessageSound(msg.sender_id);
 
       // NOTE: Do NOT invalidate messages query here!
       // The CustomEvent below triggers useRealtimeChat to add the message directly to state.
