@@ -633,7 +633,7 @@ class JwtTokenManager:
             return jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
         except JWTError as exc:
             preview = token[:20] + "..." if len(token) > 20 else token
-            log.info(f"JWT decode error ({type(exc).__name__}): {exc}. Token preview: {preview}")
+            log.warning(f"JWT decode error ({type(exc).__name__}): {exc}. Token preview: {preview}")
             return None
 
     @staticmethod

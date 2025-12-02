@@ -270,6 +270,7 @@ class ChatProjector:
             2. Update PostgreSQL chat.last_message_* (metadata preview)
         """
         event_data = envelope.event_data
+        log.info(f"DEBUG MessageSent event_data keys: {list(event_data.keys())}")
         chat_id = uuid.UUID(event_data['chat_id'])
         sender_id = uuid.UUID(event_data['sender_id']) if event_data.get('sender_id') else None
         source = event_data.get('source', 'web')

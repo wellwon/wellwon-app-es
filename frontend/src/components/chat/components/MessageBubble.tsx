@@ -30,6 +30,7 @@ import type { Message } from '@/types/realtime-chat';
 import TelegramMessageBubble from './TelegramMessageBubble';
 import { TelegramIcon } from '@/components/ui/TelegramIcon';
 import { useChatDisplayOptions } from '@/contexts/chat';
+import { usePlatform } from '@/contexts/PlatformContext';
 import { ReplyMessageBubble } from './ReplyMessageBubble';
 import { avatarCache } from '@/utils/avatarCache';
 
@@ -58,6 +59,7 @@ export function MessageBubble({
   className = ''
 }: MessageBubbleProps) {
   const { options } = useChatDisplayOptions();
+  const { isLightTheme } = usePlatform();
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
   const openVoiceRef = useRef(false);
   const [avatarLoaded, setAvatarLoaded] = useState(() => avatarCache.isLoaded(message.sender_profile?.avatar_url || ''));
@@ -812,7 +814,7 @@ export function MessageBubble({
                   : 'max-w-[66.666%]'
                 }
                 ${isOwn
-                  ? 'bg-accent-red/20 text-gray-600 rounded-br-md border border-accent-red/30 group-hover:bg-accent-red/25'
+                  ? `bg-accent-red/20 ${isLightTheme ? 'text-gray-600' : 'text-gray-900'} rounded-br-md border border-accent-red/30 group-hover:bg-accent-red/25`
                   : 'bg-[hsl(var(--light-gray))] text-white rounded-bl-md border border-white/10 group-hover:bg-[hsl(var(--light-gray))]/80'
                 }
                 transition-colors duration-150
