@@ -332,10 +332,16 @@ class ChatProjector:
         """Project MessageEdited - ScyllaDB PRIMARY. ASYNC."""
         event_data = envelope.event_data
         chat_id = uuid.UUID(event_data['chat_id'])
+
+        # Get snowflake_id from event or compute from message_id UUID
         snowflake_id = event_data.get('snowflake_id')
+        if not snowflake_id and event_data.get('message_id'):
+            # Compute deterministic snowflake from message_id (same logic as MessageSent)
+            message_uuid = uuid.UUID(event_data['message_id'])
+            snowflake_id = int.from_bytes(message_uuid.bytes[:8], byteorder='big') & 0x7FFFFFFFFFFFFFFF
 
         if not snowflake_id:
-            log.warning(f"MessageEdited missing snowflake_id, skipping ScyllaDB update")
+            log.warning(f"MessageEdited missing both snowflake_id and message_id, skipping ScyllaDB update")
             return
 
         log.info(f"Projecting MessageEdited to ScyllaDB: snowflake_id={snowflake_id}")
@@ -352,10 +358,16 @@ class ChatProjector:
         """Project MessageDeleted - ScyllaDB PRIMARY. ASYNC."""
         event_data = envelope.event_data
         chat_id = uuid.UUID(event_data['chat_id'])
+
+        # Get snowflake_id from event or compute from message_id UUID
         snowflake_id = event_data.get('snowflake_id')
+        if not snowflake_id and event_data.get('message_id'):
+            # Compute deterministic snowflake from message_id (same logic as MessageSent)
+            message_uuid = uuid.UUID(event_data['message_id'])
+            snowflake_id = int.from_bytes(message_uuid.bytes[:8], byteorder='big') & 0x7FFFFFFFFFFFFFFF
 
         if not snowflake_id:
-            log.warning(f"MessageDeleted missing snowflake_id, skipping ScyllaDB update")
+            log.warning(f"MessageDeleted missing both snowflake_id and message_id, skipping ScyllaDB update")
             return
 
         log.info(f"Projecting MessageDeleted to ScyllaDB: snowflake_id={snowflake_id}")

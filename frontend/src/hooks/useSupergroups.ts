@@ -185,8 +185,9 @@ export function useActiveSupergroups() {
     staleTime: Infinity, // WSE handles updates
 
     // Use cached data as initial data (instant render on page refresh!)
-    initialData: cachedActiveSupergroups ?? undefined,
-    initialDataUpdatedAt: cachedUpdatedAt ?? 0,
+    // IMPORTANT: Only use non-empty cache, otherwise React Query won't fetch
+    initialData: cachedActiveSupergroups?.length ? cachedActiveSupergroups : undefined,
+    initialDataUpdatedAt: cachedActiveSupergroups?.length ? (cachedUpdatedAt ?? 0) : undefined,
   });
 }
 
@@ -265,8 +266,9 @@ export function useArchivedSupergroups() {
     staleTime: Infinity,
 
     // Use cached data as initial data (instant render on page refresh!)
-    initialData: cachedArchivedSupergroups ?? undefined,
-    initialDataUpdatedAt: cachedUpdatedAt ?? 0,
+    // IMPORTANT: Only use non-empty cache, otherwise React Query won't fetch
+    initialData: cachedArchivedSupergroups?.length ? cachedArchivedSupergroups : undefined,
+    initialDataUpdatedAt: cachedArchivedSupergroups?.length ? (cachedUpdatedAt ?? 0) : undefined,
   });
 }
 
@@ -517,8 +519,9 @@ export function useSupergroups() {
     staleTime: Infinity,
 
     // Use cached data as initial data (instant render on page refresh!)
-    initialData: cachedActiveSupergroups ?? undefined,
-    initialDataUpdatedAt: cachedUpdatedAt ?? 0,
+    // IMPORTANT: Only use non-empty cache, otherwise React Query won't fetch
+    initialData: cachedActiveSupergroups?.length ? cachedActiveSupergroups : undefined,
+    initialDataUpdatedAt: cachedActiveSupergroups?.length ? (cachedUpdatedAt ?? 0) : undefined,
   });
 
   // Fetch archived supergroups
@@ -533,8 +536,9 @@ export function useSupergroups() {
     staleTime: Infinity,
 
     // Use cached data as initial data (instant render on page refresh!)
-    initialData: cachedArchivedSupergroups ?? undefined,
-    initialDataUpdatedAt: cachedUpdatedAt ?? 0,
+    // IMPORTANT: Only use non-empty cache, otherwise React Query won't fetch
+    initialData: cachedArchivedSupergroups?.length ? cachedArchivedSupergroups : undefined,
+    initialDataUpdatedAt: cachedArchivedSupergroups?.length ? (cachedUpdatedAt ?? 0) : undefined,
   });
 
   // Fetch chat counts

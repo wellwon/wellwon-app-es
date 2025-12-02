@@ -77,6 +77,7 @@ def create_user_account_domain() -> DomainRegistration:
         UserEmailVerified,
         UserProfileUpdated,
         UserAuthenticationSucceeded,
+        UserAuthenticationFailed,
         UserPasswordChanged,
         UserLoggedOut,
     )
@@ -108,6 +109,7 @@ def create_user_account_domain() -> DomainRegistration:
             "UserEmailVerified": UserEmailVerified,
             "UserProfileUpdated": UserProfileUpdated,
             "UserAuthenticationSucceeded": UserAuthenticationSucceeded,
+            "UserAuthenticationFailed": UserAuthenticationFailed,
             "UserPasswordChanged": UserPasswordChanged,
             "UserLoggedOut": UserLoggedOut,
             # CES Events (Compensating Event System - External Change Detection)

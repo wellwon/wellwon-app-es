@@ -814,7 +814,7 @@ export function MessageBubble({
                   : 'max-w-[66.666%]'
                 }
                 ${isOwn
-                  ? `bg-accent-red/20 ${isLightTheme ? 'text-gray-600' : 'text-gray-900'} rounded-br-md border border-accent-red/30 group-hover:bg-accent-red/25`
+                  ? `bg-accent-red/20 ${isLightTheme ? 'text-gray-600' : 'text-white'} rounded-br-md border border-accent-red/30 group-hover:bg-accent-red/25`
                   : 'bg-[hsl(var(--light-gray))] text-white rounded-bl-md border border-white/10 group-hover:bg-[hsl(var(--light-gray))]/80'
                 }
                 transition-colors duration-150

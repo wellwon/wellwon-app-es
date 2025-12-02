@@ -584,7 +584,62 @@
   animation: none !important;
 }
 
-/* Chat Message Animations - Simple smooth slide up + fade */
+/* Chat Message Animations - 2025 Modern Messenger Style */
+
+/* Incoming message - slide from left with bounce */
+@keyframes message-incoming {
+  0% {
+    opacity: 0;
+    transform: translateX(-20px) scale(0.95);
+  }
+  60% {
+    opacity: 1;
+    transform: translateX(4px) scale(1.02);
+  }
+  80% {
+    transform: translateX(-2px) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+/* Outgoing message - slide from right with bounce */
+@keyframes message-outgoing {
+  0% {
+    opacity: 0;
+    transform: translateX(20px) scale(0.95);
+  }
+  60% {
+    opacity: 1;
+    transform: translateX(-4px) scale(1.02);
+  }
+  80% {
+    transform: translateX(2px) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+/* Subtle pop effect for new messages */
+@keyframes message-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Legacy fallback */
 @keyframes message-appear {
   from {
     opacity: 0;
@@ -596,9 +651,14 @@
   }
 }
 
-.animate-message-in,
+/* Modern messenger-style animations - different direction for in/out */
+.animate-message-in {
+  animation: message-incoming 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  will-change: transform, opacity;
+}
+
 .animate-message-out {
-  animation: message-appear 0.25s ease-out forwards;
+  animation: message-outgoing 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
   will-change: transform, opacity;
 }
 
@@ -618,4 +678,65 @@
 
 .scrollbar-hide::-webkit-scrollbar {
   display: none;  /* Chrome, Safari, Opera */
+}
+
+/* Reply Panel Animations - 2025 Modern Messenger Style */
+
+/* Slide up with elastic bounce */
+@keyframes reply-panel-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1.01);
+  }
+  75% {
+    transform: translateY(2px) scale(0.995);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Slide down exit */
+@keyframes reply-panel-exit {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+}
+
+/* Accent line pulse on enter */
+@keyframes accent-line-pulse {
+  0% {
+    opacity: 0.5;
+    transform: scaleY(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleY(1.1);
+  }
+  100% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+.animate-reply-panel-enter {
+  animation: reply-panel-enter 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.animate-reply-panel-exit {
+  animation: reply-panel-exit 0.2s ease-out forwards;
+}
+
+.animate-accent-line {
+  animation: accent-line-pulse 0.4s ease-out forwards;
 }

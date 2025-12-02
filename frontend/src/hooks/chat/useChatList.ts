@@ -63,8 +63,9 @@ export function useChatList(options: UseChatListOptions = {}) {
     // TkDodo: staleTime: Infinity when WSE handles all updates
     staleTime: Infinity,
     // TkDodo: initialData from Zustand cache for instant render on page refresh
-    initialData: cachedChats ?? undefined,
-    initialDataUpdatedAt: cachedUpdatedAt ?? 0,
+    // IMPORTANT: Only use non-empty cache, otherwise React Query won't fetch
+    initialData: cachedChats?.length ? cachedChats : undefined,
+    initialDataUpdatedAt: cachedChats?.length ? (cachedUpdatedAt ?? 0) : undefined,
   });
 
   // WSE event handlers

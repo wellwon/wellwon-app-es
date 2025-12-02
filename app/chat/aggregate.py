@@ -523,7 +523,14 @@ class ChatAggregate:
         read_count: int,
     ) -> None:
         """Mark all messages up to a point as read"""
-        self._ensure_participant(user_id)
+        # Soft check - don't fail if participant not in aggregate state
+        # (may happen with snapshot loading issues or legacy data)
+        if not self._is_participant(user_id):
+            log.warning(
+                f"mark_messages_as_read: user {user_id} not found in aggregate participants, "
+                f"skipping (chat: {self.id}, participants: {len(self.state.participants)})"
+            )
+            return
 
         event = MessagesMarkedAsRead(
             chat_id=self.id,

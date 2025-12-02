@@ -86,8 +86,9 @@ class GetChatMessagesQuery(Query):
 
 
 class GetMessageByIdQuery(Query):
-    """Get a single message by ID"""
-    message_id: uuid.UUID
+    """Get a single message by ID (requires chat_id for ScyllaDB partition key)"""
+    chat_id: uuid.UUID
+    snowflake_id: int  # ScyllaDB message_id is Snowflake (int64)
 
 
 class GetUnreadMessagesCountQuery(Query):
