@@ -31,7 +31,7 @@ from enum import Enum
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
-from app.common.base.base_config import BaseConfig
+from app.common.base.base_config import BaseConfig, BASE_CONFIG_DICT
 # Import WorkerType from consumer_groups
 from app.infra.worker_core.consumer_groups import WorkerType
 
@@ -64,7 +64,7 @@ class WorkerConfig(BaseConfig):
     """
 
     model_config = SettingsConfigDict(
-        **BaseConfig.model_config,
+        **BASE_CONFIG_DICT,
         env_prefix='WORKER_',
     )
 

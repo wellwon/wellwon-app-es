@@ -450,7 +450,8 @@ const SidebarChat: React.FC = () => {
 
   // Обработчики для иерархического интерфейса
   const handleGroupsToggle = () => {
-    setGroupsPanelCollapsed(prev => !prev);
+    // Toggle collapsed state (store expects boolean, not updater function)
+    setGroupsPanelCollapsed(!groupsPanelCollapsed);
     // выбранную группу не сбрасываем
   };
 
@@ -530,14 +531,14 @@ const SidebarChat: React.FC = () => {
                   {filteredConversations.length} тем
                 </p>
               </div>
-            ) : !groupsPanelCollapsed ? (
+            ) : (
               <div className="text-white">
                 <h2 className="font-semibold text-lg">Все чаты</h2>
                 <p className="text-xs text-gray-400">
                   {conversations.length} диалогов
                 </p>
               </div>
-            ) : null}
+            )}
           </div>
           
           {/* Кнопка создания новой темы */}

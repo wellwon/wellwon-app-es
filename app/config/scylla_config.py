@@ -9,7 +9,7 @@ from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import SettingsConfigDict
 from enum import Enum
 
-from app.common.base.base_config import BaseConfig
+from app.common.base.base_config import BaseConfig, BASE_CONFIG_DICT
 
 
 class ConsistencyLevel(str, Enum):
@@ -47,7 +47,7 @@ class ScyllaConfig(BaseConfig):
     """
 
     model_config = SettingsConfigDict(
-        **BaseConfig.model_config,
+        **BASE_CONFIG_DICT,
         env_prefix='SCYLLA_',
     )
 
@@ -496,3 +496,9 @@ def get_scylla_config() -> ScyllaConfig:
 def reset_scylla_config() -> None:
     """Reset config singleton (for testing)."""
     get_scylla_config.cache_clear()
+
+
+# Backward compatibility alias
+def load_scylla_config_from_env() -> ScyllaConfig:
+    """Deprecated: Use get_scylla_config() instead."""
+    return get_scylla_config()

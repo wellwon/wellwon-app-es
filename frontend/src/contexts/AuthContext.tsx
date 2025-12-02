@@ -3,7 +3,7 @@
 // Description: Auth context using React Query + Zustand (TkDodo pattern)
 // =============================================================================
 
-import React, { createContext, useContext, useCallback, useMemo, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useCallback, useMemo } from 'react';
 import { logger } from '@/utils/logger';
 import type { Profile, SignUpMetadata, AuthResponse } from '@/types/auth';
 
@@ -16,7 +16,6 @@ import {
   useRegister,
   useUpdateProfile,
   useChangePassword,
-  useRefreshToken,
   profileToUser,
   type User,
 } from '@/hooks/auth';
@@ -58,11 +57,9 @@ export function useAuth() {
 // -----------------------------------------------------------------------------
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Zustand: Token state
+  // Zustand: Token state (token refresh handled by axios interceptor in api/core.ts)
   const token = useAuthStore((state) => state.token);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const refreshToken = useAuthStore((state) => state.refreshToken);
-  const expiresAt = useAuthStore((state) => state.expiresAt);
 
   // React Query: Profile
   const { profile, isLoading: isLoadingProfile } = useProfile();
@@ -73,52 +70,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const registerMutation = useRegister();
   const updateProfileMutation = useUpdateProfile();
   const changePasswordMutation = useChangePassword();
-  const refreshTokenMutation = useRefreshToken();
 
-  // Token refresh timer
-  const refreshTimerRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Schedule token refresh
-  useEffect(() => {
-    if (!isAuthenticated || !expiresAt || !refreshToken) {
-      if (refreshTimerRef.current) {
-        clearTimeout(refreshTimerRef.current);
-        refreshTimerRef.current = null;
-      }
-      return;
-    }
-
-    const scheduleRefresh = () => {
-      const now = Date.now();
-      const timeUntilExpiry = expiresAt - now;
-
-      // Refresh 1 minute before expiry
-      const refreshTime = expiresAt - 60000;
-      const delayMs = refreshTime - now;
-
-      if (delayMs <= 0) {
-        // Token already expired or expiring soon - refresh immediately!
-        logger.debug('Token expired or expiring soon, refreshing immediately');
-        refreshTokenMutation.mutate();
-        return;
-      }
-
-      logger.debug('Scheduling token refresh', { inSeconds: Math.round(delayMs / 1000) });
-
-      refreshTimerRef.current = setTimeout(() => {
-        refreshTokenMutation.mutate();
-      }, delayMs);
-    };
-
-    scheduleRefresh();
-
-    return () => {
-      if (refreshTimerRef.current) {
-        clearTimeout(refreshTimerRef.current);
-        refreshTimerRef.current = null;
-      }
-    };
-  }, [isAuthenticated, expiresAt, refreshToken, refreshTokenMutation]);
+  // NOTE: Token refresh is handled by axios interceptor in api/core.ts
+  // This follows best practices from TkDodo/TanStack Query community:
+  // - React Query handles server state, NOT auth token lifecycle
+  // - Axios interceptor handles 401 → refresh → retry transparently
+  // - No useEffect-based proactive refresh (causes loops when backend is down)
+  // See: https://elazizi.com/posts/react-query-auth-token-refresh/
 
   // Derive user from profile
   const user = useMemo(() => profileToUser(profile), [profile]);

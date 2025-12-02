@@ -536,11 +536,25 @@ const ChatInterface = React.memo(() => {
         return;
       }
     }
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Enter = send, Shift+Enter or Alt+Enter (Option+Enter on Mac) = new line
+    if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
       e.preventDefault();
       handleSendMessage();
     }
-  }, [handleSendMessage, mentionOpen, displayedItems, highlightedIndex, insertMention, closeMentions]);
+    // Alt+Enter (Option+Enter) - insert new line
+    if (e.key === 'Enter' && e.altKey) {
+      e.preventDefault();
+      const textarea = e.target as HTMLTextAreaElement;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const newValue = inputValue.substring(0, start) + '\n' + inputValue.substring(end);
+      setInputValue(newValue);
+      // Set cursor position after the newline
+      setTimeout(() => {
+        textarea.selectionStart = textarea.selectionEnd = start + 1;
+      }, 0);
+    }
+  }, [handleSendMessage, mentionOpen, displayedItems, highlightedIndex, insertMention, closeMentions, inputValue]);
   
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
@@ -810,17 +824,17 @@ const ChatInterface = React.memo(() => {
 
 
       {/* Input Area - зафиксировано внизу экрана */}
-      <div className={`border-t ${theme.border} ${theme.main} flex-shrink-0`}>
-        <div className="flex items-center px-6 py-2">
+      <div className={`border-t ${theme.border} ${theme.main} flex-shrink-0 min-h-24`}>
+        <div className="flex items-center justify-center px-6 h-full">
           <div className="max-w-4xl mx-auto w-full">
-            <div className={`flex items-center gap-2 ${theme.input.bg} ${theme.input.border} rounded-[24px] px-3 py-1`}>
+            <div className={`flex items-center gap-2 ${theme.input.bg} ${theme.input.border} rounded-[24px] px-3 py-2`}>
               {/* Иконки прикреплений */}
               <div className="flex gap-1 self-center">
                 <FileUploadButton disabled={!activeChat} />
               </div>
 
               {/* Поле ввода */}
-              <div ref={inputContainerRef} className="flex-1 flex items-center relative min-h-[36px]">
+              <div ref={inputContainerRef} className="flex-1 flex items-center justify-center relative">
                 <AutoResizeTextarea
                   ref={textareaRef}
                   value={inputValue}
@@ -828,9 +842,9 @@ const ChatInterface = React.memo(() => {
                   onKeyDown={handleKeyPress}
                   onBlur={handleInputBlur}
                   onHeightChange={setTextareaHeight}
-                  placeholder="Напишите ваш запрос"
-                  className={`flex-1 border-0 bg-transparent ${theme.input.text} ${theme.input.placeholder} outline-none focus:outline-none focus-visible:outline-none resize-none text-sm leading-[36px]`}
-                  minHeight={36}
+                  placeholder="Напишите запрос"
+                  className={`flex-1 border-0 bg-transparent ${theme.input.text} ${theme.input.placeholder} outline-none focus:outline-none focus-visible:outline-none resize-none text-sm focus:placeholder:opacity-0 placeholder:transition-opacity py-1`}
+                  minHeight={32}
                   maxHeight={120}
                 />
                 

@@ -161,17 +161,24 @@ API.interceptors.response.use(
           // Retry the original request
           return API(originalRequest);
 
-        } catch (refreshError) {
+        } catch (refreshError: any) {
           console.error('[API] Token refresh failed:', refreshError);
-
-          // Clear auth data
-          localStorage.removeItem(AUTH_STORAGE_KEY);
 
           // Notify all waiting requests of failure
           refreshSubscribers = [];
 
-          // Redirect to login
-          window.location.href = '/login?reason=session_expired';
+          // Only clear auth and redirect for actual auth failures (401/403)
+          // NOT for network errors (backend down) - let user stay logged in with cached data
+          const status = refreshError?.response?.status;
+          if (status === 401 || status === 403) {
+            // Actual auth failure - session invalid
+            localStorage.removeItem(AUTH_STORAGE_KEY);
+            window.location.href = '/login?reason=session_expired';
+          } else {
+            // Network error or server down - don't log out, just fail silently
+            // User can continue with cached data until backend comes back
+            console.warn('[API] Token refresh failed due to network/server error, keeping session');
+          }
 
           return Promise.reject(refreshError);
         } finally {

@@ -909,7 +909,7 @@ def create_dlq_service(
         event_bus: EventBus instance for Kafka forwarding
         metrics_collector: Optional metrics collector
     """
-    config = get_dlq_config(profile)
+    config = get_dlq_config()
     return DLQService(
         config=config,
         event_bus=event_bus,

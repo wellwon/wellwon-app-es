@@ -82,17 +82,14 @@ def _get_monitoring_thresholds():
 class Database(str, Enum):
     """Supported databases"""
     MAIN = "main"
-    VB = "vb"
 
 
 # Global pool registry and locks
 _POOLS: Dict[str, Optional[asyncpg.Pool]] = {
     Database.MAIN: None,
-    Database.VB: None
 }
 _POOL_LOCKS: Dict[str, asyncio.Lock] = {
     Database.MAIN: asyncio.Lock(),
-    Database.VB: asyncio.Lock()
 }
 
 # v0.3 compatibility: Global pool instance and lock
@@ -105,7 +102,6 @@ _CIRCUIT_BREAKERS: Dict[str, CircuitBreaker] = {}
 # Retry configurations for each database
 _RETRY_CONFIGS: Dict[str, Any] = {
     Database.MAIN: None,
-    Database.VB: None
 }
 
 # Global config instance
@@ -206,31 +202,7 @@ def get_postgres_dsn() -> str:
 
 def get_postgres_dsn_for_db(database: str = Database.MAIN) -> str:
     """Get PostgreSQL DSN for specified database (internal use)"""
-    config = get_config()
-
-    if database == Database.VB:
-        dsn = config.vb_dsn
-        if not dsn:
-            # Check for VB-specific DSN first
-            vb_dsn = os.getenv("VB_POSTGRES_DSN") or os.getenv("VB_DATABASE_URL")
-            if vb_dsn:
-                return vb_dsn
-
-            # Build VB DSN from components
-            host = os.getenv("VB_POSTGRES_HOST") or os.getenv("POSTGRES_HOST", "localhost")
-            port = os.getenv("VB_POSTGRES_PORT") or os.getenv("POSTGRES_PORT", "5432")
-            user = os.getenv("VB_POSTGRES_USER") or os.getenv("POSTGRES_USER", "postgres")
-            password = os.getenv("VB_POSTGRES_PASSWORD") or os.getenv("POSTGRES_PASSWORD", "")
-            database_name = os.getenv("VB_DATABASE_NAME", "wellwon_vb")
-
-            if password:
-                return f"postgresql://{user}:{password}@{host}:{port}/{database_name}"
-            else:
-                return f"postgresql://{user}@{host}:{port}/{database_name}"
-        return dsn
-    else:
-        # Main database
-        return get_postgres_dsn()
+    return get_postgres_dsn()
 
 
 # =============================================================================
@@ -272,23 +244,15 @@ async def init_pool_for_db(
     config = get_config()
 
     # Get pool configuration
-    pool_config = config.main_pool if database == Database.MAIN else config.vb_pool
+    pool_config = config.main_pool
 
-    # Get database-specific defaults from env if not provided
-    if database == Database.VB:
-        min_size = min_size or int(os.getenv("VB_PG_POOL_MIN_SIZE", str(pool_config.min_size)))
-        max_size = max_size or int(os.getenv("VB_PG_POOL_MAX_SIZE", str(pool_config.max_size)))
-        pool_acquire_timeout_sec = pool_acquire_timeout_sec or float(
-            os.getenv("VB_PG_POOL_TIMEOUT_SEC", str(pool_config.timeout)))
-        default_command_timeout_sec = default_command_timeout_sec or float(
-            os.getenv("VB_PG_COMMAND_TIMEOUT_SEC", str(pool_config.command_timeout)))
-    else:
-        min_size = min_size or int(os.getenv("PG_POOL_MIN_SIZE", str(pool_config.min_size)))
-        max_size = max_size or int(os.getenv("PG_POOL_MAX_SIZE", str(pool_config.max_size)))
-        pool_acquire_timeout_sec = pool_acquire_timeout_sec or float(
-            os.getenv("PG_POOL_TIMEOUT_SEC", str(pool_config.timeout)))
-        default_command_timeout_sec = default_command_timeout_sec or float(
-            os.getenv("PG_COMMAND_TIMEOUT_SEC", str(pool_config.command_timeout)))
+    # Get defaults from env if not provided
+    min_size = min_size or int(os.getenv("PG_POOL_MIN_SIZE", str(pool_config.min_size)))
+    max_size = max_size or int(os.getenv("PG_POOL_MAX_SIZE", str(pool_config.max_size)))
+    pool_acquire_timeout_sec = pool_acquire_timeout_sec or float(
+        os.getenv("PG_POOL_TIMEOUT_SEC", str(pool_config.timeout)))
+    default_command_timeout_sec = default_command_timeout_sec or float(
+        os.getenv("PG_COMMAND_TIMEOUT_SEC", str(pool_config.command_timeout)))
 
     # Initialize circuit breaker and retry config if needed
     circuit_breaker = get_circuit_breaker(database)
@@ -1233,7 +1197,7 @@ async def health_check_for_db(database: str = Database.MAIN) -> dict:
                 pool_info["size"] = "unknown"
 
             # Get min/max size safely
-            pool_config = config.main_pool if database == Database.MAIN else config.vb_pool
+            pool_config = config.main_pool
             pool_info["min_size"] = pool_config.min_size
             pool_info["max_size"] = pool_config.max_size
         except Exception as size_err:
@@ -1312,48 +1276,24 @@ class _DBProxy:
     fetchrow_with_app_context = staticmethod(fetchrow_with_app_context)
 
 
-class _VBProxy:
-    """Proxy for VB database operations"""
-    fetch = staticmethod(lambda *args, **kwargs: fetch_for_db(*args, **kwargs, database=Database.VB))
-    fetchrow = staticmethod(lambda *args, **kwargs: fetchrow_for_db(*args, **kwargs, database=Database.VB))
-    fetchval = staticmethod(lambda *args, **kwargs: fetchval_for_db(*args, **kwargs, database=Database.VB))
-    execute = staticmethod(lambda *args, **kwargs: execute_for_db(*args, **kwargs, database=Database.VB))
-    transaction = staticmethod(lambda **kwargs: transaction_for_db(**kwargs, database=Database.VB))
-    health_check = staticmethod(lambda: health_check_for_db(Database.VB))
-    # CES bypass functions for VB database
-    with_app_context = staticmethod(lambda: with_app_context(database=Database.VB))
-    execute_with_app_context = staticmethod(lambda *args, **kwargs: execute_with_app_context(*args, **kwargs, database=Database.VB))
-    fetch_with_app_context = staticmethod(lambda *args, **kwargs: fetch_with_app_context(*args, **kwargs, database=Database.VB))
-    fetchrow_with_app_context = staticmethod(lambda *args, **kwargs: fetchrow_with_app_context(*args, **kwargs, database=Database.VB))
-
-
-# Database proxies
+# Database proxy
 db = _DBProxy()
-vb_db = _VBProxy()
 
 # Aliases for FastAPI imports (v0.3 compatibility)
 init = init_db_pool
 close = close_db_pool
 run_schema = run_schema_from_file
 
-# VB database shortcuts
-init_vb = lambda **kwargs: init_pool_for_db(Database.VB, **kwargs)
-close_vb = lambda: close_pool_for_db(Database.VB)
-run_vb_schema = lambda path="database/wellwon_vb.sql": run_schema_for_db(path, Database.VB)
 
-
-# Initialize all databases
+# Initialize database
 async def init_all(**kwargs):
-    """Initialize all database pools"""
+    """Initialize database pool"""
     await init_pool_for_db(Database.MAIN, **kwargs)
-    config = get_config()
-    if config.enable_vb_database:
-        await init_pool_for_db(Database.VB, **kwargs)
 
 
-# Close all databases
+# Close database
 async def close_all():
-    """Close all database pools"""
+    """Close database pool"""
     await close_pool_for_db()
 
 
@@ -1451,31 +1391,17 @@ def get_all_circuit_breaker_metrics() -> Dict[str, Dict[str, Any]]:
 # =============================================================================
 
 """
-Environment variables for multi-database support:
+Environment variables for database configuration:
 
-# Main database (wellwon)
+# Database connection
 POSTGRES_DSN=postgresql://user:password@localhost:5432/wellwon
 DATABASE_URL=postgresql://user:password@localhost:5432/wellwon
+
+# Pool configuration
 PG_POOL_MIN_SIZE=20     # Production default
 PG_POOL_MAX_SIZE=100    # Production default
 PG_POOL_TIMEOUT_SEC=30.0
 PG_COMMAND_TIMEOUT_SEC=60.0
-
-# Virtual Broker database (wellwon_vb)
-VB_POSTGRES_DSN=postgresql://user:password@localhost:5432/wellwon_vb
-VB_DATABASE_URL=postgresql://user:password@localhost:5432/wellwon_vb
-VB_DATABASE_NAME=wellwon_vb
-VB_POSTGRES_HOST=localhost
-VB_POSTGRES_PORT=5432
-VB_POSTGRES_USER=postgres
-VB_POSTGRES_PASSWORD=yourpassword
-VB_PG_POOL_MIN_SIZE=10    # VB default
-VB_PG_POOL_MAX_SIZE=50    # VB default
-VB_PG_POOL_TIMEOUT_SEC=30.0
-VB_PG_COMMAND_TIMEOUT_SEC=60.0
-
-# Feature flags
-ENABLE_VB_DATABASE=true
 
 # Environment selection
 ENVIRONMENT=development    # or production, high_performance

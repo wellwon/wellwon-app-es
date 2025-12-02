@@ -23,11 +23,20 @@ const AutoResizeTextarea = React.forwardRef<HTMLTextAreaElement, AutoResizeTexta
     const adjustHeight = React.useCallback(() => {
       const textarea = textareaRef.current;
       if (textarea) {
+        // When empty, use minHeight directly to avoid padding/line-height inflation
+        if (!textarea.value) {
+          textarea.style.height = `${minHeight}px`;
+          if (onHeightChange) {
+            onHeightChange(minHeight);
+          }
+          return;
+        }
+
         textarea.style.height = 'auto';
         const scrollHeight = textarea.scrollHeight;
         const newHeight = Math.min(Math.max(scrollHeight, minHeight), maxHeight);
         textarea.style.height = `${newHeight}px`;
-        
+
         if (onHeightChange) {
           onHeightChange(newHeight);
         }

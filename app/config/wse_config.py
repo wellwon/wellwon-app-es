@@ -11,7 +11,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import SettingsConfigDict
 from enum import Enum
 
-from app.common.base.base_config import BaseConfig
+from app.common.base.base_config import BaseConfig, BASE_CONFIG_DICT
 
 
 # =============================================================================
@@ -56,7 +56,7 @@ class WSEConfig(BaseConfig):
     """
 
     model_config = SettingsConfigDict(
-        **BaseConfig.model_config,
+        **BASE_CONFIG_DICT,
         env_prefix='WSE_',
         validate_assignment=True,  # Validate on property updates
     )

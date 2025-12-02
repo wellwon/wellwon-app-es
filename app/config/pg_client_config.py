@@ -1,7 +1,7 @@
 # app/config/pg_client_config.py
 # =============================================================================
 # File: app/config/pg_client_config.py
-# Description: Database configuration for PostgreSQL pools
+# Description: Database configuration for PostgreSQL pool
 # UPDATED: Using BaseConfig pattern with Pydantic v2
 # =============================================================================
 
@@ -10,10 +10,10 @@ import os
 import multiprocessing
 from typing import Optional, Dict, Any, List, Callable
 from enum import Enum
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field
 from pydantic_settings import SettingsConfigDict
 
-from app.common.base.base_config import BaseConfig
+from app.common.base.base_config import BaseConfig, BASE_CONFIG_DICT
 from app.config.logging_config import get_logger
 
 log = get_logger("wellwon.config.pg_client")
@@ -90,39 +90,27 @@ class PoolConfig(BaseModel):
 
 
 class PostgresConfig(BaseConfig):
-    """Complete PostgreSQL database configuration"""
+    """PostgreSQL database configuration for WellWon"""
 
     model_config = SettingsConfigDict(
-        **BaseConfig.model_config,
+        **BASE_CONFIG_DICT,
         env_prefix='PG_',
     )
 
-    # Connection strings
-    main_dsn: Optional[SecretStr] = Field(
+    # Connection string
+    main_dsn: Optional[str] = Field(
         default=None,
         alias="POSTGRES_DSN",
         description="Main database DSN"
     )
 
-    vb_dsn: Optional[SecretStr] = Field(
-        default=None,
-        alias="VB_POSTGRES_DSN",
-        description="VB database DSN"
-    )
-
-    # Pool configurations (will be set by factory)
-    main_pool_min_size: int = Field(default=20, description="Main pool min size")
-    main_pool_max_size: int = Field(default=100, description="Main pool max size")
-    main_pool_timeout: float = Field(default=5.0, description="Main pool timeout")
-    main_pool_command_timeout: float = Field(default=10.0, description="Main pool command timeout")
-
-    vb_pool_min_size: int = Field(default=10, description="VB pool min size")
-    vb_pool_max_size: int = Field(default=50, description="VB pool max size")
-    vb_pool_timeout: float = Field(default=5.0, description="VB pool timeout")
-    vb_pool_command_timeout: float = Field(default=10.0, description="VB pool command timeout")
+    # Pool configuration
+    pool_min_size: int = Field(default=20, description="Pool min size")
+    pool_max_size: int = Field(default=100, description="Pool max size")
+    pool_timeout: float = Field(default=5.0, description="Pool timeout")
+    pool_command_timeout: float = Field(default=10.0, description="Pool command timeout")
 
     # Features
-    enable_vb_database: bool = Field(default=True)
     run_schemas_on_startup: bool = Field(default=True)
 
     # Health check
@@ -149,37 +137,22 @@ class PostgresConfig(BaseConfig):
     max_cached_statement_lifetime: int = Field(default=300)
     max_queries: int = Field(default=50000)
 
-    def get_main_pool_config(self) -> PoolConfig:
+    @property
+    def main_pool(self) -> PoolConfig:
         """Get main pool configuration"""
         return PoolConfig(
-            min_size=self.main_pool_min_size,
-            max_size=self.main_pool_max_size,
-            timeout=self.main_pool_timeout,
-            command_timeout=self.main_pool_command_timeout,
-            statement_cache_size=self.statement_cache_size,
-            max_cached_statement_lifetime=self.max_cached_statement_lifetime,
-            max_queries=self.max_queries,
-        )
-
-    def get_vb_pool_config(self) -> PoolConfig:
-        """Get VB pool configuration"""
-        return PoolConfig(
-            min_size=self.vb_pool_min_size,
-            max_size=self.vb_pool_max_size,
-            timeout=self.vb_pool_timeout,
-            command_timeout=self.vb_pool_command_timeout,
+            min_size=self.pool_min_size,
+            max_size=self.pool_max_size,
+            timeout=self.pool_timeout,
+            command_timeout=self.pool_command_timeout,
             statement_cache_size=self.statement_cache_size,
             max_cached_statement_lifetime=self.max_cached_statement_lifetime,
             max_queries=self.max_queries,
         )
 
     def get_main_dsn(self) -> Optional[str]:
-        """Get main DSN as plain string"""
-        return self.main_dsn.get_secret_value() if self.main_dsn else None
-
-    def get_vb_dsn(self) -> Optional[str]:
-        """Get VB DSN as plain string"""
-        return self.vb_dsn.get_secret_value() if self.vb_dsn else None
+        """Get main DSN"""
+        return self.main_dsn
 
 
 # =============================================================================
@@ -271,33 +244,21 @@ def get_postgres_config() -> PostgresConfig:
 
     # Auto-scale pool sizes if enabled
     if config.auto_scale_pools:
-        main_min, main_max = calculate_pool_size(
-            config.main_pool_min_size,
-            config.main_pool_max_size,
-            worker_count,
-            config.max_total_connections
-        )
-        vb_min, vb_max = calculate_pool_size(
-            config.vb_pool_min_size,
-            config.vb_pool_max_size,
+        pool_min, pool_max = calculate_pool_size(
+            config.pool_min_size,
+            config.pool_max_size,
             worker_count,
             config.max_total_connections
         )
 
         # Update config with calculated values
         config = PostgresConfig(
-            **config.model_dump(exclude={'main_pool_min_size', 'main_pool_max_size',
-                                         'vb_pool_min_size', 'vb_pool_max_size'}),
-            main_pool_min_size=main_min,
-            main_pool_max_size=main_max,
-            vb_pool_min_size=vb_min,
-            vb_pool_max_size=vb_max,
+            **config.model_dump(exclude={'pool_min_size', 'pool_max_size'}),
+            pool_min_size=pool_min,
+            pool_max_size=pool_max,
         )
 
-    log.info(
-        f"Database pools configured - Main: {config.main_pool_min_size}-{config.main_pool_max_size}, "
-        f"VB: {config.vb_pool_min_size}-{config.vb_pool_max_size}"
-    )
+    log.info(f"Database pool configured: {config.pool_min_size}-{config.pool_max_size}")
 
     return config
 
@@ -311,28 +272,25 @@ def reset_postgres_config() -> None:
 # Backward Compatibility Aliases
 # =============================================================================
 
-# Alias for backward compatibility
+# Type alias for backward compatibility
+DatabaseConfig = PostgresConfig
+
+
 def get_database_config():
     """Alias for get_postgres_config (backward compatibility)."""
     return get_postgres_config()
 
 
 def get_pool_config(database: str = 'main') -> PoolConfig:
-    """Get pool configuration for specific database"""
+    """Get pool configuration"""
     config = get_postgres_config()
-    return config.get_main_pool_config() if database == 'main' else config.get_vb_pool_config()
+    return config.main_pool
 
 
 def get_dsn(database: str = 'main') -> Optional[str]:
-    """Get DSN for specific database"""
+    """Get DSN"""
     config = get_postgres_config()
-    return config.get_main_dsn() if database == 'main' else config.get_vb_dsn()
-
-
-def is_vb_enabled() -> bool:
-    """Check if VB database is enabled"""
-    config = get_postgres_config()
-    return config.enable_vb_database
+    return config.get_main_dsn()
 
 
 def get_pool_stats() -> Dict[str, Any]:
@@ -346,15 +304,10 @@ def get_pool_stats() -> Dict[str, Any]:
         "worker_count": worker_count,
         "auto_scale_enabled": config.auto_scale_pools,
         "max_total_connections": config.max_total_connections,
-        "main_pool": {
-            "min_size": config.main_pool_min_size,
-            "max_size": config.main_pool_max_size,
-            "total_max": config.main_pool_max_size * worker_count
+        "pool": {
+            "min_size": config.pool_min_size,
+            "max_size": config.pool_max_size,
+            "total_max": config.pool_max_size * worker_count
         },
-        "vb_pool": {
-            "min_size": config.vb_pool_min_size,
-            "max_size": config.vb_pool_max_size,
-            "total_max": config.vb_pool_max_size * worker_count
-        },
-        "total_connections": (config.main_pool_max_size + config.vb_pool_max_size) * worker_count
+        "total_connections": config.pool_max_size * worker_count
     }

@@ -9,7 +9,7 @@ from typing import Optional, List
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import SettingsConfigDict
 
-from app.common.base.base_config import BaseConfig
+from app.common.base.base_config import BaseConfig, BASE_CONFIG_DICT
 from app.config.logging_config import get_logger
 
 log = get_logger("wellwon.config.telegram")
@@ -27,7 +27,7 @@ class TelegramConfig(BaseConfig):
     """
 
     model_config = SettingsConfigDict(
-        **BaseConfig.model_config,
+        **BASE_CONFIG_DICT,
         env_prefix='TELEGRAM_',
     )
 

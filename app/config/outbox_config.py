@@ -19,7 +19,7 @@ from typing import Dict, Set
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
-from app.common.base.base_config import BaseConfig
+from app.common.base.base_config import BaseConfig, BASE_CONFIG_DICT
 
 
 class OutboxConfig(BaseConfig):
@@ -204,7 +204,7 @@ class OutboxConfig(BaseConfig):
     )
 
     model_config = SettingsConfigDict(
-        **BaseConfig.model_config,
+        **BASE_CONFIG_DICT,
         env_prefix='OUTBOX_',
     )
 
@@ -222,6 +222,10 @@ def get_outbox_config() -> OutboxConfig:
 def reset_outbox_config() -> None:
     """Reset config singleton (for testing)."""
     get_outbox_config.cache_clear()
+
+
+# Backward compatibility alias
+DEFAULT_OUTBOX_CONFIG = get_outbox_config()
 
 
 # =============================================================================

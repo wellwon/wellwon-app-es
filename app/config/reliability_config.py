@@ -7,12 +7,12 @@
 
 import os
 from functools import lru_cache
-from typing import Optional, Callable
+from typing import Any, Optional, Callable
 from enum import Enum, auto
 from pydantic import BaseModel, Field
 from pydantic_settings import SettingsConfigDict
 
-from app.common.base.base_config import BaseConfig
+from app.common.base.base_config import BaseConfig, BASE_CONFIG_DICT
 
 
 # =============================================================================
@@ -40,6 +40,7 @@ class RetryConfig(BaseModel):
     jitter: bool = True
     exponential_base: Optional[float] = None
     jitter_type: str = "full"
+    retry_condition: Optional[Any] = None  # Callable[[Exception], bool]
 
     class Config:
         arbitrary_types_allowed = True
@@ -99,7 +100,7 @@ class ReliabilitySettings(BaseConfig):
     """
 
     model_config = SettingsConfigDict(
-        **BaseConfig.model_config,
+        **BASE_CONFIG_DICT,
         env_prefix='RELIABILITY_',
     )
 

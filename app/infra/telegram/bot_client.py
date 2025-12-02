@@ -120,7 +120,7 @@ class TelegramBotClient:
             return True
 
         try:
-            self._bot = Bot(token=self.config.bot_token)
+            self._bot = Bot(token=self.config.bot_token.get_secret_value())
 
             # Verify bot token
             me = await self._bot.get_me()
@@ -193,7 +193,7 @@ class TelegramBotClient:
 
             await self._bot.set_webhook(
                 url=self.config.full_webhook_url,
-                secret_token=self.config.webhook_secret if self.config.webhook_secret else None,
+                secret_token=self.config.webhook_secret.get_secret_value() if self.config.webhook_secret else None,
                 drop_pending_updates=True,  # Don't process old updates
             )
 
@@ -591,7 +591,7 @@ class TelegramBotClient:
             file = await self._bot.get_file(file_id)
             if file.file_path:
                 # Build full download URL
-                return f"https://api.telegram.org/file/bot{self.config.bot_token}/{file.file_path}"
+                return f"https://api.telegram.org/file/bot{self.config.bot_token.get_secret_value()}/{file.file_path}"
             return None
 
         except Exception as e:

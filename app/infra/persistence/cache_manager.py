@@ -13,7 +13,7 @@ import asyncio
 from datetime import datetime, timezone
 from enum import Enum
 from functools import wraps
-from app.config.cache_config import CACHE_CONFIG, get_cache_config, get_ttl
+from app.config.cache_config import CACHE_CONFIG, get_cache_config, get_cache_config_dict, get_ttl
 from app.config.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -139,35 +139,35 @@ class CacheManager:
 
     def _init_from_config(self):
         """Initialize settings from configuration"""
-        self.enabled = get_cache_config('core.enabled', True)
-        self.key_prefix = get_cache_config('core.key_prefix', 'wellwon')
-        self.default_ttl = get_cache_config('core.default_ttl', 300)
-        self.max_key_length = get_cache_config('core.max_key_length', 256)
+        self.enabled = get_cache_config_dict('core.enabled', True)
+        self.key_prefix = get_cache_config_dict('core.key_prefix', 'wellwon')
+        self.default_ttl = get_cache_config_dict('core.default_ttl', 300)
+        self.max_key_length = get_cache_config_dict('core.max_key_length', 256)
 
-        self.scan_count = get_cache_config('redis.scan_count', 100)
-        self.pipeline_max_size = get_cache_config('redis.pipeline_max_size', 100)
+        self.scan_count = get_cache_config_dict('redis.scan_count', 100)
+        self.pipeline_max_size = get_cache_config_dict('redis.pipeline_max_size', 100)
 
-        self.cleanup_on_startup = get_cache_config('cleanup.on_startup', True)
-        self.cleanup_batch_size = get_cache_config('cleanup.batch_size', 1000)
-        self.cleanup_interval_hours = get_cache_config('cleanup.interval_hours', 6)
+        self.cleanup_on_startup = get_cache_config_dict('cleanup.on_startup', True)
+        self.cleanup_batch_size = get_cache_config_dict('cleanup.batch_size', 1000)
+        self.cleanup_interval_hours = get_cache_config_dict('cleanup.interval_hours', 6)
 
         self.cache_enabled = {
-            'user': get_cache_config('features.enable_user', True),
-            'auth': get_cache_config('features.enable_auth', True),
-            'api': get_cache_config('features.enable_api', True),
-            'event_store': get_cache_config('features.enable_event_store', True),
-            'aggregate': get_cache_config('features.enable_aggregate', True),
-            'sequence': get_cache_config('features.enable_sequence', True),
+            'user': get_cache_config_dict('features.enable_user', True),
+            'auth': get_cache_config_dict('features.enable_auth', True),
+            'api': get_cache_config_dict('features.enable_api', True),
+            'event_store': get_cache_config_dict('features.enable_event_store', True),
+            'aggregate': get_cache_config_dict('features.enable_aggregate', True),
+            'sequence': get_cache_config_dict('features.enable_sequence', True),
         }
 
-        self.metrics_enabled = get_cache_config('monitoring.metrics_enabled', True)
-        self.log_slow_ops = get_cache_config('monitoring.log_slow_operations', True)
-        self.slow_op_threshold_ms = get_cache_config('monitoring.slow_operation_threshold_ms', 100)
-        self.log_hits = get_cache_config('monitoring.log_cache_hits', False)
-        self.log_misses = get_cache_config('monitoring.log_cache_misses', True)
+        self.metrics_enabled = get_cache_config_dict('monitoring.metrics_enabled', True)
+        self.log_slow_ops = get_cache_config_dict('monitoring.log_slow_operations', True)
+        self.slow_op_threshold_ms = get_cache_config_dict('monitoring.slow_operation_threshold_ms', 100)
+        self.log_hits = get_cache_config_dict('monitoring.log_cache_hits', False)
+        self.log_misses = get_cache_config_dict('monitoring.log_cache_misses', True)
 
-        self.debug_mode = get_cache_config('debug.enabled', False)
-        self.bypass_cache = get_cache_config('debug.bypass_cache', False)
+        self.debug_mode = get_cache_config_dict('debug.enabled', False)
+        self.bypass_cache = get_cache_config_dict('debug.bypass_cache', False)
 
     def _get_ttl(self, cache_type: str) -> int:
         return get_ttl(cache_type)
@@ -403,7 +403,7 @@ class CacheManager:
     async def increment_rate_limit(
             self, resource: str, identifier: str, window: int = None
     ) -> int:
-        window = window or get_cache_config('rate_limiting.default_window', 60)
+        window = window or get_cache_config_dict('rate_limiting.default_window', 60)
         key = self._make_key('ratelimit', resource, identifier)
 
         try:
@@ -419,8 +419,8 @@ class CacheManager:
             self, resource: str, identifier: str, limit: int = None
     ) -> bool:
         if limit is None:
-            limit = get_cache_config(f'rate_limiting.limits.{resource}',
-                                     get_cache_config('rate_limiting.default_limit', 100))
+            limit = get_cache_config_dict(f'rate_limiting.limits.{resource}',
+                                          get_cache_config_dict('rate_limiting.default_limit', 100))
 
         key = self._make_key('ratelimit', resource, identifier)
 

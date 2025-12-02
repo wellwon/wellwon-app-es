@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any
 from pydantic import Field, SecretStr
 from pydantic_settings import SettingsConfigDict
 
-from app.common.base.base_config import BaseConfig
+from app.common.base.base_config import BaseConfig, BASE_CONFIG_DICT
 from app.config.logging_config import get_logger
 
 log = get_logger("wellwon.config.jwt")
@@ -21,7 +21,7 @@ class JWTConfig(BaseConfig):
     """
 
     model_config = SettingsConfigDict(
-        **BaseConfig.model_config,
+        **BASE_CONFIG_DICT,
         env_prefix='JWT_',
     )
 

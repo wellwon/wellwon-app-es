@@ -1,6 +1,6 @@
 # app/common/base/base_config.py
 # =============================================================================
-# BaseConfig - Foundation for all TradeCore configuration classes
+# BaseConfig - Foundation for all WellWon configuration classes
 #
 # Industry best practices (Pydantic v2):
 # - SettingsConfigDict (not deprecated class Config)
@@ -11,14 +11,14 @@
 # - @lru_cache singleton pattern for factory functions
 #
 # Usage:
-#     from app.common.base.base_config import BaseConfig
+#     from app.common.base.base_config import BaseConfig, BASE_CONFIG_DICT
 #     from pydantic_settings import SettingsConfigDict
 #     from pydantic import SecretStr
 #     from functools import lru_cache
 #
 #     class MyConfig(BaseConfig):
 #         model_config = SettingsConfigDict(
-#             **BaseConfig.model_config,
+#             **BASE_CONFIG_DICT,
 #             env_prefix="MY_"
 #         )
 #         api_key: SecretStr
@@ -33,6 +33,17 @@ from typing import Any, Dict
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# Base config dict for spreading into child classes
+# Using plain dict instead of SettingsConfigDict to avoid TypedDict spread issues in Python 3.14
+BASE_CONFIG_DICT: Dict[str, Any] = {
+    "env_file": ".env",
+    "env_file_encoding": "utf-8",
+    "case_sensitive": False,
+    "extra": "ignore",
+    "env_nested_delimiter": "__",
+}
 
 
 class BaseConfig(BaseSettings):

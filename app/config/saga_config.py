@@ -11,7 +11,7 @@ from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 from datetime import timedelta
 
-from app.common.base.base_config import BaseConfig
+from app.common.base.base_config import BaseConfig, BASE_CONFIG_DICT
 
 
 class SagaConfig(BaseConfig):
@@ -22,7 +22,7 @@ class SagaConfig(BaseConfig):
     """
 
     model_config = SettingsConfigDict(
-        **BaseConfig.model_config,
+        **BASE_CONFIG_DICT,
         env_prefix='SAGA_',
     )
 

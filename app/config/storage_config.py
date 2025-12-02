@@ -8,7 +8,7 @@ from functools import lru_cache
 from pydantic import Field, SecretStr
 from pydantic_settings import SettingsConfigDict
 
-from app.common.base.base_config import BaseConfig
+from app.common.base.base_config import BaseConfig, BASE_CONFIG_DICT
 
 
 class StorageConfig(BaseConfig):
@@ -17,7 +17,7 @@ class StorageConfig(BaseConfig):
     """
 
     model_config = SettingsConfigDict(
-        **BaseConfig.model_config,
+        **BASE_CONFIG_DICT,
         env_prefix='STORAGE_',
     )
 

@@ -10,7 +10,7 @@ from enum import Enum
 from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import SettingsConfigDict
 
-from app.common.base.base_config import BaseConfig
+from app.common.base.base_config import BaseConfig, BASE_CONFIG_DICT
 
 
 class TopicType(str, Enum):
@@ -48,7 +48,7 @@ class EventBusConfig(BaseConfig):
     """
 
     model_config = SettingsConfigDict(
-        **BaseConfig.model_config,
+        **BASE_CONFIG_DICT,
         env_prefix='REDPANDA_',
     )
 
@@ -127,6 +127,16 @@ class EventBusConfig(BaseConfig):
     retry_initial_delay_ms: int = Field(default=100)
     retry_max_delay_ms: int = Field(default=2000)
     retry_backoff_factor: float = Field(default=2.0)
+    publish_retry_max_attempts: int = Field(default=3)
+    publish_retry_initial_delay_ms: int = Field(default=100)
+    publish_retry_max_delay_ms: int = Field(default=2000)
+    publish_retry_backoff_factor: float = Field(default=2.0)
+
+    # Publish circuit breaker
+    publish_circuit_breaker_failure_threshold: int = Field(default=5)
+    publish_circuit_breaker_success_threshold: int = Field(default=3)
+    publish_circuit_breaker_timeout_seconds: int = Field(default=60)
+    publish_circuit_breaker_half_open_calls: int = Field(default=3)
 
     # =========================================================================
     # Consumer Processing
@@ -181,9 +191,24 @@ class EventBusConfig(BaseConfig):
         clean_name = topic_name.replace(".", "-")
         return f"{self.consumer_group_id_prefix}-{clean_name}"
 
+    def get_topic_config(self, topic_name: str) -> Optional[TopicConfig]:
+        """Get topic configuration by name"""
+        topics = get_default_topics()
+        return topics.get(topic_name)
+
     def get_sasl_password_value(self) -> Optional[str]:
         """Get SASL password as plain string"""
         return self.sasl_password.get_secret_value() if self.sasl_password else None
+
+    @classmethod
+    def from_env(cls) -> "EventBusConfig":
+        """Create config from environment (backward compatibility)"""
+        return cls()
+
+    @property
+    def kafka(self) -> "EventBusConfig":
+        """Backward compatibility - return self since kafka fields are now flat on EventBusConfig"""
+        return self
 
 
 # =============================================================================
@@ -440,6 +465,9 @@ def reset_eventbus_config() -> None:
 # =============================================================================
 # Backward Compatibility
 # =============================================================================
+
+# Type alias for backward compatibility (was TransportConfig in old eventbus_transport_config.py)
+TransportConfig = EventBusConfig
 
 # Aliases for backward compatibility
 def get_event_bus_config() -> EventBusConfig:

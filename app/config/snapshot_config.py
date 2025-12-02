@@ -9,7 +9,7 @@ from typing import Dict, Optional, Any
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
-from app.common.base.base_config import BaseConfig
+from app.common.base.base_config import BaseConfig, BASE_CONFIG_DICT
 
 
 class SnapshotConfig(BaseConfig):
@@ -18,7 +18,7 @@ class SnapshotConfig(BaseConfig):
     """
 
     model_config = SettingsConfigDict(
-        **BaseConfig.model_config,
+        **BASE_CONFIG_DICT,
         env_prefix='SNAPSHOT_',
     )
 

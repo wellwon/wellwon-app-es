@@ -11,7 +11,7 @@ from typing import Optional, Dict
 from pydantic_settings import SettingsConfigDict
 from pydantic import Field, SecretStr
 
-from app.common.base.base_config import BaseConfig
+from app.common.base.base_config import BaseConfig, BASE_CONFIG_DICT
 
 
 class EventStoreConfig(BaseConfig):
@@ -34,7 +34,7 @@ class EventStoreConfig(BaseConfig):
     """
 
     model_config = SettingsConfigDict(
-        **BaseConfig.model_config,
+        **BASE_CONFIG_DICT,
         env_prefix='KURRENTDB_',
     )
 
@@ -404,6 +404,12 @@ class EventStoreConfig(BaseConfig):
             aggregate_type,
             self.snapshot_interval
         )
+
+    @classmethod
+    def from_env(cls) -> "EventStoreConfig":
+        """Create config from environment (backward compatibility)"""
+        return cls()
+
 
 # =============================================================================
 # Factory Function

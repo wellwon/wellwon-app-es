@@ -33,7 +33,7 @@ from app.infra.reliability.circuit_breaker import (
 from app.infra.reliability.retry import retry_async, RetryConfig
 
 # Import configuration
-from app.config.eventbus_config import EventBusConfig, get_eventbus_config
+from app.config.eventbus_config import EventBusConfig, get_eventbus_config, TransportConfig
 
 log = logging.getLogger("wellwon.event_bus")
 

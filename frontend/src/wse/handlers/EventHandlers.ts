@@ -7,6 +7,12 @@ import { WSMessage } from '@/wse';
 import { useSystemStatusStore } from '@/stores/useSystemStatusStore';
 import { logger } from '@/wse';
 import { queryClient } from '@/lib/queryClient';
+import type { Chat } from '@/types/realtime-chat';
+
+// Interface for message processor registration
+interface MessageProcessorRegistrar {
+  registerHandler(type: string, handler: (message: WSMessage) => void): void;
+}
 
 export class EventHandlers {
 
@@ -34,7 +40,7 @@ export class EventHandlers {
       logger.info('User profile updated event received:', profileData);
 
       // Invalidate React Query cache for profile
-      queryClient.invalidateQueries({ queryKey: ['user', 'profile'] });
+      void queryClient.invalidateQueries({ queryKey: ['user', 'profile'] });
 
       // Dispatch event for AuthContext
       window.dispatchEvent(new CustomEvent('userProfileUpdated', {
@@ -67,8 +73,8 @@ export class EventHandlers {
       });
 
       // Invalidate React Query cache for user profile (forces re-fetch)
-      queryClient.invalidateQueries({ queryKey: ['user', 'profile'] });
-      queryClient.invalidateQueries({ queryKey: ['user', userId] });
+      void queryClient.invalidateQueries({ queryKey: ['user', 'profile'] });
+      void queryClient.invalidateQueries({ queryKey: ['user', userId] });
 
       // Dispatch event for AuthContext to update local state immediately
       window.dispatchEvent(new CustomEvent('userAdminChange', {
@@ -159,8 +165,8 @@ export class EventHandlers {
       });
 
       // Invalidate React Query cache for user profile (forces re-fetch)
-      queryClient.invalidateQueries({ queryKey: ['user', 'profile'] });
-      queryClient.invalidateQueries({ queryKey: ['user', userId] });
+      void queryClient.invalidateQueries({ queryKey: ['user', 'profile'] });
+      void queryClient.invalidateQueries({ queryKey: ['user', userId] });
 
       // Dispatch event for AuthContext to update local state
       window.dispatchEvent(new CustomEvent('userAdminChange', {
@@ -247,7 +253,7 @@ export class EventHandlers {
 
       // Only invalidate detail cache
       // Supergroups list is updated optimistically via setQueryData in useSupergroups hook
-      queryClient.invalidateQueries({ queryKey: ['company', company.company_id] });
+      void queryClient.invalidateQueries({ queryKey: ['company', company.company_id] });
 
       window.dispatchEvent(new CustomEvent('companyUpdated', { detail: company }));
     } catch (error) {
@@ -262,7 +268,7 @@ export class EventHandlers {
 
       // Only invalidate detail cache
       // Supergroups list is updated optimistically via setQueryData in useSupergroups hook
-      queryClient.invalidateQueries({ queryKey: ['company', company.company_id] });
+      void queryClient.invalidateQueries({ queryKey: ['company', company.company_id] });
 
       window.dispatchEvent(new CustomEvent('companyArchived', { detail: company }));
     } catch (error) {
@@ -277,7 +283,7 @@ export class EventHandlers {
 
       // Only invalidate detail cache
       // Supergroups list is updated optimistically via setQueryData in useSupergroups hook
-      queryClient.invalidateQueries({ queryKey: ['company', company.company_id] });
+      void queryClient.invalidateQueries({ queryKey: ['company', company.company_id] });
 
       window.dispatchEvent(new CustomEvent('companyRestored', { detail: company }));
     } catch (error) {
@@ -306,10 +312,10 @@ export class EventHandlers {
       logger.info('Company member joined:', data);
 
       // Invalidate company lists so new company appears in sidebar
-      queryClient.invalidateQueries({ queryKey: ['companies'] });
-      queryClient.invalidateQueries({ queryKey: ['my-companies'] });
-      queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'users'] });
-      queryClient.invalidateQueries({ queryKey: ['company', data.company_id] });
+      void queryClient.invalidateQueries({ queryKey: ['companies'] });
+      void queryClient.invalidateQueries({ queryKey: ['my-companies'] });
+      void queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'users'] });
+      void queryClient.invalidateQueries({ queryKey: ['company', data.company_id] });
 
       window.dispatchEvent(new CustomEvent('companyMemberJoined', { detail: data }));
     } catch (error) {
@@ -322,8 +328,8 @@ export class EventHandlers {
       const data = message.p;
       logger.info('Company member left:', data);
 
-      queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'users'] });
-      queryClient.invalidateQueries({ queryKey: ['company', data.company_id] });
+      void queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'users'] });
+      void queryClient.invalidateQueries({ queryKey: ['company', data.company_id] });
 
       window.dispatchEvent(new CustomEvent('companyMemberLeft', { detail: data }));
     } catch (error) {
@@ -336,7 +342,7 @@ export class EventHandlers {
       const data = message.p;
       logger.info('Company member role changed:', data);
 
-      queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'users'] });
+      void queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'users'] });
 
       window.dispatchEvent(new CustomEvent('companyMemberRoleChanged', { detail: data }));
     } catch (error) {
@@ -352,7 +358,7 @@ export class EventHandlers {
       // Only invalidate company-specific telegram cache
       // Do NOT invalidate supergroups lists - they are updated optimistically via setQueryData in useSupergroups hook
       // Invalidating would cause refetch that overwrites optimistic data with stale API response
-      queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'telegram'] });
+      void queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'telegram'] });
 
       window.dispatchEvent(new CustomEvent('companyTelegramCreated', { detail: data }));
     } catch (error) {
@@ -365,7 +371,7 @@ export class EventHandlers {
       const data = message.p;
       logger.info('Company Telegram group linked:', data);
 
-      queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'telegram'] });
+      void queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'telegram'] });
 
       window.dispatchEvent(new CustomEvent('companyTelegramLinked', { detail: data }));
     } catch (error) {
@@ -378,7 +384,7 @@ export class EventHandlers {
       const data = message.p;
       logger.info('Company Telegram group unlinked:', data);
 
-      queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'telegram'] });
+      void queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'telegram'] });
 
       window.dispatchEvent(new CustomEvent('companyTelegramUnlinked', { detail: data }));
     } catch (error) {
@@ -391,8 +397,8 @@ export class EventHandlers {
       const data = message.p;
       logger.info('Company balance updated:', data);
 
-      queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'balance'] });
-      queryClient.invalidateQueries({ queryKey: ['company', data.company_id] });
+      void queryClient.invalidateQueries({ queryKey: ['company', data.company_id, 'balance'] });
+      void queryClient.invalidateQueries({ queryKey: ['company', data.company_id] });
 
       window.dispatchEvent(new CustomEvent('companyBalanceUpdated', { detail: data }));
     } catch (error) {
@@ -413,7 +419,7 @@ export class EventHandlers {
       // Invalidating would cause refetch that returns stale data (projection not yet complete)
 
       // Only invalidate counts (these are separate queries)
-      queryClient.invalidateQueries({ queryKey: ['supergroup-chat-counts'] });
+      void queryClient.invalidateQueries({ queryKey: ['supergroup-chat-counts'] });
 
       window.dispatchEvent(new CustomEvent('chatCreated', { detail: chat }));
     } catch (error) {
@@ -429,7 +435,7 @@ export class EventHandlers {
       // Only invalidate detail cache, NOT the list!
       // The list is updated optimistically via setQueryData in useChatList hook
       // Invalidating list would cause refetch that overwrites optimistic update with stale data
-      queryClient.invalidateQueries({ queryKey: ['chat', chat.chat_id] });
+      void queryClient.invalidateQueries({ queryKey: ['chat', chat.chat_id] });
 
       window.dispatchEvent(new CustomEvent('chatUpdated', { detail: chat }));
     } catch (error) {
@@ -444,7 +450,7 @@ export class EventHandlers {
 
       // Only invalidate detail cache, NOT the list!
       // The list is updated optimistically via setQueryData in useChatList hook
-      queryClient.invalidateQueries({ queryKey: ['chat', chat.chat_id] });
+      void queryClient.invalidateQueries({ queryKey: ['chat', chat.chat_id] });
 
       window.dispatchEvent(new CustomEvent('chatArchived', { detail: chat }));
     } catch (error) {
@@ -497,7 +503,7 @@ export class EventHandlers {
       // Instead, useChatList listens to messageCreated and updates last_message optimistically
 
       // Update unread count (this is a separate query, safe to invalidate)
-      queryClient.invalidateQueries({ queryKey: ['unread-count'] });
+      void queryClient.invalidateQueries({ queryKey: ['unread-count'] });
 
       // Dispatch event with full Telegram data
       // Normalize message_id to id for frontend consistency
@@ -555,8 +561,8 @@ export class EventHandlers {
       const data = message.p;
       logger.info('Participant joined chat:', data);
 
-      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id, 'participants'] });
-      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id] });
+      void queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id, 'participants'] });
+      void queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id] });
 
       window.dispatchEvent(new CustomEvent('participantJoined', { detail: data }));
     } catch (error) {
@@ -569,8 +575,8 @@ export class EventHandlers {
       const data = message.p;
       logger.info('Participant left chat:', data);
 
-      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id, 'participants'] });
-      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id] });
+      void queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id, 'participants'] });
+      void queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id] });
 
       window.dispatchEvent(new CustomEvent('participantLeft', { detail: data }));
     } catch (error) {
@@ -583,7 +589,7 @@ export class EventHandlers {
       const data = message.p;
       logger.info('Participant role changed:', data);
 
-      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id, 'participants'] });
+      void queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id, 'participants'] });
 
       window.dispatchEvent(new CustomEvent('participantRoleChanged', { detail: data }));
     } catch (error) {
@@ -618,8 +624,8 @@ export class EventHandlers {
       const data = message.p;
       logger.debug('Messages read:', data);
 
-      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id, 'messages'] });
-      queryClient.invalidateQueries({ queryKey: ['unread-count'] });
+      void queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id, 'messages'] });
+      void queryClient.invalidateQueries({ queryKey: ['unread-count'] });
 
       window.dispatchEvent(new CustomEvent('messagesRead', { detail: data }));
     } catch (error) {
@@ -633,12 +639,12 @@ export class EventHandlers {
       logger.info('Chat Telegram linked:', data);
 
       // Invalidate chat detail cache
-      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id] });
+      void queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id] });
 
       // IMPORTANT: Use setQueryData to update the specific chat instead of invalidating
       // invalidateQueries would destroy optimistic entries before projection completes
       // This preserves any optimistically added chats while updating the linked one
-      queryClient.setQueryData(['chats'], (oldChats: any[] | undefined) => {
+      queryClient.setQueryData<Chat[] | undefined>(['chats'], (oldChats) => {
         if (!oldChats) return oldChats;
         return oldChats.map(chat =>
           chat.id === data.chat_id
@@ -648,7 +654,7 @@ export class EventHandlers {
       });
 
       // Safe to invalidate counts - these are separate aggregation queries
-      queryClient.invalidateQueries({ queryKey: ['supergroup-chat-counts'] });
+      void queryClient.invalidateQueries({ queryKey: ['supergroup-chat-counts'] });
 
       window.dispatchEvent(new CustomEvent('chatTelegramLinked', { detail: data }));
     } catch (error) {
@@ -661,7 +667,7 @@ export class EventHandlers {
       const data = message.p;
       logger.info('Chat Telegram unlinked:', data);
 
-      queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id] });
+      void queryClient.invalidateQueries({ queryKey: ['chat', data.chat_id] });
 
       window.dispatchEvent(new CustomEvent('chatTelegramUnlinked', { detail: data }));
     } catch (error) {
@@ -870,7 +876,7 @@ export class EventHandlers {
   // Register All Handlers
   // ─────────────────────────────────────────────────────────────────────────
 
-  static registerAll(messageProcessor: any): void {
+  static registerAll(messageProcessor: MessageProcessorRegistrar): void {
     try {
       // Define all handlers in a map for batch registration
       const handlers: Record<string, (message: WSMessage) => void> = {

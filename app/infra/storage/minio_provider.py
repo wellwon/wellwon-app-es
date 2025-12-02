@@ -67,8 +67,8 @@ class MinIOStorageProvider(BaseStorageProvider):
                 self.session.client(
                     service_name="s3",
                     endpoint_url=self.config.endpoint_url,
-                    aws_access_key_id=self.config.access_key,
-                    aws_secret_access_key=self.config.secret_key,
+                    aws_access_key_id=self.config.access_key.get_secret_value(),
+                    aws_secret_access_key=self.config.secret_key.get_secret_value(),
                     region_name=self.config.region,
                     config=self._boto_config,
                 )

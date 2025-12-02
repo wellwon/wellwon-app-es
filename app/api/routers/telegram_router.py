@@ -186,7 +186,7 @@ async def telegram_webhook(
 
     # Security: Verify secret token
     secret_header = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-    if not verify_webhook_secret(secret_header, config.webhook_secret):
+    if not verify_webhook_secret(secret_header, config.webhook_secret.get_secret_value() if config.webhook_secret else ""):
         log.warning("Invalid webhook secret token received")
         raise HTTPException(status_code=403, detail="Invalid secret token")
 

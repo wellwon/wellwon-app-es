@@ -362,14 +362,14 @@ class TelegramMTProtoClient:
                 self._client = TelegramClient(
                     StringSession(session_string),
                     self.config.api_id,
-                    self.config.api_hash
+                    self.config.api_hash.get_secret_value()
                 )
             else:
                 log.debug("Creating new session for MTProto")
                 self._client = TelegramClient(
                     self.config.session_name,
                     self.config.api_id,
-                    self.config.api_hash
+                    self.config.api_hash.get_secret_value()
                 )
 
             # Set flood_sleep_threshold (Telethon best practice)

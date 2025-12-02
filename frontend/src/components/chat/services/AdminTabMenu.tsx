@@ -1,4 +1,4 @@
-import React, { useState, useRef, useLayoutEffect } from 'react';
+import React, { useRef } from 'react';
 import { useUnifiedSidebar } from '@/contexts/chat';
 import { usePlatform } from '@/contexts/PlatformContext';
 import { Settings, BarChart3, Users, ShoppingCart, Wrench } from 'lucide-react';
@@ -6,7 +6,6 @@ import { Settings, BarChart3, Users, ShoppingCart, Wrench } from 'lucide-react';
 const AdminTabMenu = () => {
   const { contentType, openSidebar, closeSidebar, isOpen } = useUnifiedSidebar();
   const { isLightTheme } = usePlatform();
-  const [isCompact, setIsCompact] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const tabs = [
@@ -50,37 +49,6 @@ const AdminTabMenu = () => {
     openSidebar(tabId);
   };
 
-  // Check if tabs should be compact (icons only)
-  // Using useLayoutEffect to prevent flash of wrong layout
-  useLayoutEffect(() => {
-    const checkWidth = () => {
-      if (containerRef.current) {
-        // Get available width for tabs
-        const containerWidth = containerRef.current.offsetWidth;
-        // Each tab with text needs ~110px minimum, with icon only ~50px
-        // 5 tabs * 110px = 550px minimum for text mode
-        const needsCompact = containerWidth < 550;
-        setIsCompact(needsCompact);
-      }
-    };
-
-    // Initial check - run synchronously
-    checkWidth();
-
-    // Use ResizeObserver for container size changes
-    const resizeObserver = new ResizeObserver(() => {
-      checkWidth();
-    });
-
-    if (containerRef.current) {
-      resizeObserver.observe(containerRef.current);
-    }
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, []);
-
   // Theme-aware styles (like Declarant page)
   const theme = isLightTheme ? {
     header: 'bg-white border-gray-300 shadow-sm',
@@ -109,10 +77,10 @@ const AdminTabMenu = () => {
   };
 
   return (
-    <div ref={containerRef} className={`h-16 border-b relative z-10 overflow-hidden ${theme.header}`}>
+    <div ref={containerRef} className={`h-16 border-b relative z-10 ${theme.header}`}>
 
-      <div className="flex h-full relative z-10 w-full">
-        {/* Tabs container */}
+      <div className="flex h-full relative z-10 w-full overflow-x-auto scrollbar-hide">
+        {/* Tabs container with horizontal scroll */}
         {tabs.map((tab, index) => {
           const Icon = tab.icon;
           const isActive = isOpen && contentType === tab.id;
@@ -123,25 +91,23 @@ const AdminTabMenu = () => {
               key={tab.id}
               onClick={() => handleTabClick(tab.id)}
               title={tab.label}
-              className={`flex-1 min-w-0 flex items-center justify-center gap-2 ${isCompact ? 'px-1' : 'px-3'} py-2 ${!isLast ? `border-r ${theme.border}` : ''} transition-all duration-200 group overflow-hidden ${
+              className={`flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 ${!isLast ? `border-r ${theme.border}` : ''} transition-all duration-200 group whitespace-nowrap ${
                 isActive
                   ? `${theme.button.active} border-b-2 border-accent-gray`
                   : theme.button.default
               }`}
             >
               <Icon
-                size={isCompact ? 20 : 16}
+                size={16}
                 className={`flex-shrink-0 transition-colors duration-200 ${
                   isActive ? theme.text.active : `${theme.text.secondary} group-hover:${theme.text.primary}`
                 }`}
               />
-              {!isCompact && (
-                <span className={`text-xs font-semibold transition-colors duration-200 truncate ${
-                  isActive ? theme.text.active : `${isLightTheme ? 'text-gray-700' : 'text-gray-300'} group-hover:${theme.text.primary}`
-                }`}>
-                  {tab.label}
-                </span>
-              )}
+              <span className={`text-xs font-semibold transition-colors duration-200 ${
+                isActive ? theme.text.active : `${isLightTheme ? 'text-gray-700' : 'text-gray-300'} group-hover:${theme.text.primary}`
+              }`}>
+                {tab.label}
+              </span>
             </button>
           );
         })}

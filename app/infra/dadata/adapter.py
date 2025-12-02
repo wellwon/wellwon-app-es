@@ -27,8 +27,8 @@ class DaDataAdapter:
                 headers={
                     "Content-Type": "application/json",
                     "Accept": "application/json",
-                    "Authorization": f"Token {self._config.api_key}",
-                    "X-Secret": self._config.secret_key,
+                    "Authorization": f"Token {self._config.api_key.get_secret_value()}",
+                    "X-Secret": self._config.secret_key.get_secret_value(),
                 },
             )
         return self._client

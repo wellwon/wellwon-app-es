@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional
 from pydantic import Field, BaseModel
 from pydantic_settings import SettingsConfigDict
 
-from app.common.base.base_config import BaseConfig
+from app.common.base.base_config import BaseConfig, BASE_CONFIG_DICT
 
 
 # =============================================================================
@@ -81,7 +81,7 @@ class CacheConfig(BaseConfig):
     """
 
     model_config = SettingsConfigDict(
-        **BaseConfig.model_config,
+        **BASE_CONFIG_DICT,
         env_prefix='CACHE_',
     )
 
@@ -306,6 +306,10 @@ def get_cache_config() -> CacheConfig:
 def reset_cache_config() -> None:
     """Reset config singleton (for testing)."""
     get_cache_config.cache_clear()
+
+
+# Backward compatibility alias
+CACHE_CONFIG = get_cache_config()
 
 
 # =============================================================================
