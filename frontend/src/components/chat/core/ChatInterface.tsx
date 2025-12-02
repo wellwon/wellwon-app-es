@@ -25,7 +25,7 @@ import { Loader } from '@/components/ui/loader';
 import { DraftMessageBubble } from '../components/DraftMessageBubble';
 import { logger } from '@/utils/logger';
 
-import { ReplyPreviewOverlay } from '../components/ReplyPreviewOverlay';
+import { ReplyPreview } from '../components/ReplyPreview';
 import type { MessageTemplate } from '@/utils/messageTemplates';
 import type { Message } from '@/types/realtime-chat';
 
@@ -98,7 +98,6 @@ const ChatInterface = React.memo(() => {
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionTriggerIndex, setMentionTriggerIndex] = useState(0);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const [replyOverlayHeight, setReplyOverlayHeight] = useState(0);
   
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -143,7 +142,6 @@ const ChatInterface = React.memo(() => {
   // Сброс replyTarget при смене чата
   useEffect(() => {
     setReplyTarget(null);
-    setReplyOverlayHeight(0); // Сброс высоты при смене чата
     setNewMessagesCount(0); // Сброс счётчика при смене чата
     setIsAtBottom(true);
   }, [activeChat?.id]);
@@ -689,11 +687,14 @@ const ChatInterface = React.memo(() => {
 
   const handleReply = useCallback((message: Message) => {
     setReplyTarget(message);
+    // Автофокус на поле ввода при ответе
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 100);
   }, []);
 
   const handleCancelReply = useCallback(() => {
     setReplyTarget(null);
-    setReplyOverlayHeight(0); // Сброс высоты при отмене
   }, []);
   
   const handleTemplateChange = useCallback((updatedTemplate: MessageTemplate) => {
@@ -797,6 +798,7 @@ const ChatInterface = React.memo(() => {
                       onDelete={deleteMessage}
                       onLoadMore={handleLoadMoreWithAnchor}
                       hasMoreMessages={messageFilter === 'all' ? hasMoreMessages : filteredHasMore}
+                      isLoadingMore={loadingMoreMessages}
                       scrollAreaRef={scrollAreaRef}
                     />
                 ) : null}
@@ -824,72 +826,68 @@ const ChatInterface = React.memo(() => {
 
 
       {/* Input Area - зафиксировано внизу экрана, как в Telegram/WhatsApp */}
-      {/* min-h-24 = 96px для выравнивания с соседними секциями */}
-      <div className={`border-t ${theme.border} ${theme.main} flex-shrink-0 min-h-24 flex items-center`}>
-        {/* py-4 = 16px сверху и снизу - отступы до бордеров */}
-        <div className="flex items-center justify-center px-6 py-4 w-full">
-          <div className="w-full">
-            <div className={`flex items-center gap-2 ${theme.input.bg} ${theme.input.border} rounded-[24px] px-3 py-2`}>
-              {/* Иконки прикреплений */}
-              <div className="flex gap-1">
-                <FileUploadButton disabled={!activeChat} />
-              </div>
+      <div className={`border-t ${theme.border} ${theme.main} flex-shrink-0`}>
+        <div className="px-6 py-3 w-full">
+          {/* Reply Preview - показывается над полем ввода когда отвечаем */}
+          {replyTarget && (
+            <div className="mb-2">
+              <ReplyPreview
+                replyTarget={replyTarget}
+                onCancel={handleCancelReply}
+              />
+            </div>
+          )}
 
-              {/* Поле ввода */}
-              <div ref={inputContainerRef} className="flex-1 relative flex items-center">
-                <AutoResizeTextarea
-                  ref={textareaRef}
-                  value={inputValue}
-                  onChange={handleInputChange}
-                  onKeyDown={handleKeyPress}
-                  onBlur={handleInputBlur}
-                  onHeightChange={setTextareaHeight}
-                  placeholder="Напишите запрос"
-                  className={`flex-1 border-0 bg-transparent ${theme.input.text} ${theme.input.placeholder} outline-none focus:outline-none focus-visible:outline-none resize-none text-sm focus:placeholder:opacity-0 placeholder:transition-opacity leading-5`}
-                  minHeight={36}
-                  maxHeight={108}
-                />
-                
-                {/* Mentions Dropdown */}
-                <MentionsDropdown
-                  open={mentionOpen}
-                  anchorRef={inputContainerRef}
-                  query={mentionQuery}
-                  items={displayedItems}
-                  highlightedIndex={highlightedIndex}
-                  onSelect={(index) => insertMention(displayedItems[index])}
-                  onHover={setHighlightedIndex}
-                  onRequestClose={closeMentions}
-                  isLoading={mentionsLoading}
-                  offsetAboveAnchor={replyTarget ? replyOverlayHeight + 8 : 0}
-                />
+          {/* Input box */}
+          <div className={`flex items-center gap-2 ${theme.input.bg} ${theme.input.border} rounded-[24px] px-3 py-2`}>
+            {/* Иконки прикреплений */}
+            <div className="flex gap-1">
+              <FileUploadButton disabled={!activeChat} />
+            </div>
 
-                {/* Reply Preview Overlay */}
-                {replyTarget && (
-                  <ReplyPreviewOverlay 
-                    open={!!replyTarget}
-                    anchorRef={inputContainerRef}
-                    replyTarget={replyTarget} 
-                    onCancel={handleCancelReply}
-                    onHeightChange={setReplyOverlayHeight}
-                  />
-                )}
-              </div>
+            {/* Поле ввода */}
+            <div ref={inputContainerRef} className="flex-1 relative flex items-center">
+              <AutoResizeTextarea
+                ref={textareaRef}
+                value={inputValue}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyPress}
+                onBlur={handleInputBlur}
+                onHeightChange={setTextareaHeight}
+                placeholder={replyTarget ? "Напишите ответ..." : "Напишите запрос"}
+                className={`flex-1 border-0 bg-transparent ${theme.input.text} ${theme.input.placeholder} outline-none focus:outline-none focus-visible:outline-none resize-none text-sm focus:placeholder:opacity-0 placeholder:transition-opacity leading-5`}
+                minHeight={36}
+                maxHeight={108}
+              />
 
-              {/* Кнопка отправки/микрофона в поле ввода */}
-              <div className="self-center">
-                {inputValue.trim() || sendingMessages.size > 0 ? <Button
-                    onClick={handleSendMessage}
-                    className="rounded-full bg-accent-red hover:bg-accent-red/90 h-10 w-10 p-0 transition-all duration-300 hover:scale-105 shadow-lg flex-shrink-0"
-                    disabled={sendingMessages.size > 0}
-                  >
-                    {sendingMessages.size > 0 ? (
-                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <Send size={20} />
-                    )}
-                  </Button> : <VoiceRecordButton disabled={!activeChat} />}
-              </div>
+              {/* Mentions Dropdown */}
+              <MentionsDropdown
+                open={mentionOpen}
+                anchorRef={inputContainerRef}
+                query={mentionQuery}
+                items={displayedItems}
+                highlightedIndex={highlightedIndex}
+                onSelect={(index) => insertMention(displayedItems[index])}
+                onHover={setHighlightedIndex}
+                onRequestClose={closeMentions}
+                isLoading={mentionsLoading}
+                offsetAboveAnchor={0}
+              />
+            </div>
+
+            {/* Кнопка отправки/микрофона в поле ввода */}
+            <div className="self-center">
+              {inputValue.trim() || sendingMessages.size > 0 ? <Button
+                  onClick={handleSendMessage}
+                  className="rounded-full bg-accent-red hover:bg-accent-red/90 h-10 w-10 p-0 transition-all duration-300 hover:scale-105 shadow-lg flex-shrink-0"
+                  disabled={sendingMessages.size > 0}
+                >
+                  {sendingMessages.size > 0 ? (
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Send size={20} />
+                  )}
+                </Button> : <VoiceRecordButton disabled={!activeChat} />}
             </div>
           </div>
         </div>

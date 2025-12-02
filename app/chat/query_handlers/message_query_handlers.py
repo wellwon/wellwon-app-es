@@ -17,10 +17,12 @@ from app.common.base.base_query_handler import BaseQueryHandler
 from app.chat.queries import (
     GetChatMessagesQuery,
     GetMessageByIdQuery,
+    GetMessageByTelegramIdQuery,
     GetUnreadMessagesCountQuery,
     GetUnreadChatsCountQuery,
     SearchMessagesQuery,
     MessageDetail,
+    MessageByTelegramIdResult,
     UnreadCount,
 )
 
@@ -44,12 +46,27 @@ class GetChatMessagesQueryHandler(BaseQueryHandler[GetChatMessagesQuery, List[Me
 
     async def handle(self, query: GetChatMessagesQuery) -> List[MessageDetail]:
         """Fetch messages from ScyllaDB with pagination."""
+        import json
+
         messages = await self.message_scylla_repo.get_messages(
             channel_id=query.chat_id,
             limit=query.limit,
             before_id=query.before_id,  # Snowflake ID
             after_id=query.after_id,    # Snowflake ID
         )
+
+        def parse_json_field(value):
+            """Parse JSON string to dict, return None if invalid."""
+            if value is None:
+                return None
+            if isinstance(value, dict):
+                return value
+            if isinstance(value, str):
+                try:
+                    return json.loads(value)
+                except (json.JSONDecodeError, TypeError):
+                    return None
+            return None
 
         return [
             MessageDetail(
@@ -70,11 +87,11 @@ class GetChatMessagesQueryHandler(BaseQueryHandler[GetChatMessagesQuery, List[Me
                 is_edited=m.get('is_edited', False),
                 is_deleted=m.get('is_deleted', False),
                 source=m.get('source', 'web'),
-                # Telegram fields
+                # Telegram fields - parse JSON strings from ScyllaDB
                 telegram_message_id=m.get('telegram_message_id'),
                 telegram_user_id=m.get('telegram_user_id'),
-                telegram_user_data=m.get('telegram_user_data'),
-                telegram_forward_data=m.get('telegram_forward_data'),
+                telegram_user_data=parse_json_field(m.get('telegram_user_data')),
+                telegram_forward_data=parse_json_field(m.get('telegram_forward_data')),
                 telegram_topic_id=m.get('telegram_topic_id'),
                 sync_direction=m.get('sync_direction'),
             )
@@ -218,3 +235,52 @@ class SearchMessagesQueryHandler(BaseQueryHandler[SearchMessagesQuery, List[Mess
             )
             for m in filtered
         ]
+
+
+@query_handler(GetMessageByTelegramIdQuery)
+class GetMessageByTelegramIdQueryHandler(BaseQueryHandler[GetMessageByTelegramIdQuery, Optional[MessageByTelegramIdResult]]):
+    """
+    Get WellWon message by Telegram message ID.
+
+    Uses the telegram_message_mapping table in ScyllaDB to find
+    the WellWon message corresponding to a Telegram message.
+    """
+
+    def __init__(self, deps: 'HandlerDependencies'):
+        super().__init__()
+        self.message_scylla_repo = deps.message_scylla_repo
+
+    async def handle(self, query: GetMessageByTelegramIdQuery) -> Optional[MessageByTelegramIdResult]:
+        """Lookup message by Telegram IDs from telegram_message_mapping."""
+        import uuid
+
+        mapping = await self.message_scylla_repo.get_telegram_message_mapping(
+            telegram_chat_id=query.telegram_chat_id,
+            telegram_message_id=query.telegram_message_id,
+        )
+
+        if not mapping:
+            log.debug(
+                f"No mapping found for telegram_chat_id={query.telegram_chat_id}, "
+                f"telegram_message_id={query.telegram_message_id}"
+            )
+            return None
+
+        # The mapping contains channel_id (UUID) and message_id (Snowflake)
+        channel_id = mapping.get('channel_id')
+        message_id = mapping.get('message_id')
+
+        if not channel_id or not message_id:
+            return None
+
+        # Convert Snowflake message_id to UUID for the result
+        # Note: In our system, the WellWon message_id used in read tracking
+        # may be different from Snowflake. For now, generate a deterministic UUID
+        # from the Snowflake ID for compatibility.
+        wellwon_message_uuid = uuid.UUID(int=message_id % (2**128))
+
+        return MessageByTelegramIdResult(
+            message_id=wellwon_message_uuid,
+            snowflake_id=message_id,
+            chat_id=channel_id,
+        )

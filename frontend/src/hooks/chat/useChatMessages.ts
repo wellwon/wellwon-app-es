@@ -1,16 +1,18 @@
 // =============================================================================
 // File: src/hooks/chat/useChatMessages.ts
 // Description: React Query hook for chat messages with WSE integration
-// Pattern: TkDodo's "Using WebSockets with React Query"
+// Pattern: TkDodo's "Using WebSockets with React Query" + Zustand persistence
 // =============================================================================
 
-import { useEffect, useCallback } from 'react';
-import { useQuery, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
+import { useEffect, useCallback, useRef } from 'react';
+import { useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import * as chatApi from '@/api/chat';
 import type { Message } from '@/api/chat';
 import { logger } from '@/utils/logger';
+import { useMessagesStore } from '@/stores/useMessagesStore';
 
-const MESSAGES_PER_PAGE = 20;
+const MESSAGES_PER_PAGE = 30; // Increased for smoother scrolling
+const PREFETCH_THRESHOLD = 10; // Prefetch when 10 messages from top
 
 // -----------------------------------------------------------------------------
 // Query Keys
@@ -37,7 +39,7 @@ function normalizeMessage(msg: any): Message {
 }
 
 // -----------------------------------------------------------------------------
-// useChatMessages - Infinite scroll with WSE integration
+// useChatMessages - Infinite scroll with WSE integration + persistence
 // -----------------------------------------------------------------------------
 
 interface UseChatMessagesOptions {
@@ -47,6 +49,16 @@ interface UseChatMessagesOptions {
 export function useChatMessages(chatId: string | null, options: UseChatMessagesOptions = {}) {
   const queryClient = useQueryClient();
   const { enabled = true } = options;
+
+  // Zustand cache for instant page refresh
+  const getChatMessages = useMessagesStore((s) => s.getChatMessages);
+  const setChatMessages = useMessagesStore((s) => s.setChatMessages);
+
+  // Get cached data for this chat
+  const cachedData = chatId ? getChatMessages(chatId) : null;
+
+  // Track if we're prefetching to avoid duplicate calls
+  const isPrefetchingRef = useRef(false);
 
   // Infinite query for paginated messages
   const query = useInfiniteQuery({
@@ -65,8 +77,21 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
       };
     },
     getNextPageParam: (lastPage) => lastPage.nextOffset,
+    initialPageParam: 0,
     enabled: enabled && !!chatId,
-    // Messages are sorted newest first from API, we reverse for display
+
+    // TkDodo: staleTime: Infinity when WSE handles all updates
+    staleTime: Infinity,
+
+    // TkDodo: initialData from Zustand cache for instant render
+    // IMPORTANT: Only use if cache has actual pages, otherwise let React Query fetch
+    initialData: cachedData?.pages?.length ? {
+      pages: cachedData.pages,
+      pageParams: cachedData.pageParams,
+    } : undefined,
+    initialDataUpdatedAt: cachedData?.pages?.length ? cachedData.updatedAt : undefined,
+
+    // Messages sorted newest first from API, we reverse for display
     select: (data) => ({
       pages: data.pages,
       pageParams: data.pageParams,
@@ -75,7 +100,21 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
         .flatMap((page) => page.messages)
         .reverse(),
     }),
+
+    // Keep only recent pages in memory for performance
+    maxPages: 5,
   });
+
+  // Sync React Query cache to Zustand for persistence
+  useEffect(() => {
+    if (chatId && query.data?.pages?.length) {
+      setChatMessages(
+        chatId,
+        query.data.pages,
+        query.data.pageParams as number[]
+      );
+    }
+  }, [chatId, query.data?.pages, query.data?.pageParams, setChatMessages]);
 
   // WSE event handlers - update React Query cache directly
   useEffect(() => {
@@ -175,12 +214,28 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
     };
   }, [chatId, queryClient]);
 
-  // Prefetch next page for smooth infinite scroll
+  // Seamless prefetch - load next page before user reaches top
   const prefetchNextPage = useCallback(() => {
-    if (query.hasNextPage && !query.isFetchingNextPage) {
-      query.fetchNextPage();
+    if (
+      query.hasNextPage &&
+      !query.isFetchingNextPage &&
+      !query.isFetching &&
+      !isPrefetchingRef.current
+    ) {
+      isPrefetchingRef.current = true;
+      query.fetchNextPage().finally(() => {
+        isPrefetchingRef.current = false;
+      });
     }
   }, [query]);
+
+  // Check if should prefetch based on scroll position (called by consumer)
+  const checkPrefetch = useCallback((visibleMessageIndex: number) => {
+    // If user is near the top (old messages), prefetch more
+    if (visibleMessageIndex < PREFETCH_THRESHOLD && query.hasNextPage) {
+      prefetchNextPage();
+    }
+  }, [prefetchNextPage, query.hasNextPage]);
 
   return {
     messages: query.data?.messages ?? [],
@@ -189,8 +244,10 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
     error: query.error,
     hasNextPage: query.hasNextPage,
     isFetchingNextPage: query.isFetchingNextPage,
+    isFetching: query.isFetching,
     fetchNextPage: query.fetchNextPage,
     prefetchNextPage,
+    checkPrefetch,
     refetch: query.refetch,
   };
 }

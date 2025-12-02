@@ -873,17 +873,34 @@ class CompanyAggregate:
         self.version = snapshot_data.get("version", 0)
 
     @classmethod
-    def replay_from_events(cls, company_id: uuid.UUID, events: List[BaseEvent]) -> 'CompanyAggregate':
+    def replay_from_events(
+        cls,
+        company_id: uuid.UUID,
+        events: List[BaseEvent],
+        snapshot: Optional[Any] = None
+    ) -> 'CompanyAggregate':
         """
         Reconstruct aggregate from event history.
 
         Handles both BaseEvent objects and EventEnvelope objects (from KurrentDB).
         EventEnvelopes are converted to domain events using the event registry.
+
+        Args:
+            company_id: The aggregate ID
+            events: Events to replay (should be events AFTER snapshot if snapshot provided)
+            snapshot: Optional AggregateSnapshot to restore from first
         """
         from app.infra.event_store.event_envelope import EventEnvelope
         from app.company.events import COMPANY_EVENT_TYPES
 
         agg = cls(company_id)
+
+        # Restore from snapshot first if provided
+        if snapshot is not None:
+            agg.restore_from_snapshot(snapshot.state)
+            agg.version = snapshot.version
+            log.debug(f"Restored company {company_id} from snapshot at version {snapshot.version}")
+
         for evt in events:
             # Handle EventEnvelope from KurrentDB
             if isinstance(evt, EventEnvelope):
@@ -902,9 +919,14 @@ class CompanyAggregate:
                         log.warning(f"Unknown event type in replay: {evt.event_type}")
                         continue
                 agg._apply(event_obj)
+                # Use version from envelope (handles snapshot case correctly)
+                if evt.aggregate_version:
+                    agg.version = evt.aggregate_version
+                else:
+                    agg.version += 1
             else:
                 # Direct BaseEvent object
                 agg._apply(evt)
-            agg.version += 1
+                agg.version += 1
         agg.mark_events_committed()
         return agg

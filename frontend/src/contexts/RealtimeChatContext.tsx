@@ -78,13 +78,16 @@ export const RealtimeChatProvider: React.FC<{ children: React.ReactNode }> = ({ 
   // React Query: Active Chat Detail
   const { data: activeChat } = useChatDetail(activeChatId);
 
-  // React Query: Messages (infinite scroll)
+  // React Query: Messages (infinite scroll with seamless prefetch)
   const {
     messages,
     isLoading: loadingMessages,
     hasNextPage: hasMoreMessages,
     isFetchingNextPage: loadingMoreMessages,
+    isFetching: isFetchingMessages,
     fetchNextPage,
+    prefetchNextPage,
+    checkPrefetch,
   } = useChatMessages(activeChatId, { enabled: !!activeChatId });
 
   // React Query: Participants
@@ -126,11 +129,12 @@ export const RealtimeChatProvider: React.FC<{ children: React.ReactNode }> = ({ 
     logger.debug('Chat selected', { chatId });
   }, [activeChatId, setActiveChatId, setReplyingTo, platform]);
 
+  // Seamless load more - checks isFetching to prevent conflicts
   const loadMoreMessages = useCallback(async () => {
-    if (hasMoreMessages && !loadingMoreMessages) {
+    if (hasMoreMessages && !loadingMoreMessages && !isFetchingMessages) {
       await fetchNextPage();
     }
-  }, [hasMoreMessages, loadingMoreMessages, fetchNextPage]);
+  }, [hasMoreMessages, loadingMoreMessages, isFetchingMessages, fetchNextPage]);
 
   const createChat = useCallback(async (
     name: string,
@@ -425,6 +429,8 @@ export const RealtimeChatProvider: React.FC<{ children: React.ReactNode }> = ({ 
     createChat,
     selectChat,
     loadMoreMessages,
+    prefetchNextPage,
+    checkPrefetch,
     addParticipants,
     updateChat,
     deleteChat,
@@ -474,6 +480,8 @@ export const RealtimeChatProvider: React.FC<{ children: React.ReactNode }> = ({ 
     createChat,
     selectChat,
     loadMoreMessages,
+    prefetchNextPage,
+    checkPrefetch,
     addParticipants,
     updateChat,
     deleteChat,

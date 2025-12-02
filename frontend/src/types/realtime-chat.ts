@@ -173,6 +173,8 @@ export interface RealtimeChatContextType {
   createChat: (name: string, chatType?: Chat['chat_type'], participantIds?: string[]) => Promise<Chat>;
   selectChat: (chatId: string, updateUrl?: boolean) => Promise<void>;
   loadMoreMessages: () => Promise<void>;
+  prefetchNextPage: () => void;
+  checkPrefetch: (visibleMessageIndex: number) => void;
   addParticipants: (chatId: string, userIds: string[]) => Promise<void>;
   
   // Действия с сообщениями

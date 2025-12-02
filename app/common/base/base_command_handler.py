@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, Any, Protocol, runtime_checkable, List, Dict
+from typing import Optional, Any, Protocol, runtime_checkable, List, Dict, Type, TypeVar
 from abc import ABC, abstractmethod
 import uuid
 
@@ -20,6 +20,9 @@ from app.common.base.base_model import BaseEvent
 from app.config.logging_config import get_logger
 
 log = get_logger("wellwon.base_handler")
+
+# Type variable for aggregate types
+T = TypeVar('T', bound='AggregateProtocol')
 
 
 @runtime_checkable
@@ -68,6 +71,44 @@ class BaseCommandHandler(ABC):
         self.event_bus = event_bus
         self.transport_topic = transport_topic
         self.event_store = event_store
+
+    async def load_aggregate(
+        self,
+        aggregate_id: uuid.UUID,
+        aggregate_type: str,
+        aggregate_class: Type[T],
+    ) -> T:
+        """
+        Load an aggregate from the event store with proper snapshot support.
+
+        This is the recommended way to load aggregates in command handlers.
+        It properly handles:
+        - Loading snapshot (if exists)
+        - Loading events after snapshot
+        - Restoring aggregate state from snapshot first
+        - Applying subsequent events
+
+        Args:
+            aggregate_id: The aggregate's UUID
+            aggregate_type: Type name (e.g., "Chat", "User", "Company")
+            aggregate_class: The aggregate class (must have replay_from_events classmethod)
+
+        Returns:
+            Reconstructed aggregate instance
+
+        Example:
+            chat = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
+        """
+        if not self.event_store:
+            raise RuntimeError("Event store not configured - cannot load aggregate")
+
+        snapshot, events = await self.event_store.get_events_with_snapshot(
+            aggregate_id, aggregate_type
+        )
+
+        return aggregate_class.replay_from_events(
+            aggregate_id, events, snapshot=snapshot
+        )
 
     async def publish_and_commit_events(
             self,

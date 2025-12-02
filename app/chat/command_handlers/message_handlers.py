@@ -54,8 +54,7 @@ class SendMessageHandler(BaseCommandHandler):
         log.info(f"Sending message to chat {command.chat_id} from {command.sender_id}, source={command.source}")
 
         # Load aggregate
-        events = await self.event_store.get_events(command.chat_id, "Chat")
-        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+        chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
         # Send message in WellWon
         chat_aggregate.send_message(
@@ -183,8 +182,7 @@ class EditMessageHandler(BaseCommandHandler):
         except Exception as e:
             log.warning(f"Failed to lookup telegram IDs for message edit: {e}")
 
-        events = await self.event_store.get_events(command.chat_id, "Chat")
-        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+        chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
         chat_aggregate.edit_message(
             message_id=command.message_id,
@@ -270,8 +268,7 @@ class DeleteMessageHandler(BaseCommandHandler):
         except Exception as e:
             log.warning(f"Failed to lookup telegram IDs for message deletion: {e}")
 
-        events = await self.event_store.get_events(command.chat_id, "Chat")
-        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+        chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
         chat_aggregate.delete_message(
             message_id=command.message_id,
@@ -331,8 +328,7 @@ class MarkMessageAsReadHandler(BaseCommandHandler):
     async def handle(self, command: MarkMessageAsReadCommand) -> uuid.UUID:
         log.debug(f"Marking message {command.message_id} as read by {command.user_id}")
 
-        events = await self.event_store.get_events(command.chat_id, "Chat")
-        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+        chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
         chat_aggregate.mark_message_as_read(
             message_id=command.message_id,
@@ -350,7 +346,13 @@ class MarkMessageAsReadHandler(BaseCommandHandler):
 
 @command_handler(MarkMessagesAsReadCommand)
 class MarkMessagesAsReadHandler(BaseCommandHandler):
-    """Handle MarkMessagesAsReadCommand (batch read)"""
+    """
+    Handle MarkMessagesAsReadCommand (batch read) with bidirectional Telegram sync.
+
+    When a user marks messages as read in WellWon:
+    1. Update aggregate state (idempotent)
+    2. Sync read status to Telegram (if chat is linked)
+    """
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -359,12 +361,12 @@ class MarkMessagesAsReadHandler(BaseCommandHandler):
             event_store=deps.event_store
         )
         self.query_bus = deps.query_bus
+        self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: MarkMessagesAsReadCommand) -> uuid.UUID:
         log.debug(f"Marking messages as read in chat {command.chat_id} by {command.user_id}")
 
-        events = await self.event_store.get_events(command.chat_id, "Chat")
-        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+        chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
         # TODO: Get actual count from read model
         # For now, use 0 as placeholder - projector will calculate actual count
@@ -376,13 +378,102 @@ class MarkMessagesAsReadHandler(BaseCommandHandler):
             read_count=read_count,
         )
 
+        # Check if events were actually emitted (idempotency check passed)
+        events = chat_aggregate.get_uncommitted_events()
+        if not events:
+            log.debug(f"No events emitted - already at read position {command.last_read_message_id}")
+            return command.last_read_message_id
+
         await self.publish_events(
             aggregate=chat_aggregate,
             aggregate_id=command.chat_id,
             command=command
         )
 
+        # Bidirectional sync: Mark as read on Telegram if:
+        # 1. Source is web/api (not from Telegram itself)
+        # 2. Chat is linked to Telegram
+        # 3. TelegramAdapter is available
+        source = getattr(command, 'source', 'web')
+        if source != 'telegram' and self.telegram_adapter:
+            await self._sync_read_to_telegram(command, chat_aggregate)
+
         return command.last_read_message_id
+
+    async def _sync_read_to_telegram(
+        self,
+        command: MarkMessagesAsReadCommand,
+        chat_aggregate: ChatAggregate
+    ) -> None:
+        """Sync read status to Telegram"""
+        try:
+            # Get chat details from aggregate state first
+            telegram_chat_id = chat_aggregate.state.telegram_chat_id
+            telegram_topic_id = chat_aggregate.state.telegram_topic_id
+
+            if not telegram_chat_id:
+                log.debug(f"Chat {command.chat_id} not linked to Telegram, skipping read sync")
+                return
+
+            # Get telegram_message_id for the last_read_message_id
+            # We need to look this up from ScyllaDB or the event data
+            telegram_message_id = await self._get_telegram_message_id(
+                command.chat_id,
+                command.last_read_message_id
+            )
+
+            if not telegram_message_id:
+                log.debug(f"No telegram_message_id found for {command.last_read_message_id}, skipping Telegram sync")
+                return
+
+            log.info(
+                f"Syncing read status to Telegram: chat_id={telegram_chat_id}, "
+                f"topic_id={telegram_topic_id}, max_id={telegram_message_id}"
+            )
+
+            if telegram_topic_id:
+                # Forum group with topic
+                success = await self.telegram_adapter.mark_topic_messages_read(
+                    group_id=telegram_chat_id,
+                    topic_id=telegram_topic_id,
+                    max_id=telegram_message_id,
+                )
+            else:
+                # Regular chat or group without topics
+                success = await self.telegram_adapter.mark_messages_read(
+                    chat_id=telegram_chat_id,
+                    max_id=telegram_message_id,
+                )
+
+            if success:
+                log.info(f"Read status synced to Telegram: max_id={telegram_message_id}")
+            else:
+                log.warning(f"Failed to sync read status to Telegram")
+
+        except Exception as e:
+            # Don't fail the command if Telegram sync fails
+            log.error(f"Error syncing read status to Telegram: {e}", exc_info=True)
+
+    async def _get_telegram_message_id(
+        self,
+        chat_id: uuid.UUID,
+        message_id: uuid.UUID
+    ) -> Optional[int]:
+        """
+        Get Telegram message ID for a WellWon message ID.
+
+        Looks up the message in ScyllaDB to find the telegram_message_id.
+        """
+        try:
+            from app.chat.queries import GetMessageByIdQuery
+            message = await self.query_bus.query(
+                GetMessageByIdQuery(chat_id=chat_id, message_id=message_id)
+            )
+            if message:
+                return getattr(message, 'telegram_message_id', None)
+        except Exception as e:
+            log.debug(f"Could not lookup telegram_message_id: {e}")
+        return None
 
 
 @command_handler(StartTypingCommand)

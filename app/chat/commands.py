@@ -189,10 +189,19 @@ class MarkMessageAsReadCommand(Command):
 
 
 class MarkMessagesAsReadCommand(Command):
-    """Mark all messages up to a point as read"""
+    """
+    Mark all messages up to a point as read.
+
+    Attributes:
+        chat_id: Chat to mark as read
+        user_id: User who is reading
+        last_read_message_id: Mark messages up to this ID as read
+        source: Origin of read event (web, telegram, api) - prevents sync loops
+    """
     chat_id: uuid.UUID
     user_id: uuid.UUID
     last_read_message_id: uuid.UUID
+    source: str = Field(default="web", description="web, telegram, api - prevents sync loops")
 
 
 # =============================================================================

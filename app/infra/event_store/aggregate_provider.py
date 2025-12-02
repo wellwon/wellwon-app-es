@@ -57,6 +57,17 @@ try:
 except ImportError:
     TradeAggregate = None
 
+# WellWon aggregates
+try:
+    from app.chat.aggregate import ChatAggregate
+except ImportError:
+    ChatAggregate = None
+
+try:
+    from app.company.aggregate import CompanyAggregate
+except ImportError:
+    CompanyAggregate = None
+
 log = logging.getLogger("wellwon.aggregate_provider")
 
 
@@ -127,6 +138,13 @@ class DefaultAggregateProvider(AggregateSnapshotProvider):
 
         if TradeAggregate:
             self._aggregate_types["Trade"] = TradeAggregate
+
+        # WellWon aggregates
+        if ChatAggregate:
+            self._aggregate_types["Chat"] = ChatAggregate
+
+        if CompanyAggregate:
+            self._aggregate_types["Company"] = CompanyAggregate
 
         # Performance tracking
         self._load_times: Dict[str, list] = {}
@@ -219,20 +237,34 @@ class DefaultAggregateProvider(AggregateSnapshotProvider):
             return None
 
         try:
-            # Get all events for aggregate
-            events = await self.event_store.get_events(
+            # Get snapshot and events after snapshot (FIXED: use snapshot-aware loading)
+            snapshot, events = await self.event_store.get_events_with_snapshot(
                 aggregate_id, aggregate_type
             )
 
-            if not events:
-                log.debug(f"No events found for {aggregate_type}:{aggregate_id}")
+            if not events and snapshot is None:
+                log.debug(f"No events or snapshot found for {aggregate_type}:{aggregate_id}")
                 return None
 
             # Create aggregate instance
             aggregate = aggregate_class(aggregate_id)
             events_applied = 0
 
-            # Replay events
+            # CRITICAL: Restore from snapshot first if exists
+            if snapshot is not None:
+                if hasattr(aggregate, 'restore_from_snapshot'):
+                    aggregate.restore_from_snapshot(snapshot.state)
+                    aggregate.version = snapshot.version
+                    log.debug(
+                        f"Restored {aggregate_type}:{aggregate_id} from snapshot at v{snapshot.version}"
+                    )
+                else:
+                    log.warning(
+                        f"Aggregate {aggregate_type} doesn't support restore_from_snapshot, "
+                        f"will replay all events"
+                    )
+
+            # Replay events (only events AFTER snapshot)
             for envelope in events:
                 try:
                     # Get event class from registry
@@ -301,10 +333,11 @@ class DefaultAggregateProvider(AggregateSnapshotProvider):
             if len(self._load_times[aggregate_type]) > 100:
                 self._load_times[aggregate_type] = self._load_times[aggregate_type][-100:]
 
+            snapshot_info = f", snapshot v{snapshot.version}" if snapshot else ", no snapshot"
             log.info(
                 f"Loaded aggregate {aggregate_type}:{aggregate_id} "
                 f"v{aggregate.version} for snapshot "
-                f"({events_applied} events in {load_time:.3f}s)"
+                f"({events_applied} events{snapshot_info} in {load_time:.3f}s)"
             )
 
             return aggregate

@@ -790,6 +790,38 @@ class MessageScyllaRepo:
 
         return None
 
+    async def get_telegram_message_mapping(
+        self,
+        telegram_chat_id: int,
+        telegram_message_id: int,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get Telegram message mapping (channel_id, bucket, message_id) by Telegram IDs.
+
+        This is a lightweight lookup that returns just the mapping data,
+        not the full message content. Used for bidirectional sync.
+
+        Complexity: O(1) - direct partition key lookup
+
+        Args:
+            telegram_chat_id: Telegram chat ID (partition key)
+            telegram_message_id: Telegram message ID (partition key)
+
+        Returns:
+            Mapping dict with {channel_id, bucket, message_id} if found, None otherwise
+        """
+        mapping_result = await self.client.execute_prepared(
+            """SELECT channel_id, bucket, message_id
+               FROM telegram_message_mapping
+               WHERE telegram_message_id = ? AND telegram_chat_id = ?""",
+            (telegram_message_id, telegram_chat_id),
+        )
+
+        if mapping_result:
+            return mapping_result[0]
+
+        return None
+
     # =========================================================================
     # Reaction Operations
     # =========================================================================
@@ -1230,22 +1262,56 @@ class MessageScyllaRepo:
 
         This is called by GroupDeletionSaga when deleting a company/chat.
 
+        NOTE: Messages may be stored in unexpected buckets due to deterministic
+        Snowflake IDs (used for idempotency). We must query the telegram_message_mapping
+        table to find actual buckets, not just scan time-based buckets.
+
         Args:
             channel_id: UUID of the channel to delete messages from
 
         Returns:
             Number of buckets deleted from (approximate message count not available)
         """
-        # Get distinct buckets for this channel by scanning recent buckets
-        # Start from current bucket and go back BUCKET_SCAN_DEPTH * 10 (100 buckets = ~3 years)
         from datetime import datetime, timezone
 
+        buckets_to_delete: set[int] = set()
+        log.debug(f"Starting delete_messages_for_channel for channel_id={channel_id}")
+
+        # ---------------------------------------------------------------------
+        # 1. Get buckets from telegram_message_mapping (for Telegram messages)
+        # These may have non-standard bucket values due to deterministic IDs
+        # ---------------------------------------------------------------------
+        try:
+            telegram_mappings = await self.client.execute(
+                "SELECT bucket FROM telegram_message_mapping WHERE channel_id = %s ALLOW FILTERING",
+                (channel_id,),
+            )
+            for row in telegram_mappings:
+                if row.get('bucket') is not None:
+                    buckets_to_delete.add(row['bucket'])
+            if telegram_mappings:
+                log.debug(f"Found {len(telegram_mappings)} telegram mappings with buckets: {buckets_to_delete}")
+        except Exception as e:
+            log.warning(f"Error querying telegram_message_mapping for buckets: {e}")
+
+        # ---------------------------------------------------------------------
+        # 2. Also scan recent time-based buckets for non-Telegram messages
+        # Start from current bucket and go back 100 buckets (~3 years)
+        # ---------------------------------------------------------------------
         now = datetime.now(timezone.utc)
         current_bucket = int(now.timestamp() * 1000) // (1000 * 60 * 60 * 24 * 10)
+        log.debug(f"Current time-based bucket: {current_bucket}")
 
-        # Scan back 100 buckets (~3 years of data)
-        buckets_deleted = 0
         for bucket in range(current_bucket, max(0, current_bucket - 100), -1):
+            buckets_to_delete.add(bucket)
+
+        log.debug(f"Total buckets to check: {len(buckets_to_delete)}")
+
+        # ---------------------------------------------------------------------
+        # 3. Delete from all identified buckets
+        # ---------------------------------------------------------------------
+        buckets_deleted = 0
+        for bucket in buckets_to_delete:
             try:
                 # Check if bucket has any messages
                 result = await self.client.execute_prepared(

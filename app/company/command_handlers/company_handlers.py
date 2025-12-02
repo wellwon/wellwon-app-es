@@ -275,8 +275,7 @@ class DeleteCompanyHandler(BaseCommandHandler):
             raise ValueError(f"Company {command.company_id} not found")
 
         # REPLAY: Load aggregate from EventStore (proper Event Sourcing)
-        events = await self.event_store.get_events(command.company_id, "Company")
-        company_aggregate = CompanyAggregate.replay_from_events(command.company_id, events)
+        company_aggregate = await self.load_aggregate(command.company_id, "Company", CompanyAggregate)
 
         # Call aggregate command method
         # force=True bypasses permission checks for saga-initiated deletions

@@ -54,6 +54,7 @@ class ParticipantState(BaseModel):
     role: str = "member"
     joined_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     is_active: bool = True
+    last_read_message_id: Optional[uuid.UUID] = None  # For idempotency
 
 
 # =============================================================================
@@ -525,12 +526,21 @@ class ChatAggregate:
         """Mark all messages up to a point as read"""
         # Soft check - don't fail if participant not in aggregate state
         # (may happen with snapshot loading issues or legacy data)
-        if not self._is_participant(user_id):
+        if not self.is_participant(user_id):
             log.warning(
                 f"mark_messages_as_read: user {user_id} not found in aggregate participants, "
                 f"skipping (chat: {self.id}, participants: {len(self.state.participants)})"
             )
             return
+
+        # IDEMPOTENCY: Check if already marked as read up to this message
+        user_key = str(user_id)
+        participant = self.state.participants.get(user_key)
+        if participant and participant.last_read_message_id == last_read_message_id:
+            log.debug(
+                f"mark_messages_as_read: already at message {last_read_message_id}, skipping"
+            )
+            return  # No-op, already at this read position
 
         event = MessagesMarkedAsRead(
             chat_id=self.id,
@@ -690,6 +700,7 @@ class ChatAggregate:
             MessageSent: self._on_message_sent,
             MessageEdited: self._on_message_edited,
             MessageDeleted: self._on_message_deleted,
+            MessagesMarkedAsRead: self._on_messages_marked_as_read,
             TelegramChatLinked: self._on_telegram_chat_linked,
             TelegramChatUnlinked: self._on_telegram_chat_unlinked,
         }
@@ -786,6 +797,12 @@ class ChatAggregate:
         if msg_key in self.state.recent_messages:
             self.state.recent_messages[msg_key].is_deleted = True
 
+    def _on_messages_marked_as_read(self, event: MessagesMarkedAsRead) -> None:
+        """Update participant's last read position for idempotency"""
+        user_key = str(event.user_id)
+        if user_key in self.state.participants:
+            self.state.participants[user_key].last_read_message_id = event.last_read_message_id
+
     def _on_telegram_chat_linked(self, event: TelegramChatLinked) -> None:
         self.state.telegram_chat_id = event.telegram_chat_id
         self.state.telegram_topic_id = event.telegram_topic_id
@@ -826,6 +843,7 @@ class ChatAggregate:
                     "role": v.role,
                     "joined_at": v.joined_at.isoformat(),
                     "is_active": v.is_active,
+                    "last_read_message_id": str(v.last_read_message_id) if v.last_read_message_id else None,
                 }
                 for k, v in self.state.participants.items()
             },
@@ -860,27 +878,53 @@ class ChatAggregate:
         # Restore participants
         self.state.participants = {}
         for k, v in snapshot_data.get("participants", {}).items():
+            last_read = v.get("last_read_message_id")
             self.state.participants[k] = ParticipantState(
                 user_id=uuid.UUID(v["user_id"]),
                 role=v["role"],
                 joined_at=datetime.fromisoformat(v["joined_at"]),
                 is_active=v["is_active"],
+                last_read_message_id=uuid.UUID(last_read) if last_read else None,
             )
 
         self.version = snapshot_data.get("version", 0)
 
     @classmethod
-    def replay_from_events(cls, chat_id: uuid.UUID, events: List[BaseEvent]) -> 'ChatAggregate':
+    def replay_from_events(
+        cls,
+        chat_id: uuid.UUID,
+        events: List[BaseEvent],
+        snapshot: Optional[Any] = None
+    ) -> 'ChatAggregate':
         """
         Reconstruct aggregate from event history.
 
         Handles both BaseEvent objects and EventEnvelope objects (from KurrentDB).
         EventEnvelopes are converted to domain events using the event registry.
+
+        Args:
+            chat_id: The aggregate ID
+            events: Events to replay (should be events AFTER snapshot if snapshot provided)
+            snapshot: Optional AggregateSnapshot to restore from first
         """
         from app.infra.event_store.event_envelope import EventEnvelope
         from app.chat.events import CHAT_EVENT_TYPES
 
         agg = cls(chat_id)
+
+        # Restore from snapshot first if provided
+        if snapshot is not None:
+            log.info(
+                f"Restoring chat {chat_id} from snapshot v{snapshot.version}, "
+                f"snapshot has {len(snapshot.state.get('participants', {}))} participants"
+            )
+            agg.restore_from_snapshot(snapshot.state)
+            agg.version = snapshot.version
+            log.info(
+                f"After restore: chat {chat_id} v{agg.version}, "
+                f"participants: {list(agg.state.participants.keys())}"
+            )
+
         for evt in events:
             # Handle EventEnvelope from KurrentDB
             if isinstance(evt, EventEnvelope):
@@ -899,9 +943,14 @@ class ChatAggregate:
                         log.warning(f"Unknown event type in replay: {evt.event_type}")
                         continue
                 agg._apply(event_obj)
+                # Use version from envelope (handles snapshot case correctly)
+                if evt.aggregate_version:
+                    agg.version = evt.aggregate_version
+                else:
+                    agg.version += 1
             else:
                 # Direct BaseEvent object
                 agg._apply(evt)
-            agg.version += 1
+                agg.version += 1
         agg.mark_events_committed()
         return agg

@@ -817,6 +817,87 @@ class KurrentDBEventStore:
             log.error(f"Error reading events from {stream_name}: {type(e).__name__}: {e}")
             raise EventStoreError(f"Failed to read events: {e}") from e
 
+    async def get_events_with_snapshot(
+        self,
+        aggregate_id: uuid.UUID,
+        aggregate_type: str,
+        from_version: int = 0,
+        to_version: Optional[int] = None,
+    ) -> Tuple[Optional['AggregateSnapshot'], List[EventEnvelope]]:
+        """
+        Get snapshot and events for aggregate from KurrentDB.
+
+        This is the proper way to load aggregates - returns both the snapshot
+        (if exists) and events that occurred after the snapshot. The caller
+        should restore from snapshot first, then apply the events.
+
+        Args:
+            aggregate_id: Aggregate UUID
+            aggregate_type: Aggregate type
+            from_version: Start version (inclusive, 1-based)
+            to_version: End version (inclusive, 1-based, None = all)
+
+        Returns:
+            Tuple of (snapshot or None, list of events after snapshot)
+        """
+        if not self._initialized or not self._client:
+            raise EventStoreError("KurrentDB not initialized")
+
+        # Load snapshot first
+        snapshot = await self.get_latest_snapshot(aggregate_id, aggregate_type)
+        events_from_version = from_version
+
+        if snapshot and snapshot.version >= from_version:
+            events_from_version = snapshot.version + 1
+            log.debug(
+                f"Found snapshot at version {snapshot.version} for "
+                f"{aggregate_type}-{aggregate_id}, reading events from {events_from_version}"
+            )
+
+        stream_name = self._get_stream_name(aggregate_id, aggregate_type)
+        from_revision = events_from_version - 1 if events_from_version > 0 else 0
+
+        log.info(
+            f"get_events_with_snapshot: stream='{stream_name}' "
+            f"snapshot_version={snapshot.version if snapshot else None} "
+            f"reading_from={events_from_version}"
+        )
+
+        try:
+            events_generator = await self._client.read_stream(
+                stream_name=stream_name,
+                stream_position=from_revision
+            )
+
+            envelopes = []
+            async for recorded_event in events_generator:
+                event_data = json.loads(recorded_event.data.decode('utf-8'))
+                envelope = EventEnvelope.from_dict(event_data)
+                envelope.aggregate_version = recorded_event.stream_position + 1
+
+                if to_version and envelope.aggregate_version > to_version:
+                    break
+
+                envelopes.append(envelope)
+
+            log.info(
+                f"get_events_with_snapshot: loaded snapshot={'yes' if snapshot else 'no'} "
+                f"+ {len(envelopes)} events for {aggregate_type}-{aggregate_id}"
+            )
+            return (snapshot, envelopes)
+
+        except StreamNotFoundError:
+            log.info(f"Stream '{stream_name}' not found - returning (None, [])")
+            return (None, [])
+
+        except StreamIsDeletedError:
+            log.warning(f"Stream '{stream_name}' was deleted - returning (None, [])")
+            return (None, [])
+
+        except Exception as e:
+            log.error(f"Error in get_events_with_snapshot: {type(e).__name__}: {e}")
+            raise EventStoreError(f"Failed to get events with snapshot: {e}") from e
+
     async def get_aggregate_version(
         self,
         aggregate_id: uuid.UUID,
@@ -1852,24 +1933,32 @@ class KurrentDBEventStore:
                     state = None
 
             else:
-                # No repository available - use fallback
+                # No repository available - try aggregate provider fallback
                 state = None
 
-            # Fallback: If no repository or loading failed, use event count placeholder
+            # Fallback: If no repository, try to load aggregate directly
             if state is None:
-                events = await self.get_events(aggregate_id, aggregate_type)
+                try:
+                    # Import and use aggregate provider for proper snapshot creation
+                    from app.infra.event_store.aggregate_provider import DefaultAggregateProvider
+                    provider = DefaultAggregateProvider(self, self._cache_manager)
+                    aggregate = await provider.get_aggregate_for_snapshot(aggregate_id, aggregate_type)
 
-                if not events:
-                    log.warning(f"No events found for snapshot {aggregate_type}-{aggregate_id}")
+                    if aggregate and hasattr(aggregate, 'create_snapshot'):
+                        state = aggregate.create_snapshot()
+                        log.debug(
+                            f"Loaded aggregate {aggregate_type}-{aggregate_id} v{aggregate.version} "
+                            f"via provider for snapshot"
+                        )
+                    else:
+                        log.warning(
+                            f"Could not load aggregate {aggregate_type}-{aggregate_id} via provider"
+                        )
+                        return
+
+                except Exception as e:
+                    log.error(f"Failed to load aggregate for snapshot: {e}")
                     return
-
-                # Placeholder state (backward compatibility)
-                state = {'events_count': len(events), 'version': version}
-
-                log.debug(
-                    f"Using fallback snapshot for {aggregate_type}-{aggregate_id} "
-                    f"(no repository configured)"
-                )
 
             # Save snapshot
             await self.save_snapshot(

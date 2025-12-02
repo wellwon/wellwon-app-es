@@ -196,11 +196,14 @@ class CompanyReadRepo:
             "DELETE FROM user_companies WHERE company_id = $1",
             company_id
         )
-        # Delete company balance transactions
-        await pg_client.execute(
-            "DELETE FROM company_balance_transactions WHERE company_id = $1",
-            company_id
-        )
+        # Delete company balance transactions (table may not exist yet)
+        try:
+            await pg_client.execute(
+                "DELETE FROM company_balance_transactions WHERE company_id = $1",
+                company_id
+            )
+        except Exception:
+            pass  # Table doesn't exist yet - skip
         # Delete telegram supergroups linked to this company
         await pg_client.execute(
             "DELETE FROM telegram_supergroups WHERE company_id = $1",

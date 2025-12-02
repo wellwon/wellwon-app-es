@@ -373,17 +373,34 @@ class UserAccountAggregate:
     # Replay from History
     # -------------------------------------------------------------------------
     @classmethod
-    def replay_from_events(cls, user_id: uuid.UUID, events: List[BaseEvent]) -> UserAccountAggregate:
+    def replay_from_events(
+        cls,
+        user_id: uuid.UUID,
+        events: List[BaseEvent],
+        snapshot: Optional[Any] = None
+    ) -> UserAccountAggregate:
         """
         Reconstruct an aggregate by applying past events in order.
 
         Handles both BaseEvent objects and EventEnvelope objects (from KurrentDB).
         EventEnvelopes are converted to domain events using the event registry.
+
+        Args:
+            user_id: The aggregate ID
+            events: Events to replay (should be events AFTER snapshot if snapshot provided)
+            snapshot: Optional AggregateSnapshot to restore from first
         """
         from app.infra.event_store.event_envelope import EventEnvelope
         from app.user_account.events import USER_ACCOUNT_EVENT_TYPES
 
         agg = cls(user_id)
+
+        # Restore from snapshot first if provided
+        if snapshot is not None:
+            agg.restore_from_snapshot(snapshot.state)
+            agg.version = snapshot.version
+            log.debug(f"Restored user {user_id} from snapshot at version {snapshot.version}")
+
         for evt in events:
             # Handle EventEnvelope from KurrentDB
             if isinstance(evt, EventEnvelope):
@@ -402,10 +419,15 @@ class UserAccountAggregate:
                         log.warning(f"Unknown event type in replay: {evt.event_type}")
                         continue
                 agg._apply(event_obj)
+                # Use version from envelope (handles snapshot case correctly)
+                if evt.aggregate_version:
+                    agg.version = evt.aggregate_version
+                else:
+                    agg.version += 1
             else:
                 # Direct BaseEvent object
                 agg._apply(evt)
-            agg.version += 1
+                agg.version += 1
         agg.mark_events_committed()
         return agg
 

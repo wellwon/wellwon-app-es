@@ -39,8 +39,7 @@ class LinkTelegramChatHandler(BaseCommandHandler):
     async def handle(self, command: LinkTelegramChatCommand) -> uuid.UUID:
         log.info(f"Linking Telegram chat {command.telegram_chat_id} to chat {command.chat_id}")
 
-        events = await self.event_store.get_events(command.chat_id, "Chat")
-        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+        chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
         chat_aggregate.link_telegram_chat(
             telegram_chat_id=command.telegram_chat_id,
@@ -72,8 +71,7 @@ class UnlinkTelegramChatHandler(BaseCommandHandler):
     async def handle(self, command: UnlinkTelegramChatCommand) -> uuid.UUID:
         log.info(f"Unlinking Telegram chat from {command.chat_id}")
 
-        events = await self.event_store.get_events(command.chat_id, "Chat")
-        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+        chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
         chat_aggregate.unlink_telegram_chat(unlinked_by=command.unlinked_by)
 
@@ -148,11 +146,12 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
     async def handle(self, command: ProcessTelegramMessageCommand) -> uuid.UUID:
         log.debug(f"Processing Telegram message {command.telegram_message_id} for chat {command.chat_id}")
 
-        events = await self.event_store.get_events(command.chat_id, "Chat")
-        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+        # Use get_events_with_snapshot for proper snapshot handling
+        snapshot, events = await self.event_store.get_events_with_snapshot(command.chat_id, "Chat")
+        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events, snapshot=snapshot)
 
-        # Track if this is a bootstrapped aggregate (no event history)
-        is_bootstrapped = not events
+        # Track if this is a bootstrapped aggregate (no event history AND no snapshot)
+        is_bootstrapped = snapshot is None and not events
 
         # MIGRATION SUPPORT: If no events exist, check if chat exists in read model
         # and bootstrap the aggregate state from it
@@ -242,8 +241,7 @@ class LinkChatToTelegramHandler(BaseCommandHandler):
         )
 
         # Load chat aggregate
-        events = await self.event_store.get_events(command.chat_id, "Chat")
-        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+        chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
         if not chat_aggregate.state.is_active:
             raise ValueError(f"Chat {command.chat_id} is not active")

@@ -35,6 +35,7 @@ except ImportError:
 if TYPE_CHECKING:
     from app.infra.cqrs.command_bus import CommandBus
     from app.infra.cqrs.query_bus import QueryBus
+    from app.infra.telegram.mtproto_client import ReadEventInfo
 
 log = get_logger("wellwon.telegram.incoming")
 
@@ -456,6 +457,154 @@ class TelegramIncomingHandler:
 
         except Exception as e:
             log.error(f"Error downloading file: {e}")
+            return None
+
+
+    # =========================================================================
+    # Read Status Handling (Telegram -> WellWon)
+    # =========================================================================
+
+    async def handle_read_event(self, read_event: 'ReadEventInfo') -> bool:
+        """
+        Handle incoming read event from Telegram MTProto.
+
+        When a user reads messages in Telegram, sync the read status to WellWon.
+        This is called by the MTProto client's read callback.
+
+        Args:
+            read_event: Read event info from Telegram (chat_id, max_id, is_outbox)
+
+        Returns:
+            True if handled successfully
+        """
+        # Skip outbox events (others reading your messages)
+        # We only care about inbox (you reading messages)
+        if read_event.is_outbox:
+            log.debug(f"Skipping outbox read event for chat {read_event.chat_id}")
+            return True
+
+        try:
+            # 1. Lookup WellWon chat by Telegram chat_id
+            chat_id = await self._lookup_chat_by_telegram_id(read_event.chat_id)
+
+            if not chat_id:
+                log.debug(f"No WellWon chat found for Telegram chat {read_event.chat_id}")
+                return False
+
+            # 2. Find the WellWon message that corresponds to the Telegram max_id
+            wellwon_message_id = await self._find_message_by_telegram_id(
+                chat_id,
+                read_event.chat_id,
+                read_event.max_id
+            )
+
+            if not wellwon_message_id:
+                log.debug(
+                    f"No WellWon message found for Telegram message {read_event.max_id} "
+                    f"in chat {read_event.chat_id}"
+                )
+                return False
+
+            # 3. Get the user who read (from the MTProto session - this is the logged-in user)
+            user_id = await self._get_mtproto_user_id()
+            if not user_id:
+                log.warning("Could not determine MTProto user ID for read event")
+                return False
+
+            # 4. Dispatch MarkMessagesAsReadCommand with source='telegram'
+            from app.chat.commands import MarkMessagesAsReadCommand
+
+            command = MarkMessagesAsReadCommand(
+                chat_id=chat_id,
+                user_id=user_id,
+                last_read_message_id=wellwon_message_id,
+                source="telegram",  # Prevents sync loop back to Telegram
+            )
+
+            await self._command_bus.dispatch(command)
+
+            log.info(
+                f"Synced read status from Telegram: chat={read_event.chat_id}, "
+                f"max_id={read_event.max_id} -> WellWon chat={chat_id}"
+            )
+
+            return True
+
+        except Exception as e:
+            log.error(f"Error handling Telegram read event: {e}", exc_info=True)
+            return False
+
+    async def _lookup_chat_by_telegram_id(self, telegram_chat_id: int) -> Optional[UUID]:
+        """Lookup WellWon chat by Telegram chat ID only (no topic)."""
+        try:
+            from app.chat.queries import GetChatByTelegramIdQuery
+
+            result = await self._query_bus.query(
+                GetChatByTelegramIdQuery(telegram_chat_id=telegram_chat_id)
+            )
+            return result.chat_id if result else None
+
+        except Exception as e:
+            log.debug(f"Chat lookup by telegram_id failed: {e}")
+            # Fallback to external ID lookup
+            return await self._lookup_chat(telegram_chat_id, None)
+
+    async def _find_message_by_telegram_id(
+        self,
+        chat_id: UUID,
+        telegram_chat_id: int,
+        telegram_message_id: int
+    ) -> Optional[UUID]:
+        """Find WellWon message ID by Telegram message ID."""
+        try:
+            from app.chat.queries import GetMessageByTelegramIdQuery
+
+            result = await self._query_bus.query(
+                GetMessageByTelegramIdQuery(
+                    chat_id=chat_id,
+                    telegram_chat_id=telegram_chat_id,
+                    telegram_message_id=telegram_message_id
+                )
+            )
+            return result.message_id if result else None
+
+        except Exception as e:
+            log.debug(f"Message lookup by telegram_id failed: {e}")
+            return None
+
+    async def _get_mtproto_user_id(self) -> Optional[UUID]:
+        """
+        Get the WellWon user ID for the logged-in MTProto session.
+
+        The MTProto session is owned by a specific user - we need to map
+        that Telegram user to a WellWon user.
+        """
+        try:
+            from app.infra.telegram.adapter import get_telegram_adapter
+
+            adapter = await get_telegram_adapter()
+            if not adapter.mtproto_client:
+                return None
+
+            # Get the Telegram user ID of the MTProto session owner
+            telegram_user_id = await adapter.mtproto_client.get_me_id()
+            if not telegram_user_id:
+                return None
+
+            # Lookup WellWon user by Telegram ID
+            from app.user_account.queries import GetUserByExternalIdQuery
+
+            result = await self._query_bus.query(
+                GetUserByExternalIdQuery(
+                    provider="telegram",
+                    external_id=str(telegram_user_id),
+                )
+            )
+
+            return result.user_id if result else None
+
+        except Exception as e:
+            log.debug(f"MTProto user lookup failed: {e}")
             return None
 
 

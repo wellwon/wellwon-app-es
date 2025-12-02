@@ -200,10 +200,9 @@ class UpdateChatHandler(BaseCommandHandler):
         log.info(f"Updating chat {command.chat_id}")
 
         # Load aggregate from event store
-        events = await self.event_store.get_events(command.chat_id, "Chat")
-        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+        chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
-        log.info(f"Chat state: company_id={chat_aggregate.state.company_id}, participants={list(chat_aggregate.state.participants.keys())}, event_count={len(events)}")
+        log.debug(f"Chat state: company_id={chat_aggregate.state.company_id}, participants={list(chat_aggregate.state.participants.keys())}, version={chat_aggregate.version}")
 
         # Auto-enroll user as participant if they're not yet a participant
         # For company chats, we allow any authenticated user to manage (they should be company members)
@@ -277,8 +276,7 @@ class ArchiveChatHandler(BaseCommandHandler):
         except Exception as e:
             log.warning(f"Failed to lookup telegram IDs for chat archive: {e}")
 
-        events = await self.event_store.get_events(command.chat_id, "Chat")
-        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+        chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
         log.info(f"Chat state for archive: company_id={chat_aggregate.state.company_id}, participants={list(chat_aggregate.state.participants.keys())}, event_count={len(events)}")
 
@@ -376,8 +374,7 @@ class RestoreChatHandler(BaseCommandHandler):
         except Exception as e:
             log.warning(f"Failed to lookup telegram IDs for chat restore: {e}")
 
-        events = await self.event_store.get_events(command.chat_id, "Chat")
-        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+        chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
         chat_aggregate.restore_chat(restored_by=command.restored_by)
 
@@ -450,8 +447,7 @@ class DeleteChatHandler(BaseCommandHandler):
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                events = await self.event_store.get_events(command.chat_id, "Chat")
-                chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+                chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
                 chat_aggregate.hard_delete_chat(
                     deleted_by=command.deleted_by,
@@ -516,8 +512,7 @@ class LinkChatToCompanyHandler(BaseCommandHandler):
         log.info(f"Linking chat {command.chat_id} to company {command.company_id}")
 
         # Load aggregate from event store
-        events = await self.event_store.get_events(command.chat_id, "Chat")
-        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+        chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
         # Link to company
         chat_aggregate.link_to_company(
@@ -554,8 +549,7 @@ class UnlinkChatFromCompanyHandler(BaseCommandHandler):
         log.info(f"Unlinking chat {command.chat_id} from company")
 
         # Load aggregate from event store
-        events = await self.event_store.get_events(command.chat_id, "Chat")
-        chat_aggregate = ChatAggregate.replay_from_events(command.chat_id, events)
+        chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
         # Unlink from company
         chat_aggregate.unlink_from_company(
