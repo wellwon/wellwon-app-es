@@ -114,7 +114,8 @@ def domain_event(
             parts = module_name.split(".")
             known_domains = [
                 "user_account", "broker_connection", "broker_account", "virtual_broker",
-                "order", "position", "portfolio", "automation"
+                "order", "position", "portfolio", "automation",
+                "chat", "company",  # WellWon domains
             ]
             for part in parts:
                 if part in known_domains:

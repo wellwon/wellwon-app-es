@@ -409,6 +409,46 @@ class ChatProjector:
         )
 
     # =========================================================================
+    # Telegram Delivery Confirmation (Bidirectional Read Receipts)
+    # =========================================================================
+
+    @async_projection("MessageSyncedToTelegram")
+    @monitor_projection
+    async def on_message_synced_to_telegram(self, envelope: EventEnvelope) -> None:
+        """
+        Project MessageSyncedToTelegram - ScyllaDB delivery confirmation.
+
+        ASYNC: Updates message with Telegram delivery confirmation.
+
+        This enables bidirectional delivery tracking:
+        - Single checkmark: Message sent to WellWon server
+        - Double checkmark: Message delivered to Telegram (this event)
+        - Blue double checkmark: Message read on Telegram (MessagesMarkedAsRead)
+        """
+        event_data = envelope.event_data
+        chat_id = uuid.UUID(event_data['chat_id'])
+        message_uuid = uuid.UUID(event_data['message_id'])
+        telegram_message_id = event_data['telegram_message_id']
+        telegram_chat_id = event_data['telegram_chat_id']
+
+        # Compute deterministic snowflake from message_id (same logic as MessageSent)
+        snowflake_id = int.from_bytes(message_uuid.bytes[:8], byteorder='big') & 0x7FFFFFFFFFFFFFFF
+
+        log.info(
+            f"Projecting MessageSyncedToTelegram: chat_id={chat_id}, "
+            f"snowflake={snowflake_id}, telegram_message_id={telegram_message_id}"
+        )
+
+        # Update ScyllaDB message with Telegram delivery info
+        await self.message_scylla_repo.update_message_telegram_sync(
+            channel_id=chat_id,
+            message_id=snowflake_id,
+            telegram_message_id=telegram_message_id,
+            telegram_chat_id=telegram_chat_id,
+            sync_direction=SyncDirection.WEB_TO_TELEGRAM,
+        )
+
+    # =========================================================================
     # Company Link Projections (no read model changes needed)
     # =========================================================================
 

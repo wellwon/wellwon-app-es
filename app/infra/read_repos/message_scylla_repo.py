@@ -698,6 +698,64 @@ class MessageScyllaRepo:
             execution_profile='write',
         )
 
+    async def update_message_telegram_sync(
+            self,
+            channel_id: ChannelID,
+            message_id: MessageID,
+            telegram_message_id: TelegramID,
+            telegram_chat_id: TelegramID,
+            sync_direction: SyncDirection = SyncDirection.WEB_TO_TELEGRAM,
+    ) -> None:
+        """
+        Update message with Telegram delivery confirmation.
+
+        Called when a WellWon message is successfully synced to Telegram.
+        This enables bidirectional delivery tracking (double checkmark).
+
+        Args:
+            channel_id: UUID of the channel
+            message_id: Snowflake ID of the message
+            telegram_message_id: Telegram's message ID after delivery
+            telegram_chat_id: Telegram chat ID where message was delivered
+            sync_direction: Direction of sync (typically WEB_TO_TELEGRAM)
+        """
+        bucket = calculate_message_bucket(message_id)
+        # Note: messages table doesn't have telegram_chat_id column, only telegram_message_id
+        await self.client.execute_prepared(
+            """UPDATE messages
+               SET telegram_message_id = ?, sync_direction = ?, updated_at = ?
+               WHERE channel_id = ? AND bucket = ? AND message_id = ?""",
+            (
+                telegram_message_id,
+                sync_direction.value if sync_direction else None,
+                datetime.now(timezone.utc),
+                channel_id,
+                bucket,
+                message_id,
+            ),
+            execution_profile='write',
+        )
+
+        # Also insert into telegram_message_mapping for O(1) lookup
+        try:
+            await self.client.execute_prepared(
+                """INSERT INTO telegram_message_mapping
+                   (telegram_message_id, telegram_chat_id, channel_id, bucket, message_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    telegram_message_id,
+                    telegram_chat_id,
+                    channel_id,
+                    bucket,
+                    message_id,
+                    datetime.now(timezone.utc),
+                ),
+                execution_profile='write',
+            )
+        except Exception as mapping_error:
+            # Log but don't fail - message update succeeded
+            log.warning(f"Failed to insert telegram_message_mapping during sync: {mapping_error}")
+
     async def get_messages_by_author(
             self,
             channel_id: ChannelID,

@@ -556,6 +556,28 @@ export class EventHandlers {
     }
   }
 
+  static handleMessageSyncedToTelegram(message: WSMessage): void {
+    try {
+      const data = message.p;
+      logger.info('Message synced to Telegram (delivered):', {
+        message_id: data.message_id,
+        chat_id: data.chat_id,
+        telegram_message_id: data.telegram_message_id,
+      });
+
+      // Dispatch event for useChatMessages to update message's telegram_message_id
+      // This enables the double gray checkmark (delivered) status
+      window.dispatchEvent(new CustomEvent('messageSyncedToTelegram', {
+        detail: {
+          ...data,
+          id: data.message_id || data.id,
+        }
+      }));
+    } catch (error) {
+      logger.error('Error handling message synced to telegram:', error);
+    }
+  }
+
   static handleParticipantJoined(message: WSMessage): void {
     try {
       const data = message.p;
@@ -920,6 +942,7 @@ export class EventHandlers {
         'message_created': this.handleMessageCreated,
         'message_updated': this.handleMessageUpdated,
         'message_deleted': this.handleMessageDeleted,
+        'message_synced_to_telegram': this.handleMessageSyncedToTelegram,
         'participant_joined': this.handleParticipantJoined,
         'participant_left': this.handleParticipantLeft,
         'participant_role_changed': this.handleParticipantRoleChanged,

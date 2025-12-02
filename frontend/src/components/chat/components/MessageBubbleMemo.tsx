@@ -41,7 +41,8 @@ export const MessageBubbleMemo = React.memo<MessageBubbleMemoProps>(({
 }, (prevProps, nextProps) => {
   // Кастомная функция сравнения для оптимизации ре-рендеров
   // IMPORTANT: Must check callback existence to ensure action buttons render
-  // IMPORTANT: Must compare telegram_read_at for bidirectional read receipts
+  // IMPORTANT: Must compare telegram_message_id for delivery status (double gray checkmark)
+  // IMPORTANT: Must compare telegram_read_at for read status (double blue checkmark)
   return (
     prevProps.message.id === nextProps.message.id &&
     prevProps.message.content === nextProps.message.content &&
@@ -49,6 +50,7 @@ export const MessageBubbleMemo = React.memo<MessageBubbleMemoProps>(({
     prevProps.isOwn === nextProps.isOwn &&
     prevProps.isSending === nextProps.isSending &&
     JSON.stringify(prevProps.message.read_by) === JSON.stringify(nextProps.message.read_by) &&
+    prevProps.message.telegram_message_id === nextProps.message.telegram_message_id &&
     prevProps.message.telegram_read_at === nextProps.message.telegram_read_at &&
     prevProps.className === nextProps.className &&
     // Check if callback availability changed (don't compare function refs, just existence)

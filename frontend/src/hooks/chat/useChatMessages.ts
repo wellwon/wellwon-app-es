@@ -202,6 +202,43 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
       );
     };
 
+    // Handle message synced to Telegram - delivery confirmation (double gray checkmark)
+    const handleMessageSyncedToTelegram = (event: CustomEvent) => {
+      const data = event.detail;
+      if (data.chat_id !== chatId) return;
+
+      const messageId = data.id || data.message_id;
+      const telegramMessageId = data.telegram_message_id;
+
+      logger.debug('WSE: Message synced to Telegram (delivered)', {
+        chatId,
+        messageId,
+        telegramMessageId,
+      });
+
+      queryClient.setQueryData(
+        chatKeys.messages(chatId),
+        (oldData: any) => {
+          if (!oldData) return oldData;
+
+          const newPages = oldData.pages.map((page: any) => ({
+            ...page,
+            messages: page.messages.map((m: Message) => {
+              if (m.id === messageId) {
+                return {
+                  ...m,
+                  telegram_message_id: telegramMessageId,
+                };
+              }
+              return m;
+            }),
+          }));
+
+          return { ...oldData, pages: newPages };
+        }
+      );
+    };
+
     // Handle messages read - bidirectional (Web ↔ Telegram)
     const handleMessagesRead = (event: CustomEvent) => {
       const data = event.detail;
@@ -266,12 +303,14 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
     window.addEventListener('messageCreated', handleMessageCreated as EventListener);
     window.addEventListener('messageUpdated', handleMessageUpdated as EventListener);
     window.addEventListener('messageDeleted', handleMessageDeleted as EventListener);
+    window.addEventListener('messageSyncedToTelegram', handleMessageSyncedToTelegram as EventListener);
     window.addEventListener('messagesRead', handleMessagesRead as EventListener);
 
     return () => {
       window.removeEventListener('messageCreated', handleMessageCreated as EventListener);
       window.removeEventListener('messageUpdated', handleMessageUpdated as EventListener);
       window.removeEventListener('messageDeleted', handleMessageDeleted as EventListener);
+      window.removeEventListener('messageSyncedToTelegram', handleMessageSyncedToTelegram as EventListener);
       window.removeEventListener('messagesRead', handleMessagesRead as EventListener);
     };
   }, [chatId, queryClient]);

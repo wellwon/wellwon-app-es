@@ -81,12 +81,14 @@ INTERNAL_TO_WS_EVENT_TYPE_MAP = {
     'MessageSent': 'message_created',
     'MessageEdited': 'message_updated',
     'MessageDeleted': 'message_deleted',
+    'MessageSyncedToTelegram': 'message_synced_to_telegram',
     'ParticipantAdded': 'participant_joined',
     'ParticipantRemoved': 'participant_left',
     'ParticipantRoleChanged': 'participant_role_changed',
     'UserStartedTyping': 'user_typing',
     'UserStoppedTyping': 'user_stopped_typing',
     'MessagesRead': 'messages_read',
+    'MessagesMarkedAsRead': 'messages_read',  # Actual event type from domain
     'TelegramChatLinked': 'chat_telegram_linked',
     'TelegramChatUnlinked': 'chat_telegram_unlinked',
     'TelegramMessageReceived': 'message_created',  # Telegram message → same as regular message

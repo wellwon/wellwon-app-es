@@ -565,24 +565,28 @@ export function MessageBubble({
     );
 
     // Message status (WhatsApp/Telegram style):
-    // ✓  (gray)  - Sent (server confirmed, has ID)
-    // ✓✓ (gray)  - Delivered (reached server/recipient)
+    // ✓  (gray)  - Sent to WellWon server (waiting for Telegram delivery)
+    // ✓✓ (gray)  - Delivered to Telegram (has telegram_message_id)
     // ✓✓ (blue)  - Read (by WellWon user or on Telegram)
 
     const isReadByWeb = (message.read_by?.length ?? 0) > 0;
     const isReadOnTelegram = !!message.telegram_read_at;
     const isRead = isReadByWeb || isReadOnTelegram;
 
-    // Message is "delivered" when it has an ID (server confirmed) and is not sending
+    // Message is "delivered to Telegram" when it has telegram_message_id
+    // (backend emits MessageSyncedToTelegram event after successful Telegram API call)
+    const isDeliveredToTelegram = !!message.telegram_message_id;
+
+    // For non-Telegram chats, consider message "delivered" when it has an ID
     const isDelivered = !isSending && !!message.id;
 
     // Status element with WhatsApp/Telegram-style checkmarks
     const statusEl = isOwn ? (
       isSending ? (
-        // Sending - single gray checkmark (or spinner for long sends)
+        // Sending - single gray checkmark with low opacity
         <Check
           size={16}
-          className="text-gray-500 opacity-60"
+          className="text-gray-500 opacity-50"
           strokeWidth={2}
         />
       ) : isRead ? (
@@ -598,15 +602,22 @@ export function MessageBubble({
           `}
           strokeWidth={2.5}
         />
-      ) : isDelivered ? (
-        // Delivered - double GRAY checkmark
+      ) : isDeliveredToTelegram ? (
+        // Delivered to Telegram - double GRAY checkmark
         <CheckCheck
           size={16}
           className="text-gray-400"
           strokeWidth={2}
         />
+      ) : isDelivered ? (
+        // Sent to WellWon but not yet delivered to Telegram - single gray checkmark
+        <Check
+          size={16}
+          className="text-gray-400"
+          strokeWidth={2}
+        />
       ) : (
-        // Sent (fallback) - single gray checkmark
+        // Fallback - single gray checkmark
         <Check
           size={16}
           className="text-gray-400"

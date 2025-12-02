@@ -146,8 +146,8 @@ class SendMessageHandler(BaseCommandHandler):
 
                 # Publish directly to transport (no aggregate needed for this event)
                 await self.event_bus.publish(
-                    topic="transport.chat-events",
-                    event=sync_event.model_dump(),
+                    "transport.chat-events",
+                    sync_event.model_dump()
                 )
                 log.debug(f"Published MessageSyncedToTelegram event for message {command.message_id}")
             else:

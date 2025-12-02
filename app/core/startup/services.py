@@ -6,6 +6,7 @@
 
 import os
 import logging
+import asyncio
 from app.core.fastapi_types import FastAPI
 
 # Read repositories
@@ -141,6 +142,7 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
             from app.infra.telegram.mtproto_client import IncomingMessage
             from app.chat.commands import ProcessTelegramMessageCommand
             from app.chat.queries import GetChatByTelegramIdQuery
+            from app.infra.event_store.kurrentdb_event_store import ConcurrencyError
             import uuid
 
             async def handle_incoming_telegram_message(msg: IncomingMessage):
@@ -178,30 +180,41 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
                     elif msg.file_type:
                         message_type = "file"
 
-                    # Dispatch ProcessTelegramMessageCommand
-                    command = ProcessTelegramMessageCommand(
-                        chat_id=chat_detail.id,
-                        message_id=uuid.uuid4(),
-                        telegram_message_id=msg.message_id,
-                        telegram_user_id=msg.sender_id,
-                        sender_id=None,  # External Telegram user
-                        content=msg.text or "",
-                        message_type=message_type,
-                        file_url=None,  # TODO: Download file if needed
-                        file_name=msg.file_name,
-                        file_size=msg.file_size,
-                        file_type=msg.file_type,
-                        voice_duration=msg.voice_duration,
-                        telegram_topic_id=msg.topic_id,
-                        telegram_user_data={
-                            "first_name": msg.sender_first_name,
-                            "last_name": msg.sender_last_name,
-                            "username": msg.sender_username,
-                            "is_bot": msg.sender_is_bot,
-                        },
-                    )
-                    await app.state.command_bus.send(command)
-                    logger.info(f"Command dispatched for chat {chat_detail.id}")
+                    # Dispatch ProcessTelegramMessageCommand with retry on concurrency conflicts
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        try:
+                            command = ProcessTelegramMessageCommand(
+                                chat_id=chat_detail.id,
+                                message_id=uuid.uuid4(),  # New UUID for each retry
+                                telegram_message_id=msg.message_id,
+                                telegram_user_id=msg.sender_id,
+                                sender_id=None,  # External Telegram user
+                                content=msg.text or "",
+                                message_type=message_type,
+                                file_url=None,  # TODO: Download file if needed
+                                file_name=msg.file_name,
+                                file_size=msg.file_size,
+                                file_type=msg.file_type,
+                                voice_duration=msg.voice_duration,
+                                telegram_topic_id=msg.topic_id,
+                                telegram_user_data={
+                                    "first_name": msg.sender_first_name,
+                                    "last_name": msg.sender_last_name,
+                                    "username": msg.sender_username,
+                                    "is_bot": msg.sender_is_bot,
+                                },
+                            )
+                            await app.state.command_bus.send(command)
+                            logger.info(f"Command dispatched for chat {chat_detail.id}")
+                            break  # Success - exit retry loop
+
+                        except ConcurrencyError as ce:
+                            if attempt < max_retries - 1:
+                                logger.warning(f"Concurrency conflict for chat {chat_detail.id}, retry {attempt + 1}/{max_retries}")
+                                await asyncio.sleep(0.05 * (2 ** attempt))  # Exponential backoff
+                            else:
+                                logger.error(f"Failed to process Telegram message after {max_retries} retries: {ce}")
 
                 except Exception as e:
                     logger.error(f"Error handling Telegram message: {e}", exc_info=True)
