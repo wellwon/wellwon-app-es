@@ -9,6 +9,7 @@ import { CSS } from '@dnd-kit/utilities';
 import {
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Trash2,
   GripVertical,
   Plus,
@@ -22,13 +23,18 @@ interface CanvasSectionProps {
   section: FormSectionConfig;
   index: number;
   isDark: boolean;
+  totalSections: number;
 }
 
-export const CanvasSection: React.FC<CanvasSectionProps> = ({ section, index, isDark }) => {
+export const CanvasSection: React.FC<CanvasSectionProps> = ({ section, index, isDark, totalSections }) => {
   const {
     removeSection,
     updateSection,
+    moveSection,
   } = useFormBuilderStore();
+
+  const isFirst = index === 0;
+  const isLast = index === totalSections - 1;
 
   const [isExpanded, setIsExpanded] = useState(true);
 
@@ -119,6 +125,39 @@ export const CanvasSection: React.FC<CanvasSectionProps> = ({ section, index, is
 
         {/* Actions */}
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 ">
+          {/* Move Up Button */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              moveSection(section.id, 'up');
+            }}
+            disabled={isFirst}
+            className={cn(
+              'p-1.5 rounded-lg',
+              isFirst ? 'opacity-30 cursor-not-allowed' : theme.hover
+            )}
+            title="Переместить вверх"
+          >
+            <ChevronUp className={cn('w-4 h-4', theme.textMuted)} />
+          </button>
+
+          {/* Move Down Button */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              moveSection(section.id, 'down');
+            }}
+            disabled={isLast}
+            className={cn(
+              'p-1.5 rounded-lg',
+              isLast ? 'opacity-30 cursor-not-allowed' : theme.hover
+            )}
+            title="Переместить вниз"
+          >
+            <ChevronDown className={cn('w-4 h-4', theme.textMuted)} />
+          </button>
+
+          {/* Delete Button */}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -152,6 +191,7 @@ export const CanvasSection: React.FC<CanvasSectionProps> = ({ section, index, is
                     sectionId={section.id}
                     index={fieldIndex}
                     isDark={isDark}
+                    totalFieldsInSection={section.fields.length}
                   />
                 ))}
               </div>

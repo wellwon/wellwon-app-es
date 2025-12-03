@@ -50,15 +50,23 @@ export interface ValidationRules {
 
 export type FieldWidth = 'full' | 'three-quarters' | 'two-thirds' | 'half' | 'third' | 'quarter';
 
+// Тип элемента формы (не связанный со схемой)
+export type FormElementType = 'subheading' | 'section-divider';
+
 // Опция для поля типа список (select)
 export interface SelectOption {
   label: string;   // Отображаемое название (например "Мужской")
   value: string;   // Значение для сохранения (например "0")
 }
 
+// Типы полей ввода
+export type InputFieldType = 'text' | 'number' | 'date' | 'datetime' | 'select' | 'checkbox' | 'textarea';
+
 export interface FormFieldConfig {
   id: string;
-  schemaPath: string;              // JSON path из схемы (например "ContractTerms.Amount")
+  schemaPath: string;              // JSON path из схемы (например "ContractTerms.Amount") или "__element__" для элементов
+  elementType?: FormElementType;   // Тип элемента формы (subheading, section-divider)
+  fieldType?: InputFieldType;      // Переопределение типа поля (если не задано - берётся из схемы или автоопределяется)
   customLabel?: string;            // Переопределенный label
   customPlaceholder?: string;
   customHint?: string;
@@ -71,7 +79,7 @@ export interface FormFieldConfig {
   readonly?: boolean;
   hidden?: boolean;
   required?: boolean;              // Переопределение обязательности (если не задано - берётся из схемы)
-  isSelect?: boolean;              // Флаг что поле является списком (select)
+  isSelect?: boolean;              // Флаг что поле является списком (select) - deprecated, use fieldType
   selectOptions?: SelectOption[];  // Опции для списка
 }
 
@@ -205,7 +213,7 @@ export interface DropTarget {
 // Builder State
 // =============================================================================
 
-export type BuilderTab = 'structure' | 'preview' | 'history' | 'versions';
+export type BuilderTab = 'structure' | 'preview' | 'json' | 'history' | 'versions';
 export type PreviewMode = 'desktop' | 'tablet' | 'mobile';
 
 export interface FormBuilderState {

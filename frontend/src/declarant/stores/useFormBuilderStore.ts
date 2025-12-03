@@ -16,6 +16,7 @@ import type {
   BuilderTab,
   PreviewMode,
   FieldWidth,
+  FormElementType,
 } from '../types/form-builder';
 import type { FieldDefinition } from '../types/form-definitions';
 
@@ -37,9 +38,12 @@ interface FormBuilderActions {
   updateSection: (sectionId: string, updates: Partial<FormSectionConfig>) => void;
   removeSection: (sectionId: string) => void;
   reorderSections: (fromIndex: number, toIndex: number) => void;
+  moveSection: (sectionId: string, direction: 'up' | 'down') => void;
 
   // Field actions
   addFieldToSection: (sectionId: string, schemaPath: string, index?: number) => void;
+  addElementToSection: (sectionId: string, elementType: FormElementType, label: string, index?: number) => void;
+  splitSection: (sectionId: string, atFieldIndex: number) => void;
   updateField: (sectionId: string, fieldId: string, updates: Partial<FormFieldConfig>) => void;
   updateFieldInSection: (sectionId: string, fieldId: string, updates: Partial<FormFieldConfig>) => void;
   removeFieldFromSection: (sectionId: string, fieldId: string) => void;
@@ -83,6 +87,9 @@ interface FormBuilderActions {
 
   // Debug import
   addFieldsFromJson: (json: Record<string, unknown>) => number;
+  importedValues: Map<string, string>; // Temporary values from JSON import
+  setImportedValues: (values: Map<string, string>) => void;
+  clearImportedValues: () => void;
 
   // Version label
   setLoadedVersionLabel: (label: string | null) => void;
@@ -124,7 +131,7 @@ const getSavedVersionLabel = (): string | null => {
   }
 };
 
-const initialState: FormBuilderState = {
+const initialState: FormBuilderState & { importedValues: Map<string, string> } = {
   template: null,
   schemaFields: [],
   selectedSectionId: null,
@@ -144,6 +151,7 @@ const initialState: FormBuilderState = {
   expandedNodes: new Set(),
   validationErrors: [],
   loadedVersionLabel: getSavedVersionLabel(),
+  importedValues: new Map(),
 };
 
 // =============================================================================
@@ -312,6 +320,31 @@ export const useFormBuilderStore = create<FormBuilderState & FormBuilderActions>
       })
     ),
 
+  moveSection: (sectionId, direction) =>
+    set(
+      produce((draft: FormBuilderState) => {
+        if (!draft.template) return;
+
+        const index = draft.template.sections.findIndex((s) => s.id === sectionId);
+        if (index === -1) return;
+
+        const newIndex = direction === 'up' ? index - 1 : index + 1;
+
+        // Check bounds
+        if (newIndex < 0 || newIndex >= draft.template.sections.length) return;
+
+        // Swap sections
+        const [moved] = draft.template.sections.splice(index, 1);
+        draft.template.sections.splice(newIndex, 0, moved);
+
+        // Update orders
+        draft.template.sections.forEach((s, i) => {
+          s.order = i;
+        });
+        draft.isDirty = true;
+      })
+    ),
+
   // =========================================================================
   // Field actions
   // =========================================================================
@@ -357,6 +390,107 @@ export const useFormBuilderStore = create<FormBuilderState & FormBuilderActions>
             draft.isDirty = true;
           }
         }
+      })
+    );
+  },
+
+  addElementToSection: (sectionId, elementType, label, index) => {
+    const newElement: FormFieldConfig = {
+      id: uuidv4(),
+      schemaPath: '__element__',
+      elementType,
+      customLabel: label,
+      width: 'full' as FieldWidth,
+      order: 0,
+    };
+
+    set(
+      produce((draft: FormBuilderState) => {
+        if (draft.template) {
+          const section = draft.template.sections.find((s) => s.id === sectionId);
+          if (section) {
+            const insertIndex = index ?? section.fields.length;
+            section.fields.splice(insertIndex, 0, newElement);
+
+            // Update orders
+            section.fields.forEach((f, i) => {
+              f.order = i;
+            });
+
+            // Save history
+            draft.history = draft.history.slice(0, draft.historyIndex + 1);
+            draft.history.push({
+              id: uuidv4(),
+              actionType: 'field_added',
+              description: `Добавлен элемент "${label}"`,
+              timestamp: new Date().toISOString(),
+              beforeState: [...draft.template.sections],
+              afterState: draft.template.sections.map((s) => ({ ...s, fields: [...s.fields] })),
+            });
+            draft.historyIndex = draft.history.length - 1;
+
+            draft.selectedFieldId = newElement.id;
+            draft.isDirty = true;
+          }
+        }
+      })
+    );
+  },
+
+  splitSection: (sectionId, atFieldIndex) => {
+    set(
+      produce((draft: FormBuilderState) => {
+        if (!draft.template) return;
+
+        const sectionIndex = draft.template.sections.findIndex((s) => s.id === sectionId);
+        if (sectionIndex === -1) return;
+
+        const section = draft.template.sections[sectionIndex];
+        if (atFieldIndex <= 0 || atFieldIndex >= section.fields.length) return;
+
+        // Поля для новой секции (от atFieldIndex до конца)
+        const fieldsForNewSection = section.fields.splice(atFieldIndex);
+
+        // Обновляем порядок в оригинальной секции
+        section.fields.forEach((f, i) => {
+          f.order = i;
+        });
+
+        // Создаём новую секцию
+        const newSection: FormSectionConfig = {
+          id: uuidv4(),
+          key: `section_${Date.now()}`,
+          titleRu: `${section.titleRu} (продолжение)`,
+          descriptionRu: '',
+          icon: section.icon,
+          order: sectionIndex + 1,
+          columns: section.columns,
+          collapsible: section.collapsible,
+          defaultExpanded: section.defaultExpanded,
+          fields: fieldsForNewSection.map((f, i) => ({ ...f, order: i })),
+        };
+
+        // Вставляем новую секцию после текущей
+        draft.template.sections.splice(sectionIndex + 1, 0, newSection);
+
+        // Обновляем порядок всех секций
+        draft.template.sections.forEach((s, i) => {
+          s.order = i;
+        });
+
+        // Save history
+        draft.history = draft.history.slice(0, draft.historyIndex + 1);
+        draft.history.push({
+          id: uuidv4(),
+          actionType: 'section_added',
+          description: `Секция "${section.titleRu}" разделена`,
+          timestamp: new Date().toISOString(),
+          beforeState: [...draft.template.sections],
+          afterState: draft.template.sections.map((s) => ({ ...s, fields: [...s.fields] })),
+        });
+        draft.historyIndex = draft.history.length - 1;
+
+        draft.isDirty = true;
       })
     );
   },
@@ -626,6 +760,12 @@ export const useFormBuilderStore = create<FormBuilderState & FormBuilderActions>
   // Debug import
   // =========================================================================
 
+  importedValues: new Map(),
+
+  setImportedValues: (values) => set({ importedValues: values }),
+
+  clearImportedValues: () => set({ importedValues: new Map() }),
+
   addFieldsFromJson: (json: Record<string, unknown>) => {
     const state = get();
     if (!state.template) return 0;
@@ -633,88 +773,232 @@ export const useFormBuilderStore = create<FormBuilderState & FormBuilderActions>
     // Get existing paths
     const existingPaths = state.getUsedFieldPaths();
 
-    // Recursively extract all paths from JSON
-    const extractPaths = (obj: unknown, prefix = ''): string[] => {
-      const paths: string[] = [];
+    // Human-readable section names mapping
+    const sectionNames: Record<string, string> = {
+      'DocumentID': 'Идентификатор документа',
+      'CertNumber': 'Номер сертификата',
+      'AddDeclaration': 'Дополнительная декларация',
+      'OrganizationQuarantine': 'Карантинная организация',
+      'DescriptionConsignment': 'Описание груза',
+      'Consignee': 'Получатель',
+      'Exporter': 'Экспортёр',
+      'Packaging': 'Упаковка',
+      'Desinfestation': 'Обеззараживание',
+      'PlaceIssue': 'Место выдачи',
+      'PersonSignature': 'Подпись',
+      'RFOrganizationFeatures': 'Реквизиты организации',
+      'LegalAddress': 'Юридический адрес',
+      'default': 'Основные поля',
+    };
 
-      if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
-        for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
-          const path = prefix ? `${prefix}.${key}` : key;
+    // Section icons mapping
+    const sectionIcons: Record<string, string> = {
+      'DocumentID': 'FileText',
+      'CertNumber': 'FileCheck',
+      'DescriptionConsignment': 'Package',
+      'Consignee': 'Building2',
+      'Exporter': 'Truck',
+      'Packaging': 'Box',
+      'Desinfestation': 'Shield',
+      'PlaceIssue': 'MapPin',
+      'PersonSignature': 'PenTool',
+      'OrganizationQuarantine': 'AlertTriangle',
+      'RFOrganizationFeatures': 'Briefcase',
+      'LegalAddress': 'Home',
+      'default': 'FileText',
+    };
 
-          if (value && typeof value === 'object' && !Array.isArray(value)) {
-            // For nested objects, add the path and recurse
-            paths.push(...extractPaths(value, path));
-          } else {
-            // Leaf node - add the path
-            paths.push(path);
+    // Collect all values for temporary display
+    const importedValues = new Map<string, string>();
+
+    // Group fields by section key
+    interface FieldInfo {
+      path: string;
+      label: string;
+      value: unknown;
+    }
+
+    interface SectionGroup {
+      key: string;
+      title: string;
+      icon: string;
+      order: number;
+      fields: FieldInfo[];
+    }
+
+    const sections: Map<string, SectionGroup> = new Map();
+    let sectionOrder = 0;
+
+    // Recursively extract fields - each nested object becomes its own section
+    const extractAndGroup = (
+      obj: unknown,
+      prefix = '',
+      sectionKey = 'default',
+      depth = 0
+    ): void => {
+      if (!obj || typeof obj !== 'object') return;
+
+      // Handle arrays - take first element if it's an object
+      if (Array.isArray(obj)) {
+        if (obj.length > 0 && typeof obj[0] === 'object' && obj[0] !== null) {
+          extractAndGroup(obj[0], prefix, sectionKey, depth);
+        } else if (obj.length > 0) {
+          // Array of primitives - add as single field
+          if (!sections.has(sectionKey)) {
+            sections.set(sectionKey, {
+              key: sectionKey,
+              title: sectionNames[sectionKey] || sectionKey,
+              icon: sectionIcons[sectionKey] || 'FileText',
+              order: sectionOrder++,
+              fields: [],
+            });
+          }
+          const section = sections.get(sectionKey)!;
+          const pathParts = prefix.split('.');
+          const fieldName = pathParts[pathParts.length - 1];
+          const value = obj.map(v => String(v)).join(', ');
+
+          section.fields.push({
+            path: prefix,
+            label: fieldName,
+            value: obj,
+          });
+
+          // Store value for display
+          importedValues.set(prefix, value);
+        }
+        return;
+      }
+
+      // Handle objects
+      for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+        const path = prefix ? `${prefix}.${key}` : key;
+
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          // This is a nested object - create a new section for it
+          // Use the key as section name
+          const nestedSectionKey = key;
+
+          if (!sections.has(nestedSectionKey)) {
+            sections.set(nestedSectionKey, {
+              key: nestedSectionKey,
+              title: sectionNames[nestedSectionKey] || nestedSectionKey,
+              icon: sectionIcons[nestedSectionKey] || 'FileText',
+              order: sectionOrder++,
+              fields: [],
+            });
+          }
+
+          // Recurse into nested object with new section key
+          extractAndGroup(value, path, nestedSectionKey, depth + 1);
+        } else if (Array.isArray(value)) {
+          // Array field
+          extractAndGroup(value, path, sectionKey, depth);
+        } else {
+          // Leaf node - add to current section
+          if (!sections.has(sectionKey)) {
+            sections.set(sectionKey, {
+              key: sectionKey,
+              title: sectionNames[sectionKey] || sectionKey,
+              icon: sectionIcons[sectionKey] || 'FileText',
+              order: sectionOrder++,
+              fields: [],
+            });
+          }
+
+          const section = sections.get(sectionKey)!;
+          section.fields.push({
+            path,
+            label: key,
+            value,
+          });
+
+          // Store value for display
+          if (value !== null && value !== undefined) {
+            importedValues.set(path, String(value));
           }
         }
       }
-
-      return paths;
     };
 
-    const jsonPaths = extractPaths(json);
-    const newPaths = jsonPaths.filter((path) => !existingPaths.has(path));
+    extractAndGroup(json);
 
-    if (newPaths.length === 0) return 0;
+    // Filter out existing paths and count new ones
+    let totalNewFields = 0;
+    const sectionsToCreate: SectionGroup[] = [];
 
-    // Create or find "Import" section
-    let importSectionId: string | null = null;
+    // Sort sections by order
+    const sortedSections = Array.from(sections.values()).sort((a, b) => a.order - b.order);
+
+    for (const section of sortedSections) {
+      const newFields = section.fields.filter((f) => !existingPaths.has(f.path));
+      if (newFields.length > 0) {
+        sectionsToCreate.push({
+          ...section,
+          fields: newFields,
+        });
+        totalNewFields += newFields.length;
+      }
+    }
+
+    if (totalNewFields === 0) return 0;
 
     set(
-      produce((draft: FormBuilderState) => {
+      produce((draft: FormBuilderState & { importedValues: Map<string, string> }) => {
         if (!draft.template) return;
 
-        // Find or create "Import" section
-        let importSection = draft.template.sections.find(
-          (s) => s.key === 'debug-import'
-        );
+        const beforeState = draft.template.sections.map((s) => ({ ...s, fields: [...s.fields] }));
 
-        if (!importSection) {
-          importSection = {
-            id: uuidv4(),
-            key: 'debug-import',
-            titleRu: 'Импорт (Debug)',
-            descriptionRu: 'Поля, импортированные из JSON документа',
-            icon: 'Bug',
-            order: draft.template.sections.length,
-            columns: 2,
-            collapsible: true,
-            defaultExpanded: true,
-            fields: [],
-          };
-          draft.template.sections.push(importSection);
+        // Create sections for each group
+        for (const sectionData of sectionsToCreate) {
+          const sectionKey = `import-${sectionData.key}`;
+
+          // Find existing section or create new
+          let section = draft.template.sections.find((s) => s.key === sectionKey);
+
+          if (!section) {
+            section = {
+              id: uuidv4(),
+              key: sectionKey,
+              titleRu: sectionData.title,
+              descriptionRu: '',
+              icon: sectionData.icon,
+              order: draft.template.sections.length,
+              columns: 2,
+              collapsible: true,
+              defaultExpanded: true,
+              fields: [],
+            };
+            draft.template.sections.push(section);
+          }
+
+          // Add fields to section (without defaultValue - values are temporary)
+          for (const fieldInfo of sectionData.fields) {
+            const schemaField = state.getFieldByPath(fieldInfo.path);
+
+            const newField: FormFieldConfig = {
+              id: uuidv4(),
+              schemaPath: fieldInfo.path,
+              customLabel: schemaField?.label_ru || fieldInfo.label,
+              width: 'half' as FieldWidth,
+              order: section.fields.length,
+            };
+
+            section.fields.push(newField);
+          }
         }
 
-        importSectionId = importSection.id;
-
-        // Add new fields
-        for (const path of newPaths) {
-          // Try to find in schema
-          const schemaField = state.getFieldByPath(path);
-          const pathParts = path.split('.');
-          const fieldName = pathParts[pathParts.length - 1];
-
-          const newField: FormFieldConfig = {
-            id: uuidv4(),
-            schemaPath: path,
-            customLabel: schemaField?.label_ru || fieldName,
-            width: 'half' as FieldWidth,
-            order: importSection.fields.length,
-          };
-
-          importSection.fields.push(newField);
-        }
+        // Store imported values for temporary display
+        draft.importedValues = importedValues;
 
         // Save history
         draft.history = draft.history.slice(0, draft.historyIndex + 1);
         draft.history.push({
           id: uuidv4(),
           actionType: 'fields_imported',
-          description: `Импортировано ${newPaths.length} полей из JSON`,
+          description: `Импортировано ${totalNewFields} полей в ${sectionsToCreate.length} секций`,
           timestamp: new Date().toISOString(),
-          beforeState: [...state.template!.sections],
+          beforeState,
           afterState: draft.template.sections.map((s) => ({ ...s, fields: [...s.fields] })),
         });
         draft.historyIndex = draft.history.length - 1;
@@ -723,7 +1007,7 @@ export const useFormBuilderStore = create<FormBuilderState & FormBuilderActions>
       })
     );
 
-    return newPaths.length;
+    return totalNewFields;
   },
 
   // =========================================================================

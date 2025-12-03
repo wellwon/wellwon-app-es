@@ -3,7 +3,7 @@
 // =============================================================================
 
 import React, { useMemo } from 'react';
-import { Eye, Monitor, Tablet, Smartphone, RefreshCw, Calendar } from 'lucide-react';
+import { Eye, Monitor, Tablet, Smartphone, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useFormBuilderStore } from '../../../stores/useFormBuilderStore';
 import type { FormFieldConfig, FormSectionConfig, SelectOption } from '../../../types/form-builder';
@@ -16,7 +16,7 @@ interface FormPreviewProps {
 type ViewportSize = 'desktop' | 'tablet' | 'mobile';
 
 export const FormPreview: React.FC<FormPreviewProps> = ({ isDark, formWidth = 100 }) => {
-  const { template, getFieldByPath } = useFormBuilderStore();
+  const { template, getFieldByPath, importedValues } = useFormBuilderStore();
   const [viewport, setViewport] = React.useState<ViewportSize>('desktop');
 
   const theme = isDark
@@ -126,6 +126,7 @@ export const FormPreview: React.FC<FormPreviewProps> = ({ isDark, formWidth = 10
                   section={section}
                   isDark={isDark}
                   getFieldByPath={getFieldByPath}
+                  importedValues={importedValues}
                 />
               ))}
             </div>
@@ -144,9 +145,10 @@ interface PreviewSectionProps {
   section: FormSectionConfig;
   isDark: boolean;
   getFieldByPath: (path: string) => any;
+  importedValues: Map<string, string>;
 }
 
-const PreviewSection: React.FC<PreviewSectionProps> = ({ section, isDark, getFieldByPath }) => {
+const PreviewSection: React.FC<PreviewSectionProps> = ({ section, isDark, getFieldByPath, importedValues }) => {
   const [isExpanded, setIsExpanded] = React.useState(section.defaultExpanded);
 
   const theme = isDark
@@ -198,6 +200,7 @@ const PreviewSection: React.FC<PreviewSectionProps> = ({ section, isDark, getFie
                   field={field}
                   isDark={isDark}
                   getFieldByPath={getFieldByPath}
+                  importedValue={importedValues.get(field.schemaPath)}
                 />
               ))}
             </div>
@@ -216,6 +219,7 @@ interface PreviewFieldProps {
   field: FormFieldConfig;
   isDark: boolean;
   getFieldByPath: (path: string) => any;
+  importedValue?: string;
 }
 
 // Определение типа поля по названию (если схема указывает text, но название содержит ключевые слова)
@@ -239,7 +243,17 @@ function inferFieldTypeFromLabel(label: string, schemaType: string): string {
   return schemaType;
 }
 
-const PreviewField: React.FC<PreviewFieldProps> = ({ field, isDark, getFieldByPath }) => {
+const PreviewField: React.FC<PreviewFieldProps> = ({ field, isDark, getFieldByPath, importedValue }) => {
+  // Проверяем, является ли это элементом формы (подзаголовок и т.д.)
+  if (field.schemaPath === '__element__') {
+    return (
+      <PreviewFormElement
+        field={field}
+        isDark={isDark}
+      />
+    );
+  }
+
   const schemaField = getFieldByPath(field.schemaPath);
 
   // Унифицированные стили из dynamic-forms
@@ -274,12 +288,10 @@ const PreviewField: React.FC<PreviewFieldProps> = ({ field, isDark, getFieldByPa
   const label = field.customLabel || schemaField?.label_ru || field.schemaPath;
   const placeholder = field.customPlaceholder || schemaField?.placeholder_ru || '';
 
-  // Определяем тип поля:
-  // 1. Если isSelect - рендерим select
-  // 2. Иначе берём тип из схемы и проверяем по названию (автоопределение даты)
+  // Определяем тип поля: приоритет - field.fieldType > isSelect > схема > автоопределение
   const schemaType = schemaField?.field_type || 'text';
   const inferredType = inferFieldTypeFromLabel(label, schemaType);
-  const fieldType = field.isSelect ? 'select' : inferredType;
+  const fieldType = field.fieldType || (field.isSelect ? 'select' : inferredType);
   const isRequired = field.required ?? schemaField?.required ?? false;
 
   return (
@@ -291,12 +303,63 @@ const PreviewField: React.FC<PreviewFieldProps> = ({ field, isDark, getFieldByPa
       </label>
 
       {/* Input based on field type */}
-      {renderFieldInput(fieldType, placeholder, field.readonly || false, theme, field.selectOptions, isDark, isRequired)}
+      {renderFieldInput(fieldType, placeholder, field.readonly || false, theme, field.selectOptions, isDark, isRequired, importedValue)}
 
       {/* Helper text */}
       {(field.customHint || schemaField?.hint_ru) && (
         <p className={cn('mt-1 text-xs', theme.textMuted)}>{field.customHint || schemaField?.hint_ru}</p>
       )}
+    </div>
+  );
+};
+
+// =============================================================================
+// PreviewFormElement - Элементы формы в превью (подзаголовок и т.д.)
+// =============================================================================
+
+interface PreviewFormElementProps {
+  field: FormFieldConfig;
+  isDark: boolean;
+}
+
+const PreviewFormElement: React.FC<PreviewFormElementProps> = ({ field, isDark }) => {
+  const theme = isDark
+    ? {
+        text: 'text-white',
+        textMuted: 'text-gray-400',
+      }
+    : {
+        text: 'text-gray-900',
+        textMuted: 'text-gray-500',
+      };
+
+  const displayLabel = field.customLabel || 'Подзаголовок';
+
+  // Для подзаголовка и любого элемента с __element__ показываем разделитель
+  // По умолчанию считаем subheading если elementType не указан
+  const elementType = field.elementType || 'subheading';
+
+  if (elementType === 'subheading' || elementType === 'section-divider') {
+    return (
+      <div className="col-span-12 pt-6 pb-3">
+        {/* Горизонтальная линия-разделитель */}
+        <div className={cn('h-px mb-4', isDark ? 'bg-white/10' : 'bg-gray-200')} />
+
+        {/* Подзаголовок */}
+        <h4 className={cn('font-semibold text-base', theme.text)}>
+          {displayLabel}
+        </h4>
+      </div>
+    );
+  }
+
+  // Fallback для неизвестных элементов
+  return (
+    <div className="col-span-12 pt-6 pb-3">
+      <div className={cn('h-px mb-4', isDark ? 'bg-white/10' : 'bg-gray-200')} />
+      <h4 className={cn('font-semibold text-base', theme.text)}>
+        {displayLabel}
+      </h4>
     </div>
   );
 };
@@ -311,6 +374,7 @@ interface FieldInputProps {
   theme: Record<string, string>;
   isDark?: boolean;
   isRequired?: boolean;
+  initialValue?: string;
 }
 
 // Хук для получения классов стиля с учётом заполненности
@@ -339,9 +403,16 @@ function useFieldStyles(
 }
 
 // Текстовое поле
-const TextFieldInput: React.FC<FieldInputProps> = ({ placeholder, readonly, theme, isDark, isRequired }) => {
-  const [value, setValue] = React.useState('');
+const TextFieldInput: React.FC<FieldInputProps> = ({ placeholder, readonly, theme, isDark, isRequired, initialValue }) => {
+  const [value, setValue] = React.useState(initialValue || '');
   const className = useFieldStyles(theme, isDark, isRequired, value.length > 0, readonly);
+
+  // Обновляем значение если initialValue изменился
+  React.useEffect(() => {
+    if (initialValue !== undefined) {
+      setValue(initialValue);
+    }
+  }, [initialValue]);
 
   return (
     <input
@@ -356,9 +427,15 @@ const TextFieldInput: React.FC<FieldInputProps> = ({ placeholder, readonly, them
 };
 
 // Числовое поле
-const NumberFieldInput: React.FC<FieldInputProps> = ({ placeholder, readonly, theme, isDark, isRequired }) => {
-  const [value, setValue] = React.useState('');
+const NumberFieldInput: React.FC<FieldInputProps> = ({ placeholder, readonly, theme, isDark, isRequired, initialValue }) => {
+  const [value, setValue] = React.useState(initialValue || '');
   const className = useFieldStyles(theme, isDark, isRequired, value.length > 0, readonly);
+
+  React.useEffect(() => {
+    if (initialValue !== undefined) {
+      setValue(initialValue);
+    }
+  }, [initialValue]);
 
   return (
     <input
@@ -373,9 +450,15 @@ const NumberFieldInput: React.FC<FieldInputProps> = ({ placeholder, readonly, th
 };
 
 // Textarea
-const TextareaFieldInput: React.FC<FieldInputProps> = ({ placeholder, readonly, theme, isDark, isRequired }) => {
-  const [value, setValue] = React.useState('');
+const TextareaFieldInput: React.FC<FieldInputProps> = ({ placeholder, readonly, theme, isDark, isRequired, initialValue }) => {
+  const [value, setValue] = React.useState(initialValue || '');
   const className = useFieldStyles(theme, isDark, isRequired, value.length > 0, readonly);
+
+  React.useEffect(() => {
+    if (initialValue !== undefined) {
+      setValue(initialValue);
+    }
+  }, [initialValue]);
 
   return (
     <textarea
@@ -390,9 +473,15 @@ const TextareaFieldInput: React.FC<FieldInputProps> = ({ placeholder, readonly, 
 };
 
 // Datetime поле
-const DatetimeFieldInput: React.FC<FieldInputProps> = ({ readonly, theme, isDark, isRequired }) => {
-  const [value, setValue] = React.useState('');
+const DatetimeFieldInput: React.FC<FieldInputProps> = ({ readonly, theme, isDark, isRequired, initialValue }) => {
+  const [value, setValue] = React.useState(initialValue || '');
   const className = useFieldStyles(theme, isDark, isRequired, value.length > 0, readonly);
+
+  React.useEffect(() => {
+    if (initialValue !== undefined) {
+      setValue(initialValue);
+    }
+  }, [initialValue]);
 
   return (
     <div className="relative">
@@ -413,10 +502,16 @@ interface SelectFieldInputProps extends FieldInputProps {
 }
 
 const SelectFieldInput: React.FC<SelectFieldInputProps> = ({
-  placeholder, readonly, theme, isDark, isRequired, selectOptions
+  placeholder, readonly, theme, isDark, isRequired, selectOptions, initialValue
 }) => {
-  const [value, setValue] = React.useState('');
+  const [value, setValue] = React.useState(initialValue || '');
   const className = useFieldStyles(theme, isDark, isRequired, value.length > 0, readonly);
+
+  React.useEffect(() => {
+    if (initialValue !== undefined) {
+      setValue(initialValue);
+    }
+  }, [initialValue]);
 
   return (
     <select
@@ -447,13 +542,24 @@ interface CheckboxFieldInputProps {
   placeholder: string;
   readonly: boolean;
   theme: Record<string, string>;
+  initialValue?: string;
 }
 
-const CheckboxFieldInput: React.FC<CheckboxFieldInputProps> = ({ placeholder, readonly, theme }) => {
+const CheckboxFieldInput: React.FC<CheckboxFieldInputProps> = ({ placeholder, readonly, theme, initialValue }) => {
+  const [checked, setChecked] = React.useState(initialValue === 'true' || initialValue === '1');
+
+  React.useEffect(() => {
+    if (initialValue !== undefined) {
+      setChecked(initialValue === 'true' || initialValue === '1');
+    }
+  }, [initialValue]);
+
   return (
     <div className="flex items-center gap-2">
       <input
         type="checkbox"
+        checked={checked}
+        onChange={(e) => setChecked(e.target.checked)}
         disabled={readonly}
         className={cn('w-4 h-4 rounded', theme.checkbox)}
       />
@@ -472,13 +578,14 @@ function renderFieldInput(
   theme: Record<string, string>,
   selectOptions?: SelectOption[],
   isDark?: boolean,
-  isRequired?: boolean
+  isRequired?: boolean,
+  initialValue?: string
 ) {
-  const baseProps = { placeholder, readonly, theme, isDark, isRequired };
+  const baseProps = { placeholder, readonly, theme, isDark, isRequired, initialValue };
 
   switch (fieldType) {
     case 'checkbox':
-      return <CheckboxFieldInput placeholder={placeholder} readonly={readonly} theme={theme} />;
+      return <CheckboxFieldInput placeholder={placeholder} readonly={readonly} theme={theme} initialValue={initialValue} />;
 
     case 'select':
       return <SelectFieldInput {...baseProps} selectOptions={selectOptions} />;
@@ -494,6 +601,7 @@ function renderFieldInput(
           isDark={isDark}
           isRequired={isRequired}
           theme={theme}
+          initialValue={initialValue}
         />
       );
 
@@ -518,6 +626,7 @@ interface DateMaskedInputProps {
   isDark?: boolean;
   isRequired?: boolean;
   theme?: Record<string, string>;
+  initialValue?: string;
 }
 
 // Проверка валидности даты
@@ -579,9 +688,17 @@ const DateMaskedInput: React.FC<DateMaskedInputProps> = ({
   isDark,
   isRequired,
   theme,
+  initialValue,
 }) => {
-  const [value, setValue] = React.useState('');
+  const [value, setValue] = React.useState(initialValue || '');
   const [hasError, setHasError] = React.useState(false);
+
+  // Обновляем значение если initialValue изменился
+  React.useEffect(() => {
+    if (initialValue !== undefined) {
+      setValue(initialValue);
+    }
+  }, [initialValue]);
 
   // Определяем, нужен ли красный стиль (обязательное + пустое)
   const hasValue = value.length > 0;

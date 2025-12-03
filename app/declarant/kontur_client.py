@@ -647,8 +647,9 @@ class KonturClient:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.get(url, headers=self._get_headers())
 
-            if response.status_code == 401:
-                log.warning("Session expired, re-authenticating...")
+            # 401 or 403 may indicate expired session
+            if response.status_code in (401, 403):
+                log.warning(f"Session expired ({response.status_code}), re-authenticating...")
                 await self.authenticate()
                 response = await client.get(url, headers=self._get_headers())
 

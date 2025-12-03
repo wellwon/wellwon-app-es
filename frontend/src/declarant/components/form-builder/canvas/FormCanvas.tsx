@@ -77,6 +77,7 @@ export const FormCanvas: React.FC<FormCanvasProps> = ({ isDark, formWidth = 100 
                 section={section}
                 index={index}
                 isDark={isDark}
+                totalSections={template.sections.length}
               />
             ))}
 

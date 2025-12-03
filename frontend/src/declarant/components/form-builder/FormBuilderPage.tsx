@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { DndContext, DragEndEvent, DragOverEvent, DragStartEvent, DragOverlay, closestCenter } from '@dnd-kit/core';
-import { Loader2, AlertCircle, GripVertical, Type, Hash, Calendar, List, CheckSquare, FileText as TextIcon } from 'lucide-react';
+import { Loader2, AlertCircle, GripVertical, Type, Hash, Calendar, List, CheckSquare, FileText as TextIcon, Heading2, SplitSquareHorizontal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useFormBuilderStore } from '../../stores/useFormBuilderStore';
 import { BuilderLayout } from './BuilderLayout';
@@ -14,6 +14,7 @@ import { StructurePanel } from './panels/StructurePanel';
 import { FormCanvas } from './canvas/FormCanvas';
 import { SchemaTree } from './tree/SchemaTree';
 import { FormPreview } from './preview/FormPreview';
+import { JsonPreview } from './preview/JsonPreview';
 import { HistoryPanel } from './panels/HistoryPanel';
 import { VersionsPanel } from './panels/VersionsPanel';
 import { DebugModal } from './DebugModal';
@@ -169,6 +170,8 @@ export const FormBuilderPage: React.FC<FormBuilderPageProps> = ({ defaultIsDark 
     setDraggedItem,
     setDropTarget,
     addFieldToSection,
+    addElementToSection,
+    splitSection,
     moveField,
     reorderFieldsInSection,
     undo,
@@ -362,8 +365,13 @@ export const FormBuilderPage: React.FC<FormBuilderPageProps> = ({ defaultIsDark 
         setDraggedItem({
           type: dragData.type,
           id: String(active.id),
-          data: dragData.field || dragData.section,
+          data: dragData.field || dragData.section || dragData,
           sourceSection: dragData.sectionId,
+          // Для form-element сохраняем дополнительные данные
+          ...(dragData.type === 'form-element' && {
+            elementType: dragData.elementType,
+            label: dragData.label,
+          }),
         });
       }
     },
@@ -407,6 +415,27 @@ export const FormBuilderPage: React.FC<FormBuilderPageProps> = ({ defaultIsDark 
           // Добавление поля из дерева схемы на существующее поле (вставка рядом)
           if (activeData.type === 'schema-field' && overData.type === 'canvas-field') {
             addFieldToSection(overData.sectionId, activeData.field.path, overData.index);
+          }
+
+          // Добавление элемента формы (подзаголовок) в секцию
+          if (activeData.type === 'form-element' && overData.type === 'section') {
+            if (activeData.elementType === 'section-divider') {
+              // Разделитель секции - разбивает секцию на две
+              splitSection(overData.sectionId, overData.index ?? 0);
+            } else {
+              // Другие элементы (подзаголовок и т.д.)
+              addElementToSection(overData.sectionId, activeData.elementType, activeData.label, overData.index);
+            }
+          }
+
+          // Добавление элемента формы на существующее поле (вставка рядом)
+          if (activeData.type === 'form-element' && overData.type === 'canvas-field') {
+            if (activeData.elementType === 'section-divider') {
+              // Разделитель секции - разбивает секцию на две
+              splitSection(overData.sectionId, overData.index ?? 0);
+            } else {
+              addElementToSection(overData.sectionId, activeData.elementType, activeData.label, overData.index);
+            }
           }
 
           // Перемещение поля canvas на другое поле canvas (сортировка внутри секции)
@@ -453,7 +482,7 @@ export const FormBuilderPage: React.FC<FormBuilderPageProps> = ({ defaultIsDark 
       setDraggedItem(null);
       setDropTarget(null);
     },
-    [addFieldToSection, moveField, reorderFieldsInSection, setDraggedItem, setDropTarget]
+    [addFieldToSection, addElementToSection, splitSection, moveField, reorderFieldsInSection, setDraggedItem, setDropTarget]
   );
 
   // Loading state - wait for form definition to be fetched
@@ -520,6 +549,8 @@ export const FormBuilderPage: React.FC<FormBuilderPageProps> = ({ defaultIsDark 
         return <FormCanvas isDark={isDark} formWidth={formWidth} />;
       case 'preview':
         return <FormPreview isDark={isDark} formWidth={formWidth} />;
+      case 'json':
+        return <JsonPreview isDark={isDark} />;
       case 'history':
         return <HistoryPanel isDark={isDark} />;
       case 'versions':
@@ -566,6 +597,8 @@ export const FormBuilderPage: React.FC<FormBuilderPageProps> = ({ defaultIsDark 
               isDark={isDark}
               isPreviewActive={activeTab === 'preview'}
               onTogglePreview={() => setActiveTab(activeTab === 'preview' ? 'structure' : 'preview')}
+              isJsonPreviewActive={activeTab === 'json'}
+              onToggleJsonPreview={() => setActiveTab(activeTab === 'json' ? 'structure' : 'json')}
             />
           }
           canvas={renderCanvasContent()}
@@ -678,6 +711,46 @@ const DragPreview: React.FC<DragPreviewProps> = ({ draggedItem, isDark, getField
             {fieldConfig?.customLabel || schemaField?.label_ru || fieldConfig?.schemaPath || 'Поле'}
           </span>
         </div>
+      </div>
+    );
+  }
+
+  // For form elements (subheading, section-divider)
+  if (draggedItem.type === 'form-element') {
+    const elementType = draggedItem.data?.elementType || draggedItem.id?.replace('element-', '');
+    const label = draggedItem.data?.label || draggedItem.label || 'Элемент';
+
+    const isSubheading = elementType === 'subheading';
+    const isDivider = elementType === 'section-divider';
+
+    const Icon = isSubheading ? Heading2 : isDivider ? SplitSquareHorizontal : Type;
+    const accentColor = isDivider ? 'ring-orange-500' : 'ring-purple-500';
+    const iconColor = isDark
+      ? (isDivider ? 'text-orange-400' : 'text-purple-400')
+      : (isDivider ? 'text-orange-600' : 'text-purple-600');
+
+    return (
+      <div
+        className={cn(
+          'px-4 py-3 rounded-xl border-2 shadow-xl cursor-grabbing',
+          theme.bg,
+          theme.border,
+          `ring-2 ${accentColor}`
+        )}
+        style={{ width: 280 }}
+      >
+        <div className="flex items-center gap-2">
+          <GripVertical className={cn('w-4 h-4', theme.textMuted)} />
+          <Icon className={cn('w-5 h-5', iconColor)} />
+          <span className={cn('font-medium truncate', theme.text)}>
+            {label}
+          </span>
+        </div>
+        {isDivider && (
+          <div className={cn('mt-2 text-xs', theme.textMuted)}>
+            Разделит секцию на две части
+          </div>
+        )}
       </div>
     );
   }
