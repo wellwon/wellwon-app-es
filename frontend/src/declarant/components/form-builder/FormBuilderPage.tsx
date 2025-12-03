@@ -20,7 +20,7 @@ import { VersionsPanel } from './panels/VersionsPanel';
 import { DebugModal } from './DebugModal';
 import { useFormDefinition } from '../../hooks/useFormTemplates';
 import { saveSections, saveFormWidth } from '../../api/form-templates-api';
-import type { FormTemplate } from '../../types/form-builder';
+import type { FormTemplate, FormElementType, InputFieldType, FieldWidth } from '../../types/form-builder';
 import type { FieldDefinition } from '../../types/form-definitions';
 
 interface FormBuilderPageProps {
@@ -219,11 +219,13 @@ export const FormBuilderPage: React.FC<FormBuilderPageProps> = ({ defaultIsDark 
         fields: s.fields_config.map((f, fieldIdx) => ({
           id: f.id || `field-${f.schemaPath.replace(/\./g, '-')}-${fieldIdx}`,
           schemaPath: f.schemaPath,
+          elementType: f.elementType as FormElementType | undefined,
+          fieldType: f.fieldType as InputFieldType | undefined,
           customLabel: f.customLabel,
           customPlaceholder: f.customPlaceholder,
           customHint: f.customHint,
           prompt: f.prompt,
-          width: (f.width || 'half') as 'full' | 'three-quarters' | 'two-thirds' | 'half' | 'third' | 'quarter',
+          width: (f.width || 'half') as FieldWidth,
           order: f.order || fieldIdx,
           readonly: f.readonly,
           defaultValue: f.defaultValue,
@@ -320,6 +322,8 @@ export const FormBuilderPage: React.FC<FormBuilderPageProps> = ({ defaultIsDark 
         fields: section.fields.map((field, fieldIdx) => ({
           id: field.id,
           schemaPath: field.schemaPath,
+          elementType: field.elementType,
+          fieldType: field.fieldType,
           customLabel: field.customLabel,
           customPlaceholder: field.customPlaceholder,
           customHint: field.customHint,

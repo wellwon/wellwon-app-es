@@ -281,6 +281,8 @@ export async function saveFormWidth(
 interface FormSectionFieldConfig {
   id: string;
   schemaPath: string;
+  elementType?: string;         // Тип элемента формы: subheading, section-divider
+  fieldType?: string;           // Тип поля: text, number, date, datetime, select, checkbox, textarea
   customLabel?: string;
   customPlaceholder?: string;
   customHint?: string;
@@ -310,7 +312,7 @@ interface FormSectionData {
   default_expanded: boolean;
 }
 
-interface FormDefinitionResponse {
+export interface FormDefinitionResponse {
   id: string;
   document_mode_id: string;
   gf_code: string;
@@ -553,7 +555,7 @@ interface VersionsListResponse {
   total: number;
 }
 
-interface CreateVersionRequest {
+interface CreateFormVersionRequest {
   version_label?: string;
   change_description?: string;
 }
@@ -623,4 +625,19 @@ export async function deleteFormVersion(
     `${DEFINITIONS_URL}/${documentModeId}/versions/${versionNumber}`
   );
   return response.data;
+}
+
+// =============================================================================
+// Form By Document Type (для использования в CreateDeclarationPage)
+// =============================================================================
+
+/**
+ * Получить форму по типу документа (document_mode_id)
+ * Используется при клике на документ в CreateDeclarationPage
+ * Возвращает готовую конфигурацию формы для рендеринга
+ */
+export async function getFormByDocumentType(
+  documentModeId: string
+): Promise<FormDefinitionResponse | null> {
+  return getFormDefinition(documentModeId);
 }

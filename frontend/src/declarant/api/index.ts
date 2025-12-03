@@ -200,25 +200,210 @@ export interface CreateDocflowRequest {
   name?: string;  // Optional docflow name
 }
 
+export interface DocflowDocument {
+  document_id: string;
+  form_id: string;
+  name: string;
+  is_core: boolean;
+  gfv?: string;
+  doc_number?: string;
+  state?: number;
+}
+
 export interface DocflowResponse {
-  id: string;
-  version: number;
-  state: number;
-  type: number;
-  procedure: number;
-  singularity?: number;
-  customs: number;
+  id: string;  // Kontur docflow ID
+  ww_number: string;  // Our WW-XXXXXX number
   name?: string;
-  organization_id: string;
-  employee_id: string;
-  create_date?: string;
-  update_date?: string;
+  declaration_type: number;
+  procedure: number;
+  status: number;
+  org_name?: string;
+  inn?: string;
+  kpp?: string;
+  gtd_number?: string;
+  process_id?: string;
+  created?: string;
+  changed?: string;
+  // Documents (returned from create endpoint)
+  documents?: DocflowDocument[];
+}
+
+export interface DocflowDocumentsResponse {
+  documents: DocflowDocument[];
+}
+
+// List response types
+export interface DocflowListItem {
+  id: string;  // Our internal UUID
+  kontur_id: string;  // Kontur's UUID
+  ww_number: string;  // Our WW-XXXXXX number
+  name?: string;
+  declaration_type: number;
+  declaration_type_code: string;  // ИМ/ЭК/ТТ
+  procedure: number;
+  status: number;
+  status_text?: string;
+  org_name?: string;
+  inn?: string;
+  gtd_number?: string;
+  documents_count: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface DocflowListResponse {
+  items: DocflowListItem[];
+  total: number;
+  skip: number;
+  take: number;
+}
+
+export interface DocflowDetailResponse {
+  id: string;  // Our internal UUID
+  kontur_id: string;
+  ww_number: string;
+  name?: string;
+  declaration_type: number;
+  declaration_type_code: string;
+  procedure: number;
+  status: number;
+  status_text?: string;
+  customs_code?: number;
+  org_name?: string;
+  inn?: string;
+  kpp?: string;
+  employee_id?: string;
+  gtd_number?: string;
+  process_id?: string;
+  documents: DocflowDocument[];
+  kontur_created?: string;
+  kontur_changed?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 /**
  * Create new docflow (пакет декларации) via Kontur API
+ * Backend now returns full response with documents and URLs
  */
 export async function createDocflow(request: CreateDocflowRequest): Promise<DocflowResponse> {
   const response = await API.post<DocflowResponse>('/declarant/docflows', request);
+  return response.data;
+}
+
+/**
+ * Get documents list for a docflow
+ */
+export async function getDocflowDocuments(docflowId: string): Promise<DocflowDocumentsResponse> {
+  const response = await API.get<DocflowDocumentsResponse>(`/declarant/docflows/${docflowId}/documents`);
+  return response.data;
+}
+
+/**
+ * List docflows from database with pagination and filtering
+ */
+export async function listDocflows(params?: {
+  skip?: number;
+  take?: number;
+  declaration_type?: number;
+  status?: number;
+  search?: string;
+}): Promise<DocflowListResponse> {
+  const response = await API.get<DocflowListResponse>('/declarant/docflows', { params });
+  return response.data;
+}
+
+/**
+ * Get docflow by WW number (e.g., WW-123456)
+ */
+export async function getDocflowByWwNumber(wwNumber: string): Promise<DocflowDetailResponse> {
+  const response = await API.get<DocflowDetailResponse>(`/declarant/docflows/by-ww/${wwNumber}`);
+  return response.data;
+}
+
+/**
+ * Get docflow by Kontur ID
+ */
+export async function getDocflowByKonturId(konturId: string): Promise<DocflowDetailResponse> {
+  const response = await API.get<DocflowDetailResponse>(`/declarant/docflows/by-kontur/${konturId}`);
+  return response.data;
+}
+
+/**
+ * Delete docflow from database (only from our DB, not from Kontur)
+ */
+export async function deleteDocflow(konturId: string): Promise<{ success: boolean; message: string }> {
+  const response = await API.delete<{ success: boolean; message: string }>(`/declarant/docflows/${konturId}`);
+  return response.data;
+}
+
+// =============================================================================
+// References API (Справочники)
+// =============================================================================
+
+export interface OrganizationItem {
+  id: string;
+  kontur_id: string;
+  name?: string;
+  inn?: string;
+  kpp?: string;
+  ogrn?: string;
+  address?: Record<string, unknown>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrganizationsListResponse {
+  items: OrganizationItem[];
+  total: number;
+  last_updated?: string;
+}
+
+export interface EmployeeItem {
+  id: string;
+  kontur_id: string;
+  organization_id?: string;
+  surname?: string;
+  name?: string;
+  patronymic?: string;
+  phone?: string;
+  email?: string;
+  auth_letter_date?: string;
+  auth_letter_number?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EmployeesListResponse {
+  items: EmployeeItem[];
+  total: number;
+  last_updated?: string;
+}
+
+/**
+ * Get all organizations from reference
+ */
+export async function getOrganizations(includeInactive = false): Promise<OrganizationsListResponse> {
+  const response = await API.get<OrganizationsListResponse>('/declarant/references/organizations', {
+    params: { include_inactive: includeInactive }
+  });
+  return response.data;
+}
+
+/**
+ * Get all employees from reference
+ */
+export async function getEmployees(params?: {
+  includeInactive?: boolean;
+  organizationId?: string;
+}): Promise<EmployeesListResponse> {
+  const response = await API.get<EmployeesListResponse>('/declarant/references/employees', {
+    params: {
+      include_inactive: params?.includeInactive ?? false,
+      organization_id: params?.organizationId
+    }
+  });
   return response.data;
 }

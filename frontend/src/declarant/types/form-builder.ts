@@ -175,6 +175,7 @@ export type HistoryActionType =
   | 'field_removed'
   | 'field_moved'
   | 'field_modified'
+  | 'fields_imported'
   | 'section_added'
   | 'section_removed'
   | 'section_modified'

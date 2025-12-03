@@ -6,7 +6,17 @@
 import React, { useState } from 'react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { createDocflow, type CreateDocflowRequest, type DocflowResponse } from '../api';
+import {
+  createDocflow,
+  getOrganizations,
+  getEmployees,
+  type CreateDocflowRequest,
+  type DocflowResponse,
+  type DocflowDetailResponse,
+  type OrganizationItem,
+  type EmployeeItem,
+} from '../api';
+import { DocumentFormModal } from '../components/DocumentFormModal';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,6 +44,9 @@ import {
   ChevronDown,
   Loader2,
   Send,
+  ExternalLink,
+  CheckCircle2,
+  Package,
 } from 'lucide-react';
 
 // Типы
@@ -90,6 +103,7 @@ interface DocumentItem {
   linkedGoods?: number;
   archived?: boolean;
   presentedWithDT?: boolean;
+  documentModeId?: string;  // ID типа документа для загрузки формы
 }
 
 interface CreateDeclarationPageProps {
@@ -100,6 +114,8 @@ interface CreateDeclarationPageProps {
   onCancel: () => void;
   onSave: () => void;
   onOpenDeclarationForm?: () => void;
+  // Данные загруженного пакета (для открытия существующей декларации)
+  loadedPackageData?: DocflowDetailResponse | null;
 }
 
 // Мок-данные
@@ -156,21 +172,8 @@ const customsOfficesData: SelectOption[] = [
   { value: 'spb', label: '10210000 - Санкт-Петербургская таможня' },
 ];
 
-const organizationsData: SelectOption[] = [
-  { value: 'promtorg', label: 'ООО "Промторг"' },
-  { value: 'techimport', label: 'ООО "ТехИмпорт"' },
-  { value: 'euroservice', label: 'АО "ЕвроСервис"' },
-  { value: 'globallogistics', label: 'ООО "Глобал Логистикс"' },
-  { value: 'transsnab', label: 'ЗАО "ТрансСнаб"' },
-];
-
-const declarantsData: SelectOption[] = [
-  { value: 'ivanov', label: 'Иванов Иван Иванович' },
-  { value: 'petrov', label: 'Петров Пётр Петрович' },
-  { value: 'sidorov', label: 'Сидоров Сидор Сидорович' },
-  { value: 'kuznetsova', label: 'Кузнецова Мария Александровна' },
-  { value: 'sokolova', label: 'Соколова Анна Викторовна' },
-];
+// Мок-данные для организаций и декларантов (будут заменены на данные из API)
+// Оставляем пустыми - данные загружаются динамически
 
 const mainDocumentsIMEK: DocumentItem[] = [
   { id: '1', name: 'Декларация на товары', status: 'Не заполнено', statusColor: 'text-accent-red', hasLink: true },
@@ -200,7 +203,8 @@ const goodsDocuments: DocumentItem[] = [
     date: '15 декабря 2018',
     linkedGoods: 3,
     archived: true,
-    presentedWithDT: false
+    presentedWithDT: false,
+    documentModeId: '1002007E',  // Внешнеторговый контракт
   },
   {
     id: '2',
@@ -210,7 +214,8 @@ const goodsDocuments: DocumentItem[] = [
     date: '20 декабря 2018',
     linkedGoods: 3,
     archived: false,
-    presentedWithDT: false
+    presentedWithDT: false,
+    documentModeId: '1002007E',  // Спецификация к контракту
   },
   {
     id: '3',
@@ -220,7 +225,8 @@ const goodsDocuments: DocumentItem[] = [
     date: '27 декабря 2018',
     linkedGoods: 1,
     archived: true,
-    presentedWithDT: false
+    presentedWithDT: false,
+    documentModeId: '1002005E',  // Счет-фактура (инвойс)
   }
 ];
 
@@ -298,6 +304,7 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
   onCancel,
   onSave,
   onOpenDeclarationForm,
+  loadedPackageData,
 }) => {
   const {
     direction: createDirection,
@@ -312,9 +319,68 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
     selectedRegDocs,
   } = state;
 
+  // State для модального окна формы документа
+  const [documentFormModal, setDocumentFormModal] = useState<{
+    open: boolean;
+    documentModeId: string;
+    documentType: string;
+  } | null>(null);
+
+  // ========== Справочники из API ==========
+  const [organizations, setOrganizations] = useState<OrganizationItem[]>([]);
+  const [employees, setEmployees] = useState<EmployeeItem[]>([]);
+  const [isLoadingOrganizations, setIsLoadingOrganizations] = useState(false);
+  const [isLoadingEmployees, setIsLoadingEmployees] = useState(false);
+
+  // Загрузка справочников при монтировании компонента
+  React.useEffect(() => {
+    const loadReferences = async () => {
+      // Загружаем организации
+      setIsLoadingOrganizations(true);
+      try {
+        const orgsResponse = await getOrganizations();
+        setOrganizations(orgsResponse.items);
+      } catch (error) {
+        console.error('Failed to load organizations:', error);
+      } finally {
+        setIsLoadingOrganizations(false);
+      }
+
+      // Загружаем сотрудников
+      setIsLoadingEmployees(true);
+      try {
+        const employeesResponse = await getEmployees();
+        setEmployees(employeesResponse.items);
+      } catch (error) {
+        console.error('Failed to load employees:', error);
+      } finally {
+        setIsLoadingEmployees(false);
+      }
+    };
+
+    loadReferences();
+  }, []);
+
+  // Преобразование данных справочников в формат для Select
+  const organizationsData: SelectOption[] = organizations.map(org => ({
+    value: org.kontur_id,
+    label: org.name ? `${org.name}${org.inn ? ` (ИНН: ${org.inn})` : ''}` : org.kontur_id,
+  }));
+
+  const declarantsData: SelectOption[] = employees.map(emp => ({
+    value: emp.kontur_id,
+    label: [emp.surname, emp.name, emp.patronymic].filter(Boolean).join(' ') || emp.kontur_id,
+  }));
+
   // Хелперы для обновления состояния
   const updateState = (updates: Partial<CreateDeclarationState>) => {
     onStateChange({ ...state, ...updates });
+  };
+
+  // Обработчик сохранения формы документа
+  const handleSaveDocumentForm = (values: Record<string, unknown>) => {
+    console.log('Document form saved:', values);
+    // TODO: Отправка данных в Kontur API
   };
 
   // Получить процедуры в зависимости от типа декларации
@@ -370,8 +436,135 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
 
   // ========== Docflow API State ==========
   const [isCreatingDocflow, setIsCreatingDocflow] = useState(false);
-  const [docflowResponse, setDocflowResponse] = useState<DocflowResponse | null>(null);
+  // Используем loadedPackageData если передано (открытие существующей декларации)
+  // Преобразуем DocflowDetailResponse в совместимый формат при необходимости
+  const convertToDocflowResponse = (data: DocflowDetailResponse): DocflowResponse => ({
+    id: data.kontur_id,  // Используем kontur_id как основной id
+    ww_number: data.ww_number,
+    name: data.name,
+    declaration_type: data.declaration_type,
+    procedure: data.procedure,
+    status: data.status,
+    org_name: data.org_name,
+    inn: data.inn,
+    kpp: data.kpp,
+    gtd_number: data.gtd_number,
+    process_id: data.process_id,
+    created: data.kontur_created,
+    changed: data.kontur_changed,
+    documents: data.documents,
+  });
+
+  const [docflowResponse, setDocflowResponse] = useState<DocflowResponse | null>(
+    loadedPackageData ? convertToDocflowResponse(loadedPackageData) : null
+  );
   const [docflowError, setDocflowError] = useState<string | null>(null);
+
+  // Обратный маппинг Kontur procedure ID -> наш код процедуры
+  const konturIdToProcedure: Record<number, string> = {
+    // ИМ процедуры
+    1: '40',   // Выпуск для внутреннего потребления
+    2: '51',   // Переработка на таможенной территории
+    3: '53',   // Временный ввоз
+    4: '63',   // Реимпорт
+    5: '78',   // Уничтожение (ИМ)
+    6: '41',   // Свободная таможенная зона (ИМ)
+    // ЭК процедуры
+    7: '10',   // Экспорт
+    8: '21',   // Реэкспорт
+    9: '22',   // Временный вывоз
+    10: '23',  // Переработка вне ТТ
+    11: '31',  // Свободная таможенная зона (ЭК)
+  };
+
+  // Обратный маппинг таможенного органа (код -> ключ для select)
+  const customsCodeToKey: Record<number, string> = {
+    10000000: 'central',
+    10129000: 'moscow',
+    10005000: 'sheremetyevo',
+    10002000: 'domodedovo',
+    10001000: 'vnukovo',
+    10216000: 'baltiysk',
+    10210000: 'spb',
+  };
+
+  // Обратный маппинг типа декларации
+  const typeCodeToDirection: Record<string, 'IM' | 'EK' | 'TT'> = {
+    'ИМ': 'IM',
+    'ЭК': 'EK',
+    'ТТ': 'TT',
+  };
+
+  // Обновляем docflowResponse и state когда loadedPackageData изменяется
+  React.useEffect(() => {
+    if (loadedPackageData) {
+      setDocflowResponse(convertToDocflowResponse(loadedPackageData));
+
+      // Обновляем state формы на основе загруженных данных
+      const direction = typeCodeToDirection[loadedPackageData.declaration_type_code] || 'IM';
+      const customsProcedure = konturIdToProcedure[loadedPackageData.procedure] || '';
+      const customsOffice = loadedPackageData.customs_code
+        ? (customsCodeToKey[loadedPackageData.customs_code] || '')
+        : '';
+
+      onStateChange({
+        ...state,
+        direction,
+        customsProcedure,
+        customsOffice,
+        organization: loadedPackageData.org_name || '',
+        declarant: loadedPackageData.employee_id || '',
+      });
+    }
+  }, [loadedPackageData]);
+
+  // Функция для преобразования UUID в формат Microsoft GUID (little-endian для первых 3 групп)
+  const uuidToMsGuid = (uuid: string): string => {
+    const parts = uuid.split('-');
+    if (parts.length !== 5) return uuid.toUpperCase().replace(/-/g, '');
+
+    const reverseBytes = (hex: string) => {
+      const bytes = [];
+      for (let i = 0; i < hex.length; i += 2) {
+        bytes.push(hex.substring(i, i + 2));
+      }
+      return bytes.reverse().join('');
+    };
+
+    return (
+      reverseBytes(parts[0]) +
+      reverseBytes(parts[1]) +
+      reverseBytes(parts[2]) +
+      parts[3] +
+      parts[4]
+    ).toUpperCase();
+  };
+
+  // Формирование ссылки на пакет в Контуре (без processRef - напрямую через docflowId)
+  const getKonturPackageUrl = (docflowId: string): string => {
+    // Попробуем формат через docflowId напрямую
+    return `https://demo-d.kontur.ru/#/ShowPackages/Show?docflowId=${docflowId}`;
+  };
+
+  // Формирование ссылки на декларацию
+  const getKonturDeclarationUrl = (
+    docflowId: string,
+    formId: string,
+    documentId: string,
+    gfv: string
+  ): string => {
+    return `https://demo-d.kontur.ru/#/declaration?gfv=${gfv}&formId=${formId}&showControls=no&docflowId=${docflowId}&documentId=${documentId}`;
+  };
+
+  // Формирование ссылки на другой документ пакета
+  const getKonturDocumentUrl = (
+    docflowId: string,
+    formId: string,
+    documentId: string,
+    gfv: string
+  ): string => {
+    return `https://demo-d.kontur.ru/#/packages/editDocument?gfv=${gfv}&formId=${formId}&showControls=no&docflowId=${docflowId}&documentId=${documentId}`;
+  };
 
   // Маппинг направления на kontur_id type для API
   // Согласно справочнику: Ввоз=1, Вывоз=3, Транзит=24
@@ -412,24 +605,6 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
     'spb': 10210000,
   };
 
-  // Маппинг организаций и сотрудников (мок -> реальные kontur_id)
-  // TODO: Получать из справочников через API
-  const organizationKonturIdMap: Record<string, string> = {
-    'promtorg': '49e99c39-7ba1-48f0-a7be-0fcf92ed5c78',  // Демо-участник ВЭД
-    'techimport': '49e99c39-7ba1-48f0-a7be-0fcf92ed5c78',
-    'euroservice': '49e99c39-7ba1-48f0-a7be-0fcf92ed5c78',
-    'globallogistics': '49e99c39-7ba1-48f0-a7be-0fcf92ed5c78',
-    'transsnab': '49e99c39-7ba1-48f0-a7be-0fcf92ed5c78',
-  };
-
-  const employeeKonturIdMap: Record<string, string> = {
-    'ivanov': '223f7665-52f0-4b00-8fa2-ba8b0d6dd536',     // Иванов Иван Иванович
-    'petrov': '223f7665-52f0-4b00-8fa2-ba8b0d6dd536',
-    'sidorov': '223f7665-52f0-4b00-8fa2-ba8b0d6dd536',
-    'kuznetsova': '54355797-19d4-454c-967c-eef65b030b65', // Ладик Ольга Александровна
-    'sokolova': '54355797-19d4-454c-967c-eef65b030b65',
-  };
-
   // Проверка заполненности всех обязательных полей для активации кнопки
   const isFormValid = (): boolean => {
     // Базовые обязательные поля
@@ -462,12 +637,17 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
     setDocflowResponse(null);
 
     try {
+      // Получаем название организации для передачи в API
+      const selectedOrg = organizations.find(o => o.kontur_id === createOrganization);
+      const orgName = selectedOrg?.name || createOrganization;
+
       const request: CreateDocflowRequest = {
         type: directionToType[createDirection] ?? 1,
         procedure: procedureToKonturId[createCustomsProcedure] ?? 1,
         customs: customsCodeMap[createCustomsOffice] || 10129000,
-        organization_id: organizationKonturIdMap[createOrganization] || createOrganization,
-        employee_id: employeeKonturIdMap[createDeclarant] || createDeclarant,
+        organization_id: createOrganization,  // Теперь это уже kontur_id из справочника
+        employee_id: createDeclarant,  // Теперь это уже kontur_id из справочника
+        name: orgName,  // Передаём название организации как имя пакета
       };
 
       // Добавляем особенности если выбраны
@@ -478,6 +658,8 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
       console.log('Creating docflow with request:', request);
       const response = await createDocflow(request);
       setDocflowResponse(response);
+      console.log('Docflow created:', response);
+      console.log('WW Number:', response.ww_number);
     } catch (error) {
       console.error('Error creating docflow:', error);
       setDocflowError(error instanceof Error ? error.message : 'Произошла ошибка при создании пакета');
@@ -572,7 +754,35 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
       <div className="flex gap-6">
         {/* Левая часть - Создание декларации */}
         <div className={`flex-1 rounded-2xl p-6 border ${theme.card.background} ${theme.card.border}`}>
-          <h2 className={`text-lg font-semibold mb-6 ${theme.text.primary}`}>Создание декларации</h2>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className={`text-lg font-semibold ${theme.text.primary} flex items-center gap-2`}>
+              {docflowResponse ? (
+                <>
+                  <CheckCircle2 size={20} className="text-accent-green" />
+                  Декларация создана
+                </>
+              ) : (
+                'Создание декларации'
+              )}
+            </h2>
+            {docflowResponse && (
+              <div className="flex items-center gap-2">
+                {/* Номер декларации WW (из API) */}
+                <span className={`px-3 py-1 rounded-lg text-sm font-mono ${
+                  isDark ? 'bg-white/10 text-white' : 'bg-gray-100 text-gray-700'
+                }`}>
+                  {docflowResponse.ww_number}
+                </span>
+                {/* ID пакета Kontur */}
+                <span className={`px-3 py-1 rounded-lg text-xs font-mono flex items-center gap-1 ${
+                  isDark ? 'bg-accent-green/20 text-accent-green' : 'bg-green-50 text-green-700'
+                }`}>
+                  <Package size={12} />
+                  {docflowResponse.id.slice(0, 8)}...
+                </span>
+              </div>
+            )}
+          </div>
 
           <div className="space-y-4">
             {/* Тип декларации - кнопки (только отображение, нельзя переключить) */}
@@ -705,12 +915,12 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
               </>
             )}
 
-            {/* Таможенный орган */}
+            {/* Таможенный орган подачи */}
             <div className="grid grid-cols-[240px_1fr] items-center gap-4">
-              <label className={`text-sm ${theme.text.secondary}`}>Таможенный орган</label>
+              <label className={`text-sm ${theme.text.secondary}`}>Таможенный орган подачи</label>
               <Select value={createCustomsOffice} onValueChange={(v) => updateState({ customsOffice: v })}>
                 <SelectTrigger className={selectStyles}>
-                  <SelectValue placeholder="Выберите таможенный орган" />
+                  <SelectValue placeholder="Выберите таможенный орган подачи" />
                 </SelectTrigger>
                 <SelectContent className={selectContentStyles}>
                   {customsOfficesData.map(o => (
@@ -760,43 +970,45 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
               </div>
             </div>
 
-            {/* Кнопка создания пакета декларации */}
-            <div className="grid grid-cols-[240px_1fr] items-center gap-4 pt-4 mt-4 border-t border-white/10">
-              <div></div>
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={handleCreateDocflow}
-                  disabled={!canCreateDocflow || isCreatingDocflow}
-                  className={`
-                    px-6 py-3 rounded-xl text-sm font-medium text-white flex items-center justify-center gap-2 w-full
-                    ${canCreateDocflow
-                      ? (createDirection === 'IM' ? 'bg-accent-green hover:bg-accent-green/90' : createDirection === 'EK' ? 'bg-blue-600 hover:bg-blue-600/90' : 'bg-orange-500 hover:bg-orange-500/90')
-                      : (isDark ? 'bg-white/10 text-gray-500' : 'bg-gray-200 text-gray-400')
-                    }
-                    disabled:opacity-50 disabled:cursor-not-allowed transition-colors
-                  `}
-                >
-                  {isCreatingDocflow ? (
-                    <>
-                      <Loader2 size={18} className="animate-spin" />
-                      Создание пакета...
-                    </>
-                  ) : (
-                    <>
-                      <Send size={18} />
-                      Создать пакет декларации
-                    </>
-                  )}
-                </button>
+            {/* Кнопка создания пакета декларации - скрываем после создания */}
+            {!docflowResponse && (
+              <div className="grid grid-cols-[240px_1fr] items-center gap-4 pt-4 mt-4 border-t border-white/10">
+                <div></div>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={handleCreateDocflow}
+                    disabled={!canCreateDocflow || isCreatingDocflow}
+                    className={`
+                      px-6 py-3 rounded-xl text-sm font-medium text-white flex items-center justify-center gap-2 w-full
+                      ${canCreateDocflow
+                        ? (createDirection === 'IM' ? 'bg-accent-green hover:bg-accent-green/90' : createDirection === 'EK' ? 'bg-blue-600 hover:bg-blue-600/90' : 'bg-orange-500 hover:bg-orange-500/90')
+                        : (isDark ? 'bg-white/10 text-gray-500' : 'bg-gray-200 text-gray-400')
+                      }
+                      disabled:opacity-50 disabled:cursor-not-allowed transition-colors
+                    `}
+                  >
+                    {isCreatingDocflow ? (
+                      <>
+                        <Loader2 size={18} className="animate-spin" />
+                        Создание пакета...
+                      </>
+                    ) : (
+                      <>
+                        <Send size={18} />
+                        Создать пакет декларации
+                      </>
+                    )}
+                  </button>
 
-                {/* Подсказка когда кнопка неактивна */}
-                {!canCreateDocflow && (
-                  <p className={`text-xs ${theme.text.secondary}`}>
-                    Заполните все обязательные поля для создания пакета
-                  </p>
-                )}
+                  {/* Подсказка когда кнопка неактивна */}
+                  {!canCreateDocflow && (
+                    <p className={`text-xs ${theme.text.secondary}`}>
+                      Заполните все обязательные поля для создания пакета
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
@@ -913,31 +1125,91 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
         </div>
       </div>
 
-      {/* DEBUG: API Response (временная плашка) */}
-      {(docflowError || docflowResponse) && (
-        <div className={`rounded-2xl p-6 border-2 border-dashed ${isDark ? 'border-yellow-500/50 bg-yellow-500/5' : 'border-yellow-400 bg-yellow-50'}`}>
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-yellow-500 text-xs font-mono px-2 py-0.5 rounded bg-yellow-500/20">DEBUG</span>
-            <h3 className={`text-sm font-semibold ${theme.text.primary}`}>
-              Ответ API Kontur
-            </h3>
+      {/* Ошибка создания */}
+      {docflowError && (
+        <div className={`rounded-2xl p-4 border ${isDark ? 'bg-red-500/10 border-red-500/30' : 'bg-red-50 border-red-200'}`}>
+          <p className="text-accent-red font-medium text-sm">Ошибка создания пакета</p>
+          <p className={`text-sm mt-1 ${theme.text.secondary}`}>{docflowError}</p>
+        </div>
+      )}
+
+      {/* Документы из Контура (после создания пакета) */}
+      {docflowResponse && docflowResponse.documents && docflowResponse.documents.length > 0 && (
+        <div className={`rounded-2xl p-6 border ${theme.card.background} ${theme.card.border}`}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className={`text-lg font-semibold ${theme.text.primary} flex items-center gap-2`}>
+              <Package size={18} className={getAccentColorClass('text')} />
+              Документы пакета в Контуре
+            </h2>
+            <a
+              href={getKonturPackageUrl(docflowResponse.id)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-2 ${isDark ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+            >
+              <ExternalLink size={14} />
+              Открыть в Контуре
+            </a>
           </div>
 
-          {docflowError && (
-            <div className={`p-4 rounded-lg ${isDark ? 'bg-red-500/10 border border-red-500/30' : 'bg-red-50 border border-red-200'}`}>
-              <p className="text-accent-red font-medium text-sm">Ошибка</p>
-              <p className={`text-sm mt-1 ${theme.text.secondary}`}>{docflowError}</p>
-            </div>
-          )}
+          <div className="-mx-6 -mb-6">
+            {docflowResponse.documents.map((doc, index) => {
+              const isLast = index === docflowResponse.documents!.length - 1;
+              const docUrl = doc.is_core
+                ? getKonturDeclarationUrl(docflowResponse.id, doc.form_id, doc.document_id, doc.gfv || '')
+                : getKonturDocumentUrl(docflowResponse.id, doc.form_id, doc.document_id, doc.gfv || '');
 
-          {docflowResponse && (
-            <div className={`p-4 rounded-lg ${isDark ? 'bg-accent-green/10 border border-accent-green/30' : 'bg-green-50 border border-green-200'}`}>
-              <p className="text-accent-green font-medium text-sm mb-2">Пакет успешно создан!</p>
-              <pre className={`text-xs overflow-auto p-3 rounded font-mono ${isDark ? 'bg-black/50' : 'bg-gray-100'} ${theme.text.primary}`}>
-                {JSON.stringify(docflowResponse, null, 2)}
-              </pre>
-            </div>
-          )}
+              return (
+                <div
+                  key={doc.document_id}
+                  className={`flex items-center justify-between py-3 px-6 ${!isLast ? `border-b ${isDark ? 'border-white/10' : 'border-gray-200'}` : ''} ${isDark ? 'hover:bg-white/[0.03]' : 'hover:bg-[#f4f4f6]'} ${isLast ? 'rounded-b-2xl' : ''}`}
+                >
+                  <div className="flex items-center gap-3">
+                    {doc.is_core && (
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${isDark ? 'bg-accent-green/20 text-accent-green' : 'bg-green-50 text-green-700'}`}>
+                        Основной
+                      </span>
+                    )}
+                    <span className={theme.text.primary}>{doc.name}</span>
+                    <span className={`text-xs font-mono ${theme.text.secondary}`}>gfv: {doc.gfv || '-'}</span>
+                  </div>
+                  <a
+                    href={docUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`px-2 py-1 rounded text-xs flex items-center gap-1 ${getAccentColorClass('text')} hover:underline`}
+                  >
+                    <ExternalLink size={12} />
+                    Открыть
+                  </a>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Технический лог JSON ответа от API */}
+      {docflowResponse && (
+        <div className={`rounded-2xl p-6 border ${theme.card.background} ${theme.card.border}`}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className={`text-lg font-semibold ${theme.text.primary} flex items-center gap-2`}>
+              <FileText size={18} className={theme.text.secondary} />
+              Технический лог (JSON ответ API)
+            </h2>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(JSON.stringify(docflowResponse, null, 2));
+              }}
+              className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-2 ${isDark ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+            >
+              <Copy size={14} />
+              Копировать
+            </button>
+          </div>
+          <pre className={`text-xs font-mono overflow-auto max-h-[400px] p-4 rounded-lg ${isDark ? 'bg-black/30 text-gray-300' : 'bg-gray-100 text-gray-800'}`}>
+            {JSON.stringify(docflowResponse, null, 2)}
+          </pre>
         </div>
       )}
 
@@ -1197,7 +1469,20 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
                         <button className={`p-1.5 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`} title="Просмотр">
                           <FileText size={16} className={theme.text.secondary} />
                         </button>
-                        <button className={`p-1.5 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`} title="Редактировать">
+                        <button
+                          className={`p-1.5 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}
+                          title="Редактировать"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (doc.documentModeId) {
+                              setDocumentFormModal({
+                                open: true,
+                                documentModeId: doc.documentModeId,
+                                documentType: doc.type || 'Документ',
+                              });
+                            }
+                          }}
+                        >
                           <Pencil size={16} className={theme.text.secondary} />
                         </button>
                         <button className={`p-1.5 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`} title="Удалить">
@@ -1425,6 +1710,18 @@ export const CreateDeclarationPage: React.FC<CreateDeclarationPageProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Модальное окно формы документа */}
+      {documentFormModal && (
+        <DocumentFormModal
+          open={documentFormModal.open}
+          onOpenChange={(open) => !open && setDocumentFormModal(null)}
+          documentModeId={documentFormModal.documentModeId}
+          documentType={documentFormModal.documentType}
+          onSave={handleSaveDocumentForm}
+          isDark={isDark}
+        />
+      )}
     </div>
   );
 };

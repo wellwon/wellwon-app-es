@@ -1652,6 +1652,199 @@ COMMENT ON TABLE dc_document_types IS 'Справочник видов доку�
 
 
 -- =============================================================================
+-- DECLARANT MODULE: Contractors (Контрагенты)
+-- =============================================================================
+
+-- Контрагенты (из Kontur API GET /common/v1/options/commonOrgs)
+CREATE TABLE IF NOT EXISTS dc_common_orgs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    contractor_number SERIAL,                     -- Наш внутренний номер контрагента
+    kontur_id VARCHAR(100) NOT NULL UNIQUE,       -- ID из Kontur API
+    org_name VARCHAR(500),                        -- Полное наименование организации
+    short_name VARCHAR(300),                      -- Сокращенное наименование
+    org_type INTEGER DEFAULT 0,                   -- Тип: 0=ЮЛ, 1=ИП, 2=ФЛ
+    inn VARCHAR(12),                              -- ИНН
+    kpp VARCHAR(9),                               -- КПП
+    ogrn VARCHAR(15),                             -- ОГРН/ОГРНИП
+    okato VARCHAR(11),                            -- ОКАТО
+    okpo VARCHAR(10),                             -- ОКПО
+    oktmo VARCHAR(11),                            -- ОКТМО
+    is_foreign BOOLEAN DEFAULT FALSE,             -- Иностранный контрагент
+    legal_address JSONB,                          -- Юридический адрес
+    actual_address JSONB,                         -- Фактический адрес
+    person JSONB,                                 -- Данные физлица (для ИП/ФЛ)
+    identity_card JSONB,                          -- Документ удостоверяющий личность
+    bank_requisites JSONB,                        -- Банковские реквизиты из Kontur (legacy, для миграции)
+    raw_data JSONB,                               -- Полные данные из Kontur API
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dc_common_orgs_contractor_number
+    ON dc_common_orgs(contractor_number);
+CREATE INDEX IF NOT EXISTS idx_dc_common_orgs_kontur_id
+    ON dc_common_orgs(kontur_id);
+CREATE INDEX IF NOT EXISTS idx_dc_common_orgs_inn
+    ON dc_common_orgs(inn) WHERE inn IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_dc_common_orgs_short_name
+    ON dc_common_orgs USING gin(short_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_dc_common_orgs_is_active
+    ON dc_common_orgs(is_active) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_dc_common_orgs_is_foreign
+    ON dc_common_orgs(is_foreign);
+CREATE INDEX IF NOT EXISTS idx_dc_common_orgs_org_type
+    ON dc_common_orgs(org_type);
+
+CREATE TRIGGER set_dc_common_orgs_updated_at
+    BEFORE UPDATE ON dc_common_orgs
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_common_orgs IS 'Справочник контрагентов (из Kontur API /common/v1/options/commonOrgs)';
+COMMENT ON COLUMN dc_common_orgs.contractor_number IS 'Наш внутренний номер контрагента (автоинкремент)';
+COMMENT ON COLUMN dc_common_orgs.org_type IS 'Тип контрагента: 0=ЮЛ, 1=ИП, 2=ФЛ';
+
+
+-- Банковские счета контрагентов (платежные реквизиты)
+CREATE TABLE IF NOT EXISTS dc_contractor_bank_accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    contractor_id UUID NOT NULL REFERENCES dc_common_orgs(id) ON DELETE CASCADE,
+    account_number INTEGER DEFAULT 1,             -- Номер счета у контрагента (1, 2, 3...)
+
+    -- Основные реквизиты
+    bank_name VARCHAR(500),                       -- Название банка
+    bik VARCHAR(9),                               -- БИК (для российских банков)
+    swift VARCHAR(11),                            -- SWIFT (для международных переводов)
+    mfo VARCHAR(20),                              -- МФО (для иностранных банков)
+    bank_okpo VARCHAR(10),                        -- ОКПО банка
+
+    -- Счета
+    corr_account VARCHAR(20),                     -- Корреспондентский счёт
+    current_account VARCHAR(20),                  -- Расчётный счёт
+    currency_account VARCHAR(20),                 -- Валютный счёт
+    transit_account VARCHAR(20),                  -- Транзитный счёт
+    special_transit_account VARCHAR(20),          -- Спец. транзитный счёт
+
+    -- Дополнительно
+    currency_code VARCHAR(3),                     -- Код валюты счета (RUB, USD, EUR, CNY)
+    is_primary BOOLEAN DEFAULT FALSE,             -- Основной счёт
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(contractor_id, account_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_contractor_bank_accounts_contractor
+    ON dc_contractor_bank_accounts(contractor_id);
+CREATE INDEX IF NOT EXISTS idx_dc_contractor_bank_accounts_bik
+    ON dc_contractor_bank_accounts(bik) WHERE bik IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_dc_contractor_bank_accounts_is_primary
+    ON dc_contractor_bank_accounts(is_primary) WHERE is_primary = TRUE;
+CREATE INDEX IF NOT EXISTS idx_dc_contractor_bank_accounts_is_active
+    ON dc_contractor_bank_accounts(is_active) WHERE is_active = TRUE;
+
+CREATE TRIGGER set_dc_contractor_bank_accounts_updated_at
+    BEFORE UPDATE ON dc_contractor_bank_accounts
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_contractor_bank_accounts IS 'Банковские счета контрагентов (платежные реквизиты)';
+COMMENT ON COLUMN dc_contractor_bank_accounts.account_number IS 'Порядковый номер счета у контрагента';
+
+
+-- =============================================================================
+-- DECLARANT MODULE: Organizations and Employees
+-- =============================================================================
+
+-- Свои организации (из Kontur API GET /common/v1/options/organizations)
+CREATE TABLE IF NOT EXISTS dc_organizations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kontur_id VARCHAR(100) NOT NULL UNIQUE,       -- ID из Kontur API
+    name VARCHAR(500),                            -- Название организации
+    inn VARCHAR(12),                              -- ИНН
+    kpp VARCHAR(9),                               -- КПП
+    ogrn VARCHAR(15),                             -- ОГРН
+    address JSONB,                                -- Адрес
+    raw_data JSONB,                               -- Полные данные из Kontur API
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_organizations_kontur_id
+    ON dc_organizations(kontur_id);
+CREATE INDEX IF NOT EXISTS idx_dc_organizations_inn
+    ON dc_organizations(inn) WHERE inn IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_dc_organizations_is_active
+    ON dc_organizations(is_active) WHERE is_active = TRUE;
+
+CREATE TRIGGER set_dc_organizations_updated_at
+    BEFORE UPDATE ON dc_organizations
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_organizations IS 'Справочник своих организаций (из Kontur API /common/v1/options/organizations)';
+
+
+-- Подписанты / Сотрудники (из Kontur API GET /common/v1/options/employees)
+CREATE TABLE IF NOT EXISTS dc_employees (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kontur_id VARCHAR(100) NOT NULL,              -- ID из Kontur API
+    organization_id UUID REFERENCES dc_organizations(id) ON DELETE SET NULL,
+    surname VARCHAR(100),                         -- Фамилия
+    name VARCHAR(100),                            -- Имя
+    patronymic VARCHAR(100),                      -- Отчество
+    phone VARCHAR(50),                            -- Телефон
+    email VARCHAR(200),                           -- Email
+    auth_letter_date VARCHAR(20),                 -- Дата доверенности
+    auth_letter_number VARCHAR(100),              -- Номер доверенности
+    raw_data JSONB,                               -- Полные данные из Kontur API
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(kontur_id, organization_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_employees_kontur_id
+    ON dc_employees(kontur_id);
+CREATE INDEX IF NOT EXISTS idx_dc_employees_organization
+    ON dc_employees(organization_id);
+CREATE INDEX IF NOT EXISTS idx_dc_employees_surname
+    ON dc_employees USING gin(surname gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_dc_employees_is_active
+    ON dc_employees(is_active) WHERE is_active = TRUE;
+
+CREATE TRIGGER set_dc_employees_updated_at
+    BEFORE UPDATE ON dc_employees
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_employees IS 'Справочник подписантов/сотрудников (из Kontur API /common/v1/options/employees)';
+
+
+-- Особенности декларирования (из Kontur API GET /common/v1/options/declarationSingularities)
+CREATE TABLE IF NOT EXISTS dc_declaration_features (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kontur_id INTEGER,                            -- ID из Kontur API
+    code VARCHAR(10) NOT NULL UNIQUE,             -- Код особенности
+    name VARCHAR(500) NOT NULL,                   -- Название
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_declaration_features_code
+    ON dc_declaration_features(code);
+CREATE INDEX IF NOT EXISTS idx_dc_declaration_features_is_active
+    ON dc_declaration_features(is_active) WHERE is_active = TRUE;
+
+CREATE TRIGGER set_dc_declaration_features_updated_at
+    BEFORE UPDATE ON dc_declaration_features
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+COMMENT ON TABLE dc_declaration_features IS 'Справочник особенностей декларирования (из Kontur API)';
+
+
+-- =============================================================================
 -- INITIAL DATA
 -- =============================================================================
 

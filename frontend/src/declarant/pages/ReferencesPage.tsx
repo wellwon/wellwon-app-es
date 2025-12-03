@@ -987,6 +987,11 @@ interface SimpleDetailProps {
   isDark: boolean;
 }
 
+interface DetailProps {
+  isDark: boolean;
+  onSync?: () => void;
+}
+
 const CustomsDetail: React.FC<SimpleDetailProps> = ({ isDark }) => {
   const [items, setItems] = useState<CustomsOffice[]>([]);
   const [total, setTotal] = useState(0);
@@ -3056,11 +3061,13 @@ const ReferencesContent: React.FC<ReferencesContentProps> = ({
     text: {
       primary: 'text-white',
       secondary: 'text-gray-400',
+      muted: 'text-gray-500',
     }
   } : {
     text: {
       primary: 'text-gray-900',
       secondary: 'text-gray-600',
+      muted: 'text-gray-400',
     }
   };
 

@@ -116,6 +116,8 @@ class FormFieldConfigRequest(BaseModel):
     """Field configuration from Form Builder"""
     id: str
     schemaPath: str
+    elementType: Optional[str] = None  # Тип элемента формы: subheading, section-divider
+    fieldType: Optional[str] = None    # Тип поля: text, number, date, datetime, select, checkbox, textarea
     customLabel: Optional[str] = None
     customPlaceholder: Optional[str] = None
     customHint: Optional[str] = None
@@ -125,7 +127,7 @@ class FormFieldConfigRequest(BaseModel):
     readonly: Optional[bool] = None
     defaultValue: Optional[Any] = None
     required: Optional[bool] = None
-    isSelect: Optional[bool] = None  # Флаг: рендерить как select
+    isSelect: Optional[bool] = None  # Флаг: рендерить как select (deprecated, use fieldType)
     selectOptions: Optional[List[SelectOptionRequest]] = None  # Опции для select
 
 

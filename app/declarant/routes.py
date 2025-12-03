@@ -9,6 +9,7 @@ import logging
 from typing import List, Optional
 from datetime import datetime
 
+import os
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 
@@ -30,6 +31,8 @@ from app.declarant.references_service import (
     SyncResult,
 )
 from app.declarant.kontur_client import KonturClientError, get_kontur_client
+from app.declarant.dadata_client import DaDataClientError, get_dadata_client, CompanyInfo
+from app.declarant.docflow_repository import DocflowRepository, DocflowReadModel
 
 log = logging.getLogger("wellwon.declarant.routes")
 
@@ -315,8 +318,15 @@ class CommonOrgResponse(BaseModel):
     inn: Optional[str] = None
     kpp: Optional[str] = None
     ogrn: Optional[str] = None
+    okato: Optional[str] = None
+    okpo: Optional[str] = None
+    oktmo: Optional[str] = None
     is_foreign: bool = False
     legal_address: Optional[dict] = None
+    actual_address: Optional[dict] = None
+    person: Optional[dict] = None
+    identity_card: Optional[dict] = None
+    bank_requisites: Optional[list] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -1627,8 +1637,15 @@ async def get_common_orgs(include_inactive: bool = False):
                     inn=item.inn,
                     kpp=item.kpp,
                     ogrn=item.ogrn,
+                    okato=item.okato,
+                    okpo=item.okpo,
+                    oktmo=item.oktmo,
                     is_foreign=item.is_foreign,
                     legal_address=item.legal_address,
+                    actual_address=item.actual_address,
+                    person=item.person,
+                    identity_card=item.identity_card,
+                    bank_requisites=item.bank_requisites,
                     is_active=item.is_active,
                     created_at=item.created_at,
                     updated_at=item.updated_at
@@ -1719,8 +1736,15 @@ async def search_common_orgs(q: str, limit: int = 50):
                     inn=item.inn,
                     kpp=item.kpp,
                     ogrn=item.ogrn,
+                    okato=item.okato,
+                    okpo=item.okpo,
+                    oktmo=item.oktmo,
                     is_foreign=item.is_foreign,
                     legal_address=item.legal_address,
+                    actual_address=item.actual_address,
+                    person=item.person,
+                    identity_card=item.identity_card,
+                    bank_requisites=item.bank_requisites,
                     is_active=item.is_active,
                     created_at=item.created_at,
                     updated_at=item.updated_at
@@ -1735,6 +1759,79 @@ async def search_common_orgs(q: str, limit: int = 50):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error searching: {str(e)}"
+        )
+
+
+class DeleteContractorRequest(BaseModel):
+    """Request for deleting a contractor with password confirmation"""
+    password: str
+
+
+@router.delete("/common-orgs/{contractor_id}")
+async def delete_common_org(contractor_id: str, request: DeleteContractorRequest):
+    """
+    Delete a counterparty (контрагент) with password confirmation
+
+    Args:
+        contractor_id: UUID of the contractor to delete
+        password: Admin password for confirmation
+
+    Returns:
+        Success message
+    """
+    from app.infra.persistence import pg_client
+
+    # Get password from environment
+    admin_password = os.getenv("ADMIN_DELETE_PASSWORD", "")
+
+    if not admin_password:
+        log.error("ADMIN_DELETE_PASSWORD not configured in environment")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Удаление не настроено"
+        )
+
+    if request.password != admin_password:
+        log.warning(f"Invalid delete password attempt for contractor {contractor_id}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Неверный пароль"
+        )
+
+    try:
+        # Check if contractor exists
+        existing = await pg_client.fetchrow(
+            "SELECT id, short_name, org_name FROM dc_common_orgs WHERE id = $1",
+            contractor_id
+        )
+
+        if not existing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Контрагент не найден"
+            )
+
+        # Delete contractor (CASCADE will delete bank accounts)
+        await pg_client.execute(
+            "DELETE FROM dc_common_orgs WHERE id = $1",
+            contractor_id
+        )
+
+        name = existing["short_name"] or existing["org_name"] or "Контрагент"
+        log.info(f"Deleted contractor {contractor_id}: {name}")
+
+        return {
+            "success": True,
+            "message": f"Контрагент '{name}' удален"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error deleting contractor {contractor_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка удаления: {str(e)}"
         )
 
 
@@ -1828,6 +1925,66 @@ async def sync_organizations():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Ошибка синхронизации: {str(e)}"
+        )
+
+
+@router.delete("/organizations/{organization_id}")
+async def delete_organization(organization_id: str, request: DeleteContractorRequest):
+    """
+    Delete an organization by ID (with password confirmation)
+
+    Requires admin password for confirmation.
+    """
+    admin_password = os.getenv("ADMIN_DELETE_PASSWORD", "")
+
+    if not admin_password:
+        log.error("ADMIN_DELETE_PASSWORD not configured")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Удаление не настроено"
+        )
+
+    if request.password != admin_password:
+        log.warning(f"Invalid delete password attempt for organization {organization_id}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Неверный пароль"
+        )
+
+    try:
+        # Check if organization exists
+        existing = await pg_client.fetchrow(
+            "SELECT id, name FROM dc_organizations WHERE id = $1",
+            organization_id
+        )
+
+        if not existing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Организация не найдена"
+            )
+
+        # Delete organization
+        await pg_client.execute(
+            "DELETE FROM dc_organizations WHERE id = $1",
+            organization_id
+        )
+
+        name = existing["name"] or "Организация"
+        log.info(f"Deleted organization {organization_id}: {name}")
+
+        return {
+            "success": True,
+            "message": f"Организация '{name}' удалена"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error deleting organization {organization_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка удаления: {str(e)}"
         )
 
 
@@ -1997,36 +2154,50 @@ class CreateDocflowRequest(BaseModel):
     name: Optional[str] = None  # Optional docflow name
 
 
+class DocflowDocumentItem(BaseModel):
+    """Document item in docflow"""
+    document_id: str
+    form_id: str
+    name: str
+    is_core: bool = False
+    gfv: Optional[str] = None
+    doc_number: Optional[str] = None
+
+
 class DocflowResponse(BaseModel):
     """Response model for docflow"""
-    id: str
-    version: int
-    state: int
-    type: int
-    procedure: int
-    singularity: Optional[int] = None
-    customs: int
+    id: str  # Kontur docflow ID
+    ww_number: str  # Our WW-XXXXXX number
     name: Optional[str] = None
-    organization_id: str
-    employee_id: str
-    create_date: Optional[datetime] = None
-    update_date: Optional[datetime] = None
+    declaration_type: int
+    procedure: int
+    status: int
+    org_name: Optional[str] = None
+    inn: Optional[str] = None
+    kpp: Optional[str] = None
+    gtd_number: Optional[str] = None
+    process_id: Optional[str] = None
+    created: Optional[str] = None
+    changed: Optional[str] = None
+    # Documents
+    documents: List[DocflowDocumentItem] = []
 
 
 @docflows_router.post("", response_model=DocflowResponse)
 async def create_docflow(request: CreateDocflowRequest):
     """
-    Create a new docflow (пакет декларации) in Kontur API
+    Create a new docflow (пакет декларации) in Kontur API and save to database
 
     Args:
         request: Docflow creation data
 
     Returns:
-        Created docflow data
+        Created docflow data with documents
     """
     try:
         log.info(f"Creating docflow: type={request.type}, procedure={request.procedure}")
 
+        # 1. Create docflow in Kontur
         client = get_kontur_client()
         result = await client.create_docflow(
             declaration_type=request.type,
@@ -2038,19 +2209,102 @@ async def create_docflow(request: CreateDocflowRequest):
             name=request.name
         )
 
+        kontur_id = result.get("id", "")
+        log.info(f"Docflow created in Kontur: {kontur_id}")
+
+        # 2. Get documents from Kontur
+        documents_data = []
+        try:
+            documents_raw = await client.get_docflow_documents(kontur_id)
+            for doc in documents_raw:
+                doc_item = {
+                    "document_id": doc.get("documentId", ""),
+                    "form_id": doc.get("formId", ""),
+                    "name": doc.get("name", ""),
+                    "is_core": doc.get("isCore", False),
+                    "gfv": doc.get("gfv"),
+                    "doc_number": doc.get("docNumber"),
+                    "grafa44_code": doc.get("grafa44Code"),
+                    "document_mode_id": doc.get("documentModeId"),
+                }
+                documents_data.append(doc_item)
+        except Exception as e:
+            log.warning(f"Failed to get documents for docflow {kontur_id}: {e}")
+
+        # 3. Generate WW number (with type prefix) and save to database
+        declaration_type_value = result.get("declarationType", request.type)
+        ww_number = DocflowRepository.generate_ww_number(declaration_type_value)
+
+        try:
+            # Ensure table exists
+            await DocflowRepository.ensure_table()
+
+            # Parse timestamps
+            kontur_created = None
+            kontur_changed = None
+            if result.get("created"):
+                try:
+                    from dateutil.parser import parse
+                    kontur_created = parse(result.get("created"))
+                except Exception:
+                    pass
+            if result.get("changed"):
+                try:
+                    from dateutil.parser import parse
+                    kontur_changed = parse(result.get("changed"))
+                except Exception:
+                    pass
+
+            await DocflowRepository.insert(
+                kontur_id=kontur_id,
+                ww_number=ww_number,
+                declaration_type=result.get("declarationType", request.type),
+                procedure=result.get("procedure", request.procedure),
+                status=result.get("status", 0),
+                name=result.get("name"),
+                status_text=result.get("statusText"),
+                customs_code=request.customs,
+                organization_id=request.organization_id,
+                organization_name=result.get("orgName"),
+                inn=result.get("inn"),
+                kpp=result.get("kpp"),
+                employee_id=request.employee_id,
+                gtd_number=result.get("gtdNumber"),
+                process_id=result.get("processId"),
+                documents=documents_data,
+                kontur_created=kontur_created,
+                kontur_changed=kontur_changed,
+            )
+            log.info(f"Docflow saved to database: {ww_number}")
+        except Exception as e:
+            log.error(f"Failed to save docflow to database: {e}")
+            # Continue - we still return the Kontur data
+
         return DocflowResponse(
-            id=result.get("id", ""),
-            version=result.get("version", 1),
-            state=result.get("state", 0),
-            type=result.get("type", request.type),
-            procedure=result.get("procedure", request.procedure),
-            singularity=result.get("singularity"),
-            customs=result.get("customs", request.customs),
+            id=kontur_id,
+            ww_number=ww_number,
             name=result.get("name"),
-            organization_id=result.get("organizationId", request.organization_id),
-            employee_id=result.get("employeeId", request.employee_id),
-            create_date=result.get("createDate"),
-            update_date=result.get("updateDate")
+            declaration_type=result.get("declarationType", request.type),
+            procedure=result.get("procedure", request.procedure),
+            status=result.get("status", 0),
+            org_name=result.get("orgName"),
+            inn=result.get("inn"),
+            kpp=result.get("kpp"),
+            gtd_number=result.get("gtdNumber"),
+            process_id=result.get("processId"),
+            created=result.get("created"),
+            changed=result.get("changed"),
+            documents=[
+                DocflowDocumentItem(
+                    document_id=d["document_id"],
+                    form_id=d["form_id"],
+                    name=d["name"],
+                    is_core=d["is_core"],
+                    gfv=d.get("gfv"),
+                    doc_number=d.get("doc_number"),
+                )
+                for d in documents_data
+            ],
         )
 
     except KonturClientError as e:
@@ -2064,6 +2318,69 @@ async def create_docflow(request: CreateDocflowRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Ошибка создания пакета: {str(e)}"
+        )
+
+
+class DocflowDocumentResponse(BaseModel):
+    """Response model for a document in docflow"""
+    document_id: str
+    form_id: str
+    name: str
+    state: int
+    is_core: bool
+    gfv: Optional[str] = None
+
+
+class DocflowDocumentsResponse(BaseModel):
+    """Response model for list of documents in docflow"""
+    documents: List[DocflowDocumentResponse]
+
+
+@docflows_router.get("/{docflow_id}/documents", response_model=DocflowDocumentsResponse)
+async def get_docflow_documents(docflow_id: str):
+    """
+    Get list of documents in a docflow
+
+    Returns list of documents including the core declaration document
+    with all IDs needed to construct Kontur UI links on frontend.
+
+    Args:
+        docflow_id: UUID of the docflow
+
+    Returns:
+        List of documents with documentId, formId, gfv for frontend link construction
+    """
+    try:
+        log.info(f"Fetching documents for docflow: {docflow_id}")
+
+        client = get_kontur_client()
+        documents = await client.get_docflow_documents(docflow_id)
+
+        return DocflowDocumentsResponse(
+            documents=[
+                DocflowDocumentResponse(
+                    document_id=doc.get("documentId", ""),
+                    form_id=doc.get("formId", ""),
+                    name=doc.get("name", ""),
+                    state=doc.get("state", 0),
+                    is_core=doc.get("isCore", False),
+                    gfv=doc.get("gfv")
+                )
+                for doc in documents
+            ]
+        )
+
+    except KonturClientError as e:
+        log.error(f"Kontur API error fetching docflow documents: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Ошибка Kontur API: {str(e)}"
+        )
+    except Exception as e:
+        log.error(f"Error fetching docflow documents: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка получения документов: {str(e)}"
         )
 
 
@@ -2100,4 +2417,431 @@ async def get_form_json(docflow_id: str, form_id: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Ошибка получения JSON: {str(e)}"
+        )
+
+
+# =============================================================================
+# Docflows List/Search Endpoints
+# =============================================================================
+
+class DocflowListItem(BaseModel):
+    """Docflow item in list response"""
+    id: str  # Our internal UUID
+    kontur_id: str  # Kontur's UUID
+    ww_number: str  # Our WW-XXXXXX number
+    name: Optional[str] = None
+    declaration_type: int
+    declaration_type_code: str  # ИМ/ЭК/ТТ
+    procedure: int
+    status: int
+    status_text: Optional[str] = None
+    org_name: Optional[str] = None
+    inn: Optional[str] = None
+    gtd_number: Optional[str] = None
+    documents_count: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class DocflowListResponse(BaseModel):
+    """Response model for docflows list"""
+    items: List[DocflowListItem]
+    total: int
+    skip: int
+    take: int
+
+
+class DocflowDetailResponse(BaseModel):
+    """Detailed docflow response"""
+    id: str  # Our internal UUID
+    kontur_id: str
+    ww_number: str
+    name: Optional[str] = None
+    declaration_type: int
+    declaration_type_code: str
+    procedure: int
+    status: int
+    status_text: Optional[str] = None
+    customs_code: Optional[int] = None
+    org_name: Optional[str] = None
+    inn: Optional[str] = None
+    kpp: Optional[str] = None
+    employee_id: Optional[str] = None
+    gtd_number: Optional[str] = None
+    process_id: Optional[str] = None
+    documents: List[DocflowDocumentItem] = []
+    kontur_created: Optional[datetime] = None
+    kontur_changed: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+def _model_to_list_item(model: DocflowReadModel) -> DocflowListItem:
+    """Convert DocflowReadModel to list item"""
+    return DocflowListItem(
+        id=str(model.id),
+        kontur_id=model.kontur_id,
+        ww_number=model.ww_number,
+        name=model.name,
+        declaration_type=model.declaration_type,
+        declaration_type_code=model.declaration_type_code,
+        procedure=model.procedure,
+        status=model.status,
+        status_text=model.status_text,
+        org_name=model.organization_name,
+        inn=model.inn,
+        gtd_number=model.gtd_number,
+        documents_count=len(model.documents),
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+    )
+
+
+def _model_to_detail(model: DocflowReadModel) -> DocflowDetailResponse:
+    """Convert DocflowReadModel to detail response"""
+    return DocflowDetailResponse(
+        id=str(model.id),
+        kontur_id=model.kontur_id,
+        ww_number=model.ww_number,
+        name=model.name,
+        declaration_type=model.declaration_type,
+        declaration_type_code=model.declaration_type_code,
+        procedure=model.procedure,
+        status=model.status,
+        status_text=model.status_text,
+        customs_code=model.customs_code,
+        org_name=model.organization_name,
+        inn=model.inn,
+        kpp=model.kpp,
+        employee_id=model.employee_id,
+        gtd_number=model.gtd_number,
+        process_id=model.process_id,
+        documents=[
+            DocflowDocumentItem(
+                document_id=doc.document_id,
+                form_id=doc.form_id,
+                name=doc.name,
+                is_core=doc.is_core,
+                gfv=doc.gfv,
+                doc_number=doc.doc_number,
+            )
+            for doc in model.documents
+        ],
+        kontur_created=model.kontur_created,
+        kontur_changed=model.kontur_changed,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+    )
+
+
+@docflows_router.get("", response_model=DocflowListResponse)
+async def list_docflows(
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    take: int = Query(50, ge=1, le=100, description="Number of records to return"),
+    declaration_type: Optional[int] = Query(None, description="Filter by declaration type (0=ИМ, 1=ЭК, etc.)"),
+    status: Optional[int] = Query(None, description="Filter by status"),
+    search: Optional[str] = Query(None, description="Search by WW number, name, or GTD number"),
+):
+    """
+    List docflows from database with filtering and pagination
+
+    Args:
+        skip: Number of records to skip (default: 0)
+        take: Number of records to return (default: 50, max: 100)
+        declaration_type: Filter by declaration type
+        status: Filter by status
+        search: Search by WW number, name, or GTD number
+
+    Returns:
+        Paginated list of docflows
+    """
+    try:
+        # Ensure table exists
+        await DocflowRepository.ensure_table()
+
+        items = await DocflowRepository.list_docflows(
+            skip=skip,
+            take=take,
+            declaration_type=declaration_type,
+            status=status,
+            search=search,
+        )
+
+        total = await DocflowRepository.count_docflows(
+            declaration_type=declaration_type,
+            status=status,
+        )
+
+        return DocflowListResponse(
+            items=[_model_to_list_item(item) for item in items],
+            total=total,
+            skip=skip,
+            take=take,
+        )
+
+    except Exception as e:
+        log.error(f"Error listing docflows: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка получения списка пакетов: {str(e)}"
+        )
+
+
+@docflows_router.get("/by-ww/{ww_number}", response_model=DocflowDetailResponse)
+async def get_docflow_by_ww_number(ww_number: str):
+    """
+    Get docflow by WW number (e.g., WW-123456)
+
+    Args:
+        ww_number: Our internal WW number
+
+    Returns:
+        Detailed docflow data
+    """
+    try:
+        await DocflowRepository.ensure_table()
+
+        model = await DocflowRepository.get_by_ww_number(ww_number)
+        if not model:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Пакет {ww_number} не найден"
+            )
+
+        return _model_to_detail(model)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error getting docflow by WW number: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка получения пакета: {str(e)}"
+        )
+
+
+@docflows_router.get("/by-kontur/{kontur_id}", response_model=DocflowDetailResponse)
+async def get_docflow_by_kontur_id(kontur_id: str):
+    """
+    Get docflow by Kontur ID
+
+    Args:
+        kontur_id: Kontur's UUID
+
+    Returns:
+        Detailed docflow data
+    """
+    try:
+        await DocflowRepository.ensure_table()
+
+        model = await DocflowRepository.get_by_kontur_id(kontur_id)
+        if not model:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Пакет с Kontur ID {kontur_id} не найден"
+            )
+
+        return _model_to_detail(model)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error getting docflow by Kontur ID: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка получения пакета: {str(e)}"
+        )
+
+
+@docflows_router.delete("/{kontur_id}")
+async def delete_docflow(kontur_id: str):
+    """
+    Delete docflow from database by Kontur ID
+
+    Note: This only deletes from our database, not from Kontur.
+
+    Args:
+        kontur_id: Kontur's UUID
+
+    Returns:
+        Success message
+    """
+    try:
+        await DocflowRepository.ensure_table()
+
+        deleted = await DocflowRepository.delete(kontur_id)
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Пакет с Kontur ID {kontur_id} не найден"
+            )
+
+        return {"success": True, "message": f"Пакет {kontur_id} удален из базы данных"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error deleting docflow: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка удаления пакета: {str(e)}"
+        )
+
+
+# =============================================================================
+# DaData API - Company Search by INN
+# =============================================================================
+
+class DaDataCompanyResponse(BaseModel):
+    """Company information from DaData"""
+    inn: str
+    kpp: Optional[str] = None
+    ogrn: Optional[str] = None
+    okpo: Optional[str] = None
+    oktmo: Optional[str] = None
+    okato: Optional[str] = None
+    name_full: Optional[str] = None
+    name_short: Optional[str] = None
+    opf_short: Optional[str] = None
+    opf_full: Optional[str] = None
+    type: str = "LEGAL"
+    address: Optional[str] = None
+    address_data: Optional[dict] = None
+    management_name: Optional[str] = None
+    management_post: Optional[str] = None
+    state_status: Optional[str] = None
+    state_registration_date: Optional[str | int] = None  # Can be timestamp or string
+
+
+class DaDataSearchResponse(BaseModel):
+    """DaData search response"""
+    success: bool
+    data: Optional[DaDataCompanyResponse] = None
+    message: Optional[str] = None
+
+
+class DaDataSuggestResponse(BaseModel):
+    """DaData suggestions response"""
+    success: bool
+    suggestions: List[DaDataCompanyResponse] = []
+    message: Optional[str] = None
+
+
+@router.get("/dadata/find-by-inn/{inn}", response_model=DaDataSearchResponse)
+async def find_company_by_inn(inn: str):
+    """
+    Find company by INN using DaData API
+
+    Args:
+        inn: Company INN (10 digits for legal entities, 12 for individuals)
+
+    Returns:
+        Company information if found
+    """
+    try:
+        client = get_dadata_client()
+        result = await client.find_by_inn(inn)
+
+        if not result:
+            return DaDataSearchResponse(
+                success=False,
+                data=None,
+                message=f"Компания с ИНН {inn} не найдена"
+            )
+
+        return DaDataSearchResponse(
+            success=True,
+            data=DaDataCompanyResponse(
+                inn=result.inn,
+                kpp=result.kpp,
+                ogrn=result.ogrn,
+                okpo=result.okpo,
+                oktmo=result.oktmo,
+                okato=result.okato,
+                name_full=result.name_full,
+                name_short=result.name_short,
+                opf_short=result.opf_short,
+                opf_full=result.opf_full,
+                type=result.type,
+                address=result.address,
+                address_data=result.address_data,
+                management_name=result.management_name,
+                management_post=result.management_post,
+                state_status=result.state_status,
+                state_registration_date=result.state_registration_date,
+            ),
+            message=None
+        )
+
+    except DaDataClientError as e:
+        log.error(f"DaData API error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        log.error(f"Error searching company by INN: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка поиска компании: {str(e)}"
+        )
+
+
+@router.get("/dadata/suggest", response_model=DaDataSuggestResponse)
+async def suggest_companies(
+    query: str = Query(..., min_length=2, description="Search query (company name or INN)"),
+    count: int = Query(10, ge=1, le=20, description="Maximum number of suggestions")
+):
+    """
+    Suggest companies by name or INN using DaData API (autocomplete)
+
+    Args:
+        query: Search query (company name or partial INN)
+        count: Maximum number of suggestions (default 10)
+
+    Returns:
+        List of company suggestions
+    """
+    try:
+        client = get_dadata_client()
+        results = await client.suggest_company(query, count)
+
+        return DaDataSuggestResponse(
+            success=True,
+            suggestions=[
+                DaDataCompanyResponse(
+                    inn=r.inn,
+                    kpp=r.kpp,
+                    ogrn=r.ogrn,
+                    okpo=r.okpo,
+                    oktmo=r.oktmo,
+                    okato=r.okato,
+                    name_full=r.name_full,
+                    name_short=r.name_short,
+                    opf_short=r.opf_short,
+                    opf_full=r.opf_full,
+                    type=r.type,
+                    address=r.address,
+                    address_data=r.address_data,
+                    management_name=r.management_name,
+                    management_post=r.management_post,
+                    state_status=r.state_status,
+                    state_registration_date=r.state_registration_date,
+                )
+                for r in results
+            ],
+            message=None
+        )
+
+    except DaDataClientError as e:
+        log.error(f"DaData API error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        log.error(f"Error suggesting companies: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка поиска компаний: {str(e)}"
         )

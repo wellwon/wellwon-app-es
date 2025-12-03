@@ -606,8 +606,15 @@ class CommonOrg:
     inn: Optional[str]
     kpp: Optional[str]
     ogrn: Optional[str]
+    okato: Optional[str]
+    okpo: Optional[str]
+    oktmo: Optional[str]
     is_foreign: bool
     legal_address: Optional[dict]
+    actual_address: Optional[dict]
+    person: Optional[dict]  # Данные физлица (для ИП/ФЛ)
+    identity_card: Optional[dict]  # Документ удостоверяющий личность
+    bank_requisites: Optional[list]  # Банковские реквизиты (массив)
     raw_data: Optional[dict]
     is_active: bool
     created_at: datetime
@@ -665,8 +672,10 @@ class CommonOrgsService:
         """Get all counterparties from database"""
         query = f"""
             SELECT id, kontur_id, org_name, short_name, org_type,
-                   inn, kpp, ogrn, is_foreign, legal_address, raw_data,
-                   is_active, created_at, updated_at
+                   inn, kpp, ogrn, okato, okpo, oktmo,
+                   is_foreign, legal_address, actual_address,
+                   person, identity_card, bank_requisites,
+                   raw_data, is_active, created_at, updated_at
             FROM {cls.TABLE_NAME}
         """
         if not include_inactive:
@@ -685,8 +694,15 @@ class CommonOrgsService:
                 inn=row["inn"],
                 kpp=row["kpp"],
                 ogrn=row["ogrn"],
+                okato=row["okato"],
+                okpo=row["okpo"],
+                oktmo=row["oktmo"],
                 is_foreign=row["is_foreign"] or False,
                 legal_address=_parse_json_field(row["legal_address"]),
+                actual_address=_parse_json_field(row["actual_address"]),
+                person=_parse_json_field(row["person"]),
+                identity_card=_parse_json_field(row["identity_card"]),
+                bank_requisites=_parse_json_field(row["bank_requisites"]),
                 raw_data=_parse_json_field(row["raw_data"]),
                 is_active=row["is_active"],
                 created_at=row["created_at"],
@@ -717,8 +733,10 @@ class CommonOrgsService:
         rows = await pg_client.fetch(
             f"""
             SELECT id, kontur_id, org_name, short_name, org_type,
-                   inn, kpp, ogrn, is_foreign, legal_address, raw_data,
-                   is_active, created_at, updated_at
+                   inn, kpp, ogrn, okato, okpo, oktmo,
+                   is_foreign, legal_address, actual_address,
+                   person, identity_card, bank_requisites,
+                   raw_data, is_active, created_at, updated_at
             FROM {cls.TABLE_NAME}
             WHERE is_active = TRUE
               AND (org_name ILIKE $1 OR short_name ILIKE $1 OR inn ILIKE $1)
@@ -739,8 +757,15 @@ class CommonOrgsService:
                 inn=row["inn"],
                 kpp=row["kpp"],
                 ogrn=row["ogrn"],
+                okato=row["okato"],
+                okpo=row["okpo"],
+                oktmo=row["oktmo"],
                 is_foreign=row["is_foreign"] or False,
                 legal_address=_parse_json_field(row["legal_address"]),
+                actual_address=_parse_json_field(row["actual_address"]),
+                person=_parse_json_field(row["person"]),
+                identity_card=_parse_json_field(row["identity_card"]),
+                bank_requisites=_parse_json_field(row["bank_requisites"]),
                 raw_data=_parse_json_field(row["raw_data"]),
                 is_active=row["is_active"],
                 created_at=row["created_at"],
@@ -784,16 +809,25 @@ class CommonOrgsService:
                     inn = item.get("inn")
                     kpp = item.get("kpp")
                     ogrn = item.get("ogrn")
+                    okato = item.get("okato")
+                    okpo = item.get("okpo")
+                    oktmo = item.get("oktmo")
                     is_foreign = item.get("isForeign", False)
                     legal_address = item.get("legalAddress")
+                    actual_address = item.get("actualAddress")
+                    person = item.get("person")
+                    identity_card = item.get("identityCard")
+                    bank_requisites = item.get("bankRequisites")
+                    contacts = item.get("contacts")
 
                     # Upsert
                     result = await pg_client.execute(
                         f"""
                         INSERT INTO {cls.TABLE_NAME}
                             (kontur_id, org_name, short_name, org_type, inn, kpp, ogrn,
-                             is_foreign, legal_address, raw_data, is_active, created_at, updated_at)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE, $11, $12)
+                             okato, okpo, oktmo, is_foreign, legal_address, actual_address,
+                             person, identity_card, bank_requisites, raw_data, is_active, created_at, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, TRUE, $18, $19)
                         ON CONFLICT (kontur_id)
                         DO UPDATE SET
                             org_name = EXCLUDED.org_name,
@@ -802,11 +836,18 @@ class CommonOrgsService:
                             inn = EXCLUDED.inn,
                             kpp = EXCLUDED.kpp,
                             ogrn = EXCLUDED.ogrn,
+                            okato = EXCLUDED.okato,
+                            okpo = EXCLUDED.okpo,
+                            oktmo = EXCLUDED.oktmo,
                             is_foreign = EXCLUDED.is_foreign,
                             legal_address = EXCLUDED.legal_address,
+                            actual_address = EXCLUDED.actual_address,
+                            person = EXCLUDED.person,
+                            identity_card = EXCLUDED.identity_card,
+                            bank_requisites = EXCLUDED.bank_requisites,
                             raw_data = EXCLUDED.raw_data,
                             is_active = TRUE,
-                            updated_at = $12
+                            updated_at = $19
                         """,
                         kontur_id,
                         org_name,
@@ -815,8 +856,15 @@ class CommonOrgsService:
                         inn,
                         kpp,
                         ogrn,
+                        okato,
+                        okpo,
+                        oktmo,
                         is_foreign,
                         json.dumps(legal_address) if legal_address else None,
+                        json.dumps(actual_address) if actual_address else None,
+                        json.dumps(person) if person else None,
+                        json.dumps(identity_card) if identity_card else None,
+                        json.dumps(bank_requisites) if bank_requisites else None,
                         json.dumps(item),
                         sync_time,
                         sync_time

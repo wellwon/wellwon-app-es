@@ -61,8 +61,10 @@ const AuthPage: React.FC = () => {
   useEffect(() => {
     console.log('[AuthPage] useEffect: user=', user, 'loading=', loading, 'registrationStep=', registrationStep);
     if (user && !loading && registrationStep !== 'success' && registrationStep !== 'completing') {
-      // Проверяем redirect параметр
-      const redirectTo = searchParams.get('redirect') || '/platform';
+      // Проверяем redirect параметр (игнорируем корневой путь и пути к /platform)
+      const redirectParam = searchParams.get('redirect');
+      const isValidRedirect = redirectParam && redirectParam !== '/' && !redirectParam.startsWith('/platform');
+      const redirectTo = isValidRedirect ? redirectParam : '/platform-pro/declarant';
       console.log('[AuthPage] useEffect: conditions met, navigating to', redirectTo);
       navigate(redirectTo);
     }
@@ -339,10 +341,10 @@ const AuthPage: React.FC = () => {
           </div>
           
           <div className="flex justify-center">
-            <GlassButton 
-              variant="secondary" 
-              size="lg" 
-              onClick={() => navigate('/platform')}
+            <GlassButton
+              variant="secondary"
+              size="lg"
+              onClick={() => navigate('/platform-pro/declarant')}
               className="min-w-[200px]"
             >
               Перейти к платформе

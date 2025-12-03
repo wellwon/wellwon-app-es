@@ -47,7 +47,9 @@ import {
   ArrowUpFromLine,
   ArrowDownToLine,
   Pencil,
-  Database
+  Database,
+  Building2,
+  Loader2
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
@@ -55,9 +57,22 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { CreateDeclarationPage } from './CreateDeclarationPage';
 import { DeclarationFormPage } from './DeclarationFormPage';
 import ReferencesPage from './ReferencesPage';
+import ContractorsPage from './ContractorsPage';
+import OrganizationsPage from './OrganizationsPage';
+import { listDocflows, deleteDocflow, getDocflowByKonturId, type DocflowListItem, type DocflowDetailResponse } from '../api';
 
 // =============================================================================
 // Mock Data
@@ -249,9 +264,14 @@ const SidebarMock = ({
     profile: 'bg-white/5 hover:bg-white/10'
   };
 
+  // Основное (0) | Справочники (1-3) | Управление (4+)
   const sections = [
     { id: 'dashboard', label: 'Декларации AI', icon: ScanText },
+    // Справочники
     { id: 'logistics', label: 'Документы', icon: FileText },
+    { id: 'contractors', label: 'Контрагенты', icon: Users },
+    { id: 'organizations', label: 'Организации', icon: Building2 },
+    // Управление
     { id: 'finance', label: 'Финансы', icon: DollarSign },
     { id: 'analytics', label: 'Аналитика', icon: LineChart },
     { id: 'settings', label: 'Настройки', icon: Settings },
@@ -285,6 +305,7 @@ const SidebarMock = ({
 
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto py-4 px-3">
+        {/* Основное - только Декларации AI */}
         <div className="space-y-3">
           {!collapsed && (
             <div className={`text-xs font-semibold uppercase tracking-wider px-3 ${theme.text.secondary}`}>
@@ -292,7 +313,7 @@ const SidebarMock = ({
             </div>
           )}
           <div className={collapsed ? 'space-y-2' : 'space-y-1'}>
-            {sections.slice(0, 2).map((section) => {
+            {sections.slice(0, 1).map((section) => {
               const Icon = section.icon;
 
               if (collapsed) {
@@ -336,6 +357,59 @@ const SidebarMock = ({
           </div>
         </div>
 
+        {/* Справочники - Документы, Контрагенты, Организации */}
+        <div className="space-y-3 mt-6">
+          {!collapsed && (
+            <div className={`text-xs font-semibold uppercase tracking-wider px-3 ${theme.text.secondary}`}>
+              Справочники
+            </div>
+          )}
+          <div className={collapsed ? 'space-y-2' : 'space-y-1'}>
+            {sections.slice(1, 4).map((section) => {
+              const Icon = section.icon;
+
+              if (collapsed) {
+                return (
+                  <div
+                    key={section.id}
+                    className="group relative flex justify-center cursor-pointer"
+                    title={section.label}
+                    onClick={() => setActiveSection(section.id)}
+                  >
+                    <div className={`
+                      w-12 h-12 flex items-center justify-center rounded-xl border
+                      ${section.active
+                        ? 'bg-accent-red/20 border-accent-red/30'
+                        : 'border-white/10 hover:bg-medium-gray/80 hover:border-accent-red/50'
+                      }
+                    `}>
+                      <Icon size={20} className={section.active ? 'text-accent-red' : 'text-gray-400 group-hover:text-accent-red'} />
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={section.id}
+                  onClick={() => setActiveSection(section.id)}
+                  className={`
+                    flex items-center px-3 py-2.5 rounded-xl cursor-pointer
+                    ${section.active
+                      ? `${theme.button.active} border shadow-sm`
+                      : theme.button.default
+                    }
+                  `}
+                >
+                  <Icon size={20} className="mr-3" />
+                  <span className="font-medium text-sm">{section.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Управление - Финансы, Аналитика, Настройки, Команда */}
         <div className="space-y-3 mt-6">
           {!collapsed && (
             <div className={`text-xs font-semibold uppercase tracking-wider px-3 ${theme.text.secondary}`}>
@@ -343,7 +417,7 @@ const SidebarMock = ({
             </div>
           )}
           <div className={collapsed ? 'space-y-2' : 'space-y-1'}>
-            {sections.slice(2).map((section) => {
+            {sections.slice(4).map((section) => {
               const Icon = section.icon;
 
               if (collapsed) {
@@ -456,6 +530,8 @@ const HeaderBarMock = ({
   const sectionLabels: Record<string, string> = {
     dashboard: 'Декларации AI',
     logistics: 'Документы',
+    organizations: 'Организации',
+    contractors: 'Контрагенты',
     finance: 'Финансы',
     analytics: 'Аналитика',
     settings: 'Настройки',
@@ -611,7 +687,7 @@ const DeclarantContent: React.FC = () => {
   const [activeReferenceId, setActiveReferenceId] = useState<string | null>(null);
   const [rowsPerPage, setRowsPerPage] = useState(() => {
     const saved = localStorage.getItem('declarant_rowsPerPage');
-    return saved ? Number(saved) : 10;
+    return saved ? Number(saved) : 20;
   });
   const [currentPage, setCurrentPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
@@ -636,7 +712,78 @@ const DeclarantContent: React.FC = () => {
   const [documentFilter, setDocumentFilter] = useState('all');
   const [documentDateFilter, setDocumentDateFilter] = useState('all');
 
+  // Данные из API (декларации из нашей БД)
+  const [dbDocflows, setDbDocflows] = useState<DocflowListItem[]>([]);
+  const [isLoadingDocflows, setIsLoadingDocflows] = useState(false);
+
   const toggleTheme = contextToggleTheme;
+
+  // Функция загрузки деклараций из базы данных
+  const loadDocflows = async () => {
+    setIsLoadingDocflows(true);
+    try {
+      const response = await listDocflows({ take: 100 });
+      setDbDocflows(response.items);
+    } catch (error) {
+      console.error('Failed to load docflows from database:', error);
+    } finally {
+      setIsLoadingDocflows(false);
+    }
+  };
+
+  // Загрузка деклараций при монтировании и при возврате на dashboard
+  useEffect(() => {
+    if (activeSection === 'dashboard' && declarantViewMode === 'list') {
+      loadDocflows();
+    }
+  }, [activeSection, declarantViewMode]);
+
+  // State для удаления
+  const [deletingDocflowId, setDeletingDocflowId] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [docflowToDelete, setDocflowToDelete] = useState<{ konturId: string; number: string } | null>(null);
+
+  // Открыть диалог подтверждения удаления
+  const openDeleteDialog = (konturId: string, number: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Предотвращаем переход в декларацию при клике на удаление
+    setDocflowToDelete({ konturId, number });
+    setDeleteDialogOpen(true);
+  };
+
+  // Функция удаления декларации (вызывается из диалога)
+  const handleConfirmDelete = async () => {
+    if (!docflowToDelete) return;
+
+    setDeletingDocflowId(docflowToDelete.konturId);
+    setDeleteDialogOpen(false);
+
+    try {
+      await deleteDocflow(docflowToDelete.konturId);
+      // Обновляем список после удаления
+      setDbDocflows(prev => prev.filter(d => d.kontur_id !== docflowToDelete.konturId));
+    } catch (error) {
+      console.error('Failed to delete docflow:', error);
+      // TODO: Показать toast с ошибкой вместо alert
+    } finally {
+      setDeletingDocflowId(null);
+      setDocflowToDelete(null);
+    }
+  };
+
+  // State для хранения загруженных данных пакета при открытии
+  const [loadedPackageData, setLoadedPackageData] = useState<DocflowDetailResponse | null>(null);
+
+  // Функция загрузки данных пакета для отображения
+  const loadPackageData = async (konturId: string) => {
+    try {
+      const data = await getDocflowByKonturId(konturId);
+      setLoadedPackageData(data);
+      return data;
+    } catch (error) {
+      console.error('Failed to load package data:', error);
+      return null;
+    }
+  };
 
   // Handle URL query parameters for navigation from Form Builder
   useEffect(() => {
@@ -700,6 +847,9 @@ const DeclarantContent: React.FC = () => {
 
     setNavigationHistory(newHistory);
 
+    // Очищаем загруженные данные пакета при возврате
+    setLoadedPackageData(null);
+
     // Restore previous state
     if (previous.section === 'references') {
       setActiveSection('references');
@@ -713,6 +863,8 @@ const DeclarantContent: React.FC = () => {
       } else if (previous.viewMode === 'declaration') {
         navigateToDeclaration();
       } else {
+        // Возврат на список - очищаем createState
+        setCreateState(initialCreateState);
         navigateToDeclarantList();
       }
     } else {
@@ -741,8 +893,65 @@ const DeclarantContent: React.FC = () => {
     setActiveReferenceId(referenceId);
   };
 
+  // Преобразование данных из API в формат таблицы
+  const dbBatchesFormatted = dbDocflows.map(docflow => {
+    // Определяем тип декларации из declaration_type_code (ИМ/ЭК/ТТ)
+    // declaration_type_code приходит с бэкенда как строка "ИМ", "ЭК", "ТТ"
+    const typeCodeMap: Record<string, 'IM' | 'EK' | 'TT'> = {
+      'ИМ': 'IM',
+      'ЭК': 'EK',
+      'ТТ': 'TT'
+    };
+    const type = typeCodeMap[docflow.declaration_type_code] || 'IM';
+
+    // Определяем статус и иконку
+    // Статус "Черновик" пока декларация не завершена (status < 100)
+    let icon = Clock;
+    let iconColor = 'text-amber-500';
+    let statusText = 'Черновик';
+
+    if (docflow.status >= 100) {
+      // Завершена
+      icon = CheckCircle;
+      iconColor = 'text-accent-green';
+      statusText = 'Завершено';
+    }
+
+    // Форматирование даты
+    const formatDate = (dateStr?: string) => {
+      if (!dateStr) return '-';
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('ru-RU', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    };
+
+    return {
+      id: docflow.id,
+      number: docflow.ww_number,
+      type,
+      typeCode: String(docflow.procedure),
+      status: docflow.status >= 100 ? 'completed' : 'processing',
+      docs: `${docflow.documents_count}/${docflow.documents_count}`,
+      extracts: docflow.documents_count,
+      date: formatDate(docflow.created_at),
+      icon,
+      iconColor,
+      statusText,
+      isFromDb: true, // Маркер что запись из базы
+      konturId: docflow.kontur_id,
+    };
+  });
+
+  // Используем только реальные данные из БД (без моков)
+  const allBatches = dbBatchesFormatted;
+
   // Фильтрация данных
-  const filteredBatches = mockBatches.filter(batch => {
+  const filteredBatches = allBatches.filter(batch => {
     // Фильтр по типу декларации (быстрые фильтры)
     if (quickFilter !== 'all' && batch.type !== quickFilter) {
       return false;
@@ -790,7 +999,7 @@ const DeclarantContent: React.FC = () => {
     },
     table: {
       header: 'border-white/10',
-      row: 'divide-white/10 hover:bg-white/5',
+      row: 'divide-white/10 hover:bg-white/[0.03]',
       border: 'border-white/10'
     }
   } : {
@@ -809,7 +1018,7 @@ const DeclarantContent: React.FC = () => {
     },
     table: {
       header: 'border-gray-300',
-      row: 'divide-gray-300 hover:bg-gray-50',
+      row: 'divide-gray-300 hover:bg-[#f4f4f6]',
       border: 'border-gray-300'
     }
   };
@@ -862,17 +1071,20 @@ const DeclarantContent: React.FC = () => {
           onCancel={() => {
             navigateToDeclarantList();
             setCreateState(initialCreateState);
+            setLoadedPackageData(null);  // Очищаем загруженные данные
           }}
           onSave={() => {
             // Здесь будет логика сохранения
             console.log('Сохранение декларации:', effectiveState);
             navigateToDeclarantList();
             setCreateState(initialCreateState);
+            setLoadedPackageData(null);  // Очищаем загруженные данные
           }}
           onOpenDeclarationForm={() => {
             // Открываем форму декларации
             navigateToDeclaration();
           }}
+          loadedPackageData={loadedPackageData}
         />
       );
     }
@@ -952,7 +1164,7 @@ const DeclarantContent: React.FC = () => {
                 <div>
                   <p className={`text-sm ${theme.text.secondary}`}>Всего пакетов</p>
                   <p className={`text-2xl font-bold font-mono ${theme.text.primary}`}>
-                    {mockStats.total_batches}
+                    {dbDocflows.length}
                   </p>
                 </div>
               </div>
@@ -966,7 +1178,7 @@ const DeclarantContent: React.FC = () => {
                 <div>
                   <p className={`text-sm ${theme.text.secondary}`}>Завершено</p>
                   <p className={`text-2xl font-bold font-mono ${theme.text.primary}`}>
-                    {mockStats.completed_batches}
+                    {dbDocflows.filter(d => d.status >= 100).length}
                   </p>
                 </div>
               </div>
@@ -980,7 +1192,7 @@ const DeclarantContent: React.FC = () => {
                 <div>
                   <p className={`text-sm ${theme.text.secondary}`}>В обработке</p>
                   <p className={`text-2xl font-bold font-mono ${theme.text.primary}`}>
-                    {mockStats.processing_batches}
+                    {dbDocflows.filter(d => d.status === 0).length}
                   </p>
                 </div>
               </div>
@@ -994,7 +1206,7 @@ const DeclarantContent: React.FC = () => {
                 <div>
                   <p className={`text-sm ${theme.text.secondary}`}>Документов</p>
                   <p className={`text-2xl font-bold font-mono ${theme.text.primary}`}>
-                    {mockStats.total_documents}
+                    {dbDocflows.reduce((sum, d) => sum + d.documents_count, 0)}
                   </p>
                 </div>
               </div>
@@ -1323,11 +1535,11 @@ const DeclarantContent: React.FC = () => {
 
           {/* Таблица деклараций */}
           <div className={`rounded-2xl p-6 border ${theme.card.background} ${theme.card.border}`}>
-            <div className="overflow-x-auto">
+            <div className="-mx-6 -mb-6 overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className={`border-b ${theme.table.border}`}>
-                    <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
+                    <th className={`text-left py-3 pl-6 pr-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
                       Номер
                     </th>
                     <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
@@ -1345,7 +1557,7 @@ const DeclarantContent: React.FC = () => {
                     <th className={`text-left py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
                       Создан
                     </th>
-                    <th className={`text-right py-3 px-4 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
+                    <th className={`text-right py-3 pl-4 pr-6 text-xs font-medium uppercase tracking-wider ${theme.text.secondary}`}>
                       Действия
                     </th>
                   </tr>
@@ -1356,9 +1568,28 @@ const DeclarantContent: React.FC = () => {
                       return (
                         <tr
                           key={batch.id}
-                          className={`cursor-pointer ${theme.table.row.split(' ').slice(1).join(' ')}`}
+                          onClick={() => {
+                            // Navigate into the declaration package
+                            const packageIdToNavigate = batch.konturId || batch.id;
+
+                            // Сначала устанавливаем direction из данных таблицы (уже есть в batch.type)
+                            setCreateState(prev => ({
+                              ...prev,
+                              direction: batch.type as 'IM' | 'EK' | 'TT',
+                            }));
+
+                            // Переходим сразу, не дожидаясь загрузки
+                            pushToHistory({ section: 'dashboard', viewMode: 'package', packageId: packageIdToNavigate });
+                            navigateToPackage(packageIdToNavigate);
+
+                            // Асинхронно загружаем полные данные пакета (для документов и т.д.)
+                            if (batch.konturId) {
+                              loadPackageData(batch.konturId);
+                            }
+                          }}
+                          className={`cursor-pointer ${isDark ? 'hover:bg-white/[0.03]' : 'hover:bg-[#f4f4f6]'}`}
                         >
-                          <td className="py-3 px-4">
+                          <td className="py-3 pl-6 pr-4">
                             <span className={`font-mono text-sm ${theme.text.primary}`}>
                               {batch.number}
                             </span>
@@ -1397,7 +1628,7 @@ const DeclarantContent: React.FC = () => {
                               {batch.date}
                             </span>
                           </td>
-                          <td className="py-3 pl-4 pr-0 text-right">
+                          <td className="py-3 pl-4 pr-6 text-right">
                             <div className="flex items-center gap-2 justify-end">
                               {/* Кнопка копирования - glass стиль */}
                               <button
@@ -1413,10 +1644,16 @@ const DeclarantContent: React.FC = () => {
 
                               {/* Кнопка удаления - accent-red стиль */}
                               <button
-                                className="h-8 px-3 rounded-lg flex items-center justify-center bg-accent-red/10 text-accent-red border border-accent-red/20 hover:bg-accent-red/20 hover:border-accent-red/25"
+                                onClick={(e) => batch.konturId && openDeleteDialog(batch.konturId, batch.number, e)}
+                                disabled={deletingDocflowId === batch.konturId}
+                                className={`h-8 px-3 rounded-lg flex items-center justify-center bg-accent-red/10 text-accent-red border border-accent-red/20 hover:bg-accent-red/20 hover:border-accent-red/25 ${deletingDocflowId === batch.konturId ? 'opacity-50 cursor-wait' : ''}`}
                                 aria-label="Удалить"
                               >
-                                <Trash2 className="h-4 w-4" />
+                                {deletingDocflowId === batch.konturId ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" />
+                                )}
                               </button>
                             </div>
                           </td>
@@ -1425,9 +1662,8 @@ const DeclarantContent: React.FC = () => {
                     })}
                   </tbody>
                 </table>
-            </div>
 
-            <div className={`flex items-center justify-between pt-4 border-t ${theme.table.border}`}>
+              <div className={`flex items-center justify-between py-4 px-6 border-t ${theme.table.border}`}>
               {/* Выбор количества строк */}
               <div className="flex items-center gap-2">
                 <Select value={String(rowsPerPage)} onValueChange={handleRowsPerPageChange}>
@@ -1519,24 +1755,10 @@ const DeclarantContent: React.FC = () => {
                   <ChevronRight size={16} />
                 </button>
               </div>
-            </div>
-          </div>
-
-          {/* Информационный блок */}
-          <div className={`rounded-2xl p-4 border ${isDark ? 'bg-red-900/20 border-red-800/30' : 'bg-red-50 border-red-200'}`}>
-            <div className="flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-accent-red mt-0.5 flex-shrink-0" />
-              <div>
-                <p className={`text-sm font-medium mb-1 ${theme.text.primary}`}>
-                  Тестовая страница дизайн-системы
-                </p>
-                <p className={`text-sm ${theme.text.secondary}`}>
-                  Эта страница создана для визуальной демонстрации компонентов UI Kit и дизайн-системы WellWon.
-                  Все данные являются статическими моками и не связаны с реальными декларациями.
-                </p>
               </div>
             </div>
           </div>
+
         </>
       );
     }
@@ -1548,6 +1770,24 @@ const DeclarantContent: React.FC = () => {
           isDark={isDark}
           activeReferenceId={activeReferenceId}
           onReferenceNavigate={handleReferenceNavigate}
+        />
+      );
+    }
+
+    // Организации
+    if (section === 'organizations') {
+      return (
+        <OrganizationsPage
+          isDark={isDark}
+        />
+      );
+    }
+
+    // Контрагенты
+    if (section === 'contractors') {
+      return (
+        <ContractorsPage
+          isDark={isDark}
         />
       );
     }
@@ -1605,6 +1845,34 @@ const DeclarantContent: React.FC = () => {
           {renderContent(activeSection)}
         </div>
       </div>
+
+      {/* Диалог подтверждения удаления */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent className={`${isDark ? 'bg-[#232328] border-white/10' : 'bg-white border-gray-200'}`}>
+          <AlertDialogHeader>
+            <AlertDialogTitle className={isDark ? 'text-white' : 'text-gray-900'}>
+              Удалить декларацию?
+            </AlertDialogTitle>
+            <AlertDialogDescription className={isDark ? 'text-gray-400' : 'text-gray-500'}>
+              Декларация <span className="font-mono font-medium">{docflowToDelete?.number}</span> будет удалена из базы данных.
+              Это действие нельзя отменить.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              className={`${isDark ? 'bg-white/10 text-white border-white/10 hover:bg-white/20 hover:text-white' : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'}`}
+            >
+              Отмена
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-accent-red text-white hover:bg-accent-red/90 border-0"
+            >
+              Удалить
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

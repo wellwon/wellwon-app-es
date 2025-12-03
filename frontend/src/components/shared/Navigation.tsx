@@ -89,6 +89,12 @@ const Navigation = () => {
           </div>
 
           <div className="hidden md:flex items-center space-x-4">
+            <UTMLink
+              to="/platform-pro/declarant"
+              className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+            >
+              Декларант
+            </UTMLink>
             {user && !loading && (
               <UTMLink
                 to="/platform"
@@ -189,6 +195,13 @@ const Navigation = () => {
               )}
               
               <div className="space-y-3 mt-4">
+                <UTMLink
+                  to="/platform-pro/declarant"
+                  className="block bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg font-medium transition-colors text-center"
+                  onClick={handleLinkClick}
+                >
+                  Декларант
+                </UTMLink>
                 {user && !loading ? (
                   <div className="text-center space-y-3">
                     <UTMLink

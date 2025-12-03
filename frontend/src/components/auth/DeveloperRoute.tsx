@@ -19,8 +19,8 @@ const DeveloperRoute: React.FC<DeveloperRouteProps> = ({ children }) => {
   const { toast } = useToast();
   const [hasShownToast, setHasShownToast] = React.useState(false);
 
-  // Show loading state while checking authentication
-  if (loading) {
+  // Show loading state while checking authentication or waiting for profile
+  if (loading || (user && !profile)) {
     return (
       <div className="flex items-center justify-center h-screen bg-dark-gray">
         <div className="text-white">Загрузка...</div>
@@ -34,8 +34,8 @@ const DeveloperRoute: React.FC<DeveloperRouteProps> = ({ children }) => {
     return <Navigate to={`/auth?mode=login&redirect=${redirectUrl}`} replace />;
   }
 
-  // Redirect to platform if not a developer
-  if (!profile?.is_developer) {
+  // Redirect to platform if not a developer (profile is guaranteed to exist here)
+  if (!profile.is_developer) {
     // Show toast only once
     if (!hasShownToast) {
       toast({

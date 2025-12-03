@@ -598,6 +598,12 @@ class FormDefinitionsService:
                     "width": f.width,
                     "order": f.order,
                 }
+                # Element type (subheading, section-divider)
+                if hasattr(f, 'elementType') and f.elementType:
+                    field_dict["elementType"] = f.elementType
+                # Field type (text, number, date, select, etc.)
+                if hasattr(f, 'fieldType') and f.fieldType:
+                    field_dict["fieldType"] = f.fieldType
                 if f.customLabel:
                     field_dict["customLabel"] = f.customLabel
                 if f.customPlaceholder:

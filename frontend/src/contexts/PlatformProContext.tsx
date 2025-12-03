@@ -103,8 +103,10 @@ export const PlatformProProvider: React.FC<PlatformProProviderProps> = ({ childr
   const declarationId = urlDeclarationId || null;
 
   // Redirect если не developer (дополнительная проверка на уровне Context)
+  // Примечание: основная проверка происходит в DeveloperRoute, это резервная
   useEffect(() => {
-    if (profile && !profile.is_developer) {
+    // Не редиректим пока profile не загружен (null/undefined)
+    if (profile !== null && profile !== undefined && !profile.is_developer) {
       navigate('/platform', { replace: true });
     }
   }, [profile, navigate]);

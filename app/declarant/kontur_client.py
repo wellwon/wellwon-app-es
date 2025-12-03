@@ -136,9 +136,9 @@ class KonturClient:
                 headers=self._get_headers()
             )
 
-            if response.status_code == 401:
-                # Try to re-authenticate
-                log.warning("Session expired, re-authenticating...")
+            # 401 or 403 may indicate expired session
+            if response.status_code in (401, 403):
+                log.warning(f"Session expired ({response.status_code}), re-authenticating...")
                 await self.authenticate()
                 response = await client.get(
                     url,
@@ -174,7 +174,9 @@ class KonturClient:
                 headers=self._get_headers()
             )
 
-            if response.status_code == 401:
+            # 401 or 403 may indicate expired session
+            if response.status_code in (401, 403):
+                log.warning(f"Session expired ({response.status_code}), re-authenticating...")
                 await self.authenticate()
                 response = await client.get(
                     url,
@@ -216,8 +218,9 @@ class KonturClient:
                 headers=self._get_headers()
             )
 
-            if response.status_code == 401:
-                log.warning("Session expired, re-authenticating...")
+            # 401 or 403 may indicate expired session
+            if response.status_code in (401, 403):
+                log.warning(f"Session expired ({response.status_code}), re-authenticating...")
                 await self.authenticate()
                 response = await client.get(
                     url,
@@ -259,8 +262,9 @@ class KonturClient:
                 headers=self._get_headers()
             )
 
-            if response.status_code == 401:
-                log.warning("Session expired, re-authenticating...")
+            # 401 or 403 may indicate expired session
+            if response.status_code in (401, 403):
+                log.warning(f"Session expired ({response.status_code}), re-authenticating...")
                 await self.authenticate()
                 response = await client.get(
                     url,
@@ -305,8 +309,9 @@ class KonturClient:
                 headers=self._get_headers()
             )
 
-            if response.status_code == 401:
-                log.warning("Session expired, re-authenticating...")
+            # 401 or 403 may indicate expired session
+            if response.status_code in (401, 403):
+                log.warning(f"Session expired ({response.status_code}), re-authenticating...")
                 await self.authenticate()
                 response = await client.get(
                     url,
@@ -353,8 +358,9 @@ class KonturClient:
                 headers=self._get_headers()
             )
 
-            if response.status_code == 401:
-                log.warning("Session expired, re-authenticating...")
+            # 401 or 403 may indicate expired session
+            if response.status_code in (401, 403):
+                log.warning(f"Session expired ({response.status_code}), re-authenticating...")
                 await self.authenticate()
                 response = await client.get(
                     url,
@@ -405,8 +411,9 @@ class KonturClient:
                 headers=self._get_headers()
             )
 
-            if response.status_code == 401:
-                log.warning("Session expired, re-authenticating...")
+            # 401 or 403 may indicate expired session
+            if response.status_code in (401, 403):
+                log.warning(f"Session expired ({response.status_code}), re-authenticating...")
                 await self.authenticate()
                 response = await client.get(
                     url,
@@ -457,8 +464,9 @@ class KonturClient:
                 headers=self._get_headers()
             )
 
-            if response.status_code == 401:
-                log.warning("Session expired, re-authenticating...")
+            # 401 or 403 may indicate expired session
+            if response.status_code in (401, 403):
+                log.warning(f"Session expired ({response.status_code}), re-authenticating...")
                 await self.authenticate()
                 response = await client.get(
                     url,
@@ -514,8 +522,9 @@ class KonturClient:
                 headers=self._get_headers()
             )
 
-            if response.status_code == 401:
-                log.warning("Session expired, re-authenticating...")
+            # 401 or 403 may indicate expired session
+            if response.status_code in (401, 403):
+                log.warning(f"Session expired ({response.status_code}), re-authenticating...")
                 await self.authenticate()
                 response = await client.get(
                     url,
@@ -622,6 +631,52 @@ class KonturClient:
 
             data = response.json()
             log.info(f"Successfully created docflow with ID: {data.get('id')}")
+
+            return data
+
+    async def get_docflow_documents(self, docflow_id: str) -> list[dict]:
+        """
+        Get list of documents in a docflow
+
+        Endpoint: GET /common/v1/docflows/{docflowId}/documents
+
+        Args:
+            docflow_id: UUID of the docflow
+
+        Returns:
+            list[dict]: List of documents with documentId, formId, name, gfv, etc.
+
+        Example response:
+            [
+                {
+                    "documentId": "uuid",
+                    "formId": "uuid",
+                    "name": "Декларация на товары",
+                    "state": 0,
+                    "isCore": true,
+                    "gfv": "1800332",
+                    ...
+                }
+            ]
+        """
+        await self.ensure_authenticated()
+
+        url = f"{self.base_url}/common/v1/docflows/{docflow_id}/documents"
+
+        log.info(f"Fetching documents for docflow: {docflow_id}")
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(url, headers=self._get_headers())
+
+            if response.status_code in (401, 403):
+                log.warning(f"Session expired ({response.status_code}), re-authenticating...")
+                await self.authenticate()
+                response = await client.get(url, headers=self._get_headers())
+
+            response.raise_for_status()
+
+            data = response.json()
+            log.info(f"Fetched {len(data)} documents for docflow {docflow_id}")
 
             return data
 
