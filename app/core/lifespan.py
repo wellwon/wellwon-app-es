@@ -26,6 +26,7 @@ from app.core.startup.services import (
 )
 from app.core.startup.distributed import initialize_distributed_features, register_sync_projections_phase
 from app.core.startup.cqrs import initialize_cqrs_and_handlers
+from app.core.startup.adapters import initialize_adapters
 from app.core.shutdown import shutdown_all_services
 
 logger = logging.getLogger("wellwon.lifespan")
@@ -70,32 +71,36 @@ async def lifespan(app_instance: FastAPI):
        app_instance.state.query_bus = QueryBus(enable_caching=True)
        logger.info("CQRS buses initialized")
 
-       # Phase 5: Core Services
-       logger.info("Phase 5: Initializing core services...")
+       # Phase 5: External Adapters
+       logger.info("Phase 5: Initializing external adapters...")
+       await initialize_adapters(app_instance)
+
+       # Phase 6: Core Services
+       logger.info("Phase 6: Initializing core services...")
        await initialize_services(app_instance)
 
-       # Phase 6: CQRS Handlers and Saga Service
-       logger.info("Phase 6: Initializing CQRS handlers and saga service...")
+       # Phase 7: CQRS Handlers and Saga Service
+       logger.info("Phase 7: Initializing CQRS handlers and saga service...")
        await initialize_cqrs_and_handlers(app_instance)
 
-       # Phase 7: Optional Services (Projection Rebuilder)
-       logger.info("Phase 7: Initializing optional services...")
+       # Phase 8: Optional Services (Projection Rebuilder)
+       logger.info("Phase 8: Initializing optional services...")
        await initialize_optional_services(app_instance)
 
-       # Phase 8: Register Synchronous Projections
-       logger.info("Phase 8: Registering synchronous projections...")
+       # Phase 9: Register Synchronous Projections
+       logger.info("Phase 9: Registering synchronous projections...")
        await register_sync_projections_phase(app_instance)
 
-       # Phase 9: Database Schemas
-       logger.info("Phase 9: Running database schemas...")
+       # Phase 10: Database Schemas
+       logger.info("Phase 10: Running database schemas...")
        await run_database_schemas()
 
-       # Phase 10: Telegram Polling (after CQRS handlers are registered)
-       logger.info("Phase 10: Starting Telegram polling...")
+       # Phase 11: Telegram Polling (after CQRS handlers are registered)
+       logger.info("Phase 11: Starting Telegram polling...")
        await start_telegram_polling(app_instance)
 
-       # Phase 11: Background Tasks
-       logger.info("Phase 11: Starting background tasks...")
+       # Phase 12: Background Tasks
+       logger.info("Phase 12: Starting background tasks...")
        await start_background_tasks(app_instance)
 
        # Startup complete

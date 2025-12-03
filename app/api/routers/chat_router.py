@@ -146,16 +146,23 @@ class MarkAsReadRequest(BaseModel):
         if isinstance(self.last_read_message_id, int):
             return self.last_read_message_id
 
-        value = self.last_read_message_id
+        value = str(self.last_read_message_id).strip()
 
         # Check if it looks like a UUID (36 chars with dashes)
         if len(value) == 36 and value.count('-') == 4:
-            # Convert UUID to deterministic Snowflake ID (same formula as projector)
-            message_uuid = uuid.UUID(value)
-            return int.from_bytes(message_uuid.bytes[:8], byteorder='big') & 0x7FFFFFFFFFFFFFFF
+            try:
+                # Convert UUID to deterministic Snowflake ID (same formula as projector)
+                message_uuid = uuid.UUID(value)
+                return int.from_bytes(message_uuid.bytes[:8], byteorder='big') & 0x7FFFFFFFFFFFFFFF
+            except ValueError:
+                # Not a valid UUID despite looking like one
+                pass
 
-        # Otherwise treat as numeric Snowflake ID string
-        return int(value)
+        # Try to parse as numeric Snowflake ID string
+        try:
+            return int(value)
+        except ValueError:
+            raise ValueError(f"Invalid message ID: {value!r} - must be UUID or Snowflake ID")
 
 
 class DeleteChatRequest(BaseModel):

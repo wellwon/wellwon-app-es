@@ -225,6 +225,9 @@ class SmartRichHandler(RichHandler if RICH_AVAILABLE else logging.StreamHandler)
         # Enhanced message patterns for collection
         self.collection_patterns = {
             # Persistence Layer (PostgreSQL, Redis, MinIO, ScyllaDB infrastructure)
+            # NOTE: More specific patterns MUST come before generic patterns
+            r'Reference PostgreSQL pool initialized': ('database', 'WellWon Reference DB'),
+            r'Main PostgreSQL pool initialized': ('database', 'WellWon DB'),
             r'PostgreSQL.*pool.*initialized': ('persistence', 'PostgreSQL'),
             r'Redis.*initialized': ('persistence', 'Redis'),
             r'MinIO.*storage.*initialized': ('persistence', 'MinIO Storage'),
@@ -232,11 +235,23 @@ class SmartRichHandler(RichHandler if RICH_AVAILABLE else logging.StreamHandler)
             r'Global ScyllaDB client initialized': ('persistence', 'ScyllaDB'),
 
             # Databases (Application-specific databases)
+            r'Reference database schema checked.applied': ('database', 'WellWon Reference DB'),
+            r'Main database schema checked.applied': ('database', 'WellWon DB'),
+            r'Reference database.*checked|applied': ('database', 'WellWon Reference DB'),
             r'Main database.*checked|applied': ('database', 'WellWon DB'),
+            r'Schema from.*wellwon_reference\.sql.*applied.*REFERENCE': ('database', 'WellWon Reference DB'),
             r'Virtual Broker.*database.*initialized': ('database', 'Virtual Broker DB'),
             r'Virtual Broker.*PostgreSQL.*initialized': ('database', 'Virtual Broker DB'),
             r'Virtual Broker schema.*': ('database', 'Virtual Broker DB'),
             r'Virtual broker PostgreSQL database initialized': ('database', 'Virtual Broker DB'),
+
+            # External Adapters (Third-party integrations)
+            r'Telegram adapter initialized': ('adapters', 'Telegram Adapter'),
+            r'Telegram adapter disabled': ('adapters', 'Telegram Adapter'),
+            r'DaData adapter initialized': ('adapters', 'DaData Adapter'),
+            r'DaData not configured': ('adapters', 'DaData Adapter'),
+            r'Kontur.*adapter initialized': ('adapters', 'Kontur Adapter'),
+            r'Kontur not configured': ('adapters', 'Kontur Adapter'),
 
             # Messaging & Events
             r'EventBus.*initialized': ('messaging', 'Event Bus'),

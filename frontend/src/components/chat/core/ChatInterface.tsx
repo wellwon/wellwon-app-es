@@ -92,6 +92,9 @@ const ChatInterface = React.memo(() => {
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [newMessagesCount, setNewMessagesCount] = useState(0);
   const [isFirstLoad, setIsFirstLoad] = useState(true);
+  // Drag-drop state
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const dragCounterRef = useRef(0);
   
   // Mentions state
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -704,6 +707,55 @@ const ChatInterface = React.memo(() => {
   // Проверка прав администратора
   const isAdmin = isDeveloper;
 
+  // Drag-drop handlers for file upload
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (e.dataTransfer.types.includes('Files') && activeChat) {
+      setIsDraggingOver(true);
+    }
+  }, [activeChat]);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) {
+      setIsDraggingOver(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setIsDraggingOver(false);
+
+    if (!activeChat || !e.dataTransfer.files.length) return;
+
+    const files = Array.from(e.dataTransfer.files);
+
+    // Send each file
+    for (const file of files) {
+      try {
+        await sendFile(file, replyTarget?.id);
+      } catch (error) {
+        logger.error('Failed to send dropped file', error, { filename: file.name });
+      }
+    }
+
+    // Clear reply target after sending
+    if (replyTarget) {
+      setReplyTarget(null);
+    }
+  }, [activeChat, sendFile, replyTarget]);
+
   // Theme-aware styles - messages panel should be lighter than sidebar
   const theme = isLightTheme ? {
     main: 'bg-white',
@@ -763,7 +815,34 @@ const ChatInterface = React.memo(() => {
     return lastMessage.content?.toLowerCase().includes('новый заказ');
   }, [activeChat, displayedMessages]);
   
-  return <div className={`h-full flex ${theme.main}`}>
+  return <div
+    className={`h-full flex ${theme.main} relative`}
+    onDragEnter={handleDragEnter}
+    onDragLeave={handleDragLeave}
+    onDragOver={handleDragOver}
+    onDrop={handleDrop}
+  >
+    {/* Drag-drop overlay */}
+    {isDraggingOver && (
+      <div className={`absolute inset-0 z-50 flex items-center justify-center ${
+        isLightTheme
+          ? 'bg-accent-red/10 border-2 border-dashed border-accent-red'
+          : 'bg-accent-red/20 border-2 border-dashed border-accent-red'
+      }`}>
+        <div className={`text-center p-6 rounded-xl ${
+          isLightTheme ? 'bg-white shadow-lg' : 'bg-dark-gray shadow-lg'
+        }`}>
+          <Paperclip size={48} className="mx-auto mb-3 text-accent-red" />
+          <p className={`text-lg font-medium ${isLightTheme ? 'text-gray-900' : 'text-white'}`}>
+            Отпустите для отправки файлов
+          </p>
+          <p className={`text-sm mt-1 ${isLightTheme ? 'text-gray-500' : 'text-gray-400'}`}>
+            Файлы будут отправлены в текущий чат
+          </p>
+        </div>
+      </div>
+    )}
+
     {/* Main Chat Content */}
     <div className="flex-1 grid grid-rows-[1fr_auto]">
       {/* Content Area */}

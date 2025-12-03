@@ -203,8 +203,6 @@ async def search_companies(
 # =============================================================================
 
 from pydantic import BaseModel, Field
-from app.infra.dadata.adapter import get_dadata_adapter
-from app.config.dadata_config import is_dadata_configured
 
 
 class LookupVatRequest(BaseModel):
@@ -239,7 +237,8 @@ class LookupVatResponse(BaseModel):
 
 @router.post("/lookup-vat", response_model=LookupVatResponse)
 async def lookup_company_by_vat_dadata(
-    request: LookupVatRequest,
+    body: LookupVatRequest,
+    request: Request,
     current_user: Annotated[dict, Depends(get_current_user)],
 ):
     """
@@ -248,15 +247,16 @@ async def lookup_company_by_vat_dadata(
     This endpoint fetches company details from the Russian DaData service
     by INN (Taxpayer Identification Number).
     """
-    if not is_dadata_configured():
+    # Get DaData adapter from app state (initialized in adapters.py)
+    adapter = request.app.state.dadata_adapter
+    if not adapter:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="DaData service is not configured"
         )
 
     try:
-        adapter = get_dadata_adapter()
-        company = await adapter.lookup_company_by_inn(request.vat)
+        company = await adapter.lookup_company_by_inn(body.vat)
 
         if not company:
             return LookupVatResponse(found=False)

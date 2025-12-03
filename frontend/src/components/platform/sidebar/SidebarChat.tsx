@@ -428,6 +428,24 @@ const SidebarChat: React.FC = () => {
     }
   };
 
+  const handleArchiveChat = async (e: React.MouseEvent, conversationId: string) => {
+    e.stopPropagation();
+    try {
+      await deleteChat(conversationId);
+      toast({
+        title: "Успешно",
+        description: "Чат архивирован"
+      });
+    } catch (error) {
+      logger.error('Error archiving chat', error, { component: 'SidebarChat' });
+      toast({
+        title: "Ошибка",
+        description: "Не удалось архивировать чат",
+        variant: "error"
+      });
+    }
+  };
+
   const handleDeleteConversation = async (e: React.MouseEvent, conversationId: string) => {
     e.stopPropagation();
     if (window.confirm('Удалить этот диалог навсегда? Это действие нельзя отменить.')) {
@@ -642,6 +660,7 @@ const SidebarChat: React.FC = () => {
                     effectiveUserType={profile?.role || 'user'}
                     formatDate={formatDate}
                     handleRenameChat={handleRenameChat}
+                    handleArchiveChat={handleArchiveChat}
                     handleDeleteConversation={handleDeleteConversation}
                     isOpen={isOpen}
                     contentType={contentType}

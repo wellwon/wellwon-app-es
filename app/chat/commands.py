@@ -277,3 +277,23 @@ class ProcessTelegramMessageCommand(Command):
     telegram_user_data: Optional[Dict[str, Any]] = None  # {first_name, last_name, username, is_bot}
     telegram_forward_data: Optional[Dict[str, Any]] = None  # Forward info if forwarded message
     telegram_topic_id: Optional[int] = None  # Forum topic ID
+
+
+class UpdateMessageFileUrlCommand(Command):
+    """
+    Update a message's file URL after async upload completes.
+
+    Used for fire-and-forget file processing:
+    1. Telegram message arrives with file_id
+    2. Message is stored immediately with temporary Telegram CDN URL
+    3. Background task downloads file, uploads to MinIO
+    4. This command updates the message with permanent MinIO URL
+
+    This enables instant message display while file processing happens in background.
+    """
+    message_id: int  # Snowflake ID (bigint) - matches ScyllaDB message_id
+    chat_id: uuid.UUID
+    new_file_url: str = Field(..., min_length=1)
+    file_name: Optional[str] = None
+    file_size: Optional[int] = None
+    file_type: Optional[str] = None

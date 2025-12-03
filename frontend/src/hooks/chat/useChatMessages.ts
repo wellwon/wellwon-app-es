@@ -4,7 +4,7 @@
 // Pattern: TkDodo's "Using WebSockets with React Query" + Zustand persistence
 // =============================================================================
 
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useMemo } from 'react';
 import { useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import * as chatApi from '@/api/chat';
 import type { Message } from '@/api/chat';
@@ -13,6 +13,30 @@ import { useMessagesStore } from '@/stores/useMessagesStore';
 
 const MESSAGES_PER_PAGE = 30; // Increased for smoother scrolling
 const PREFETCH_THRESHOLD = 10; // Prefetch when 10 messages from top
+
+// -----------------------------------------------------------------------------
+// Message ID Set - O(1) deduplication helper
+// -----------------------------------------------------------------------------
+
+function buildMessageIdSet(pages: any[]): Set<string> {
+  const idSet = new Set<string>();
+  for (const page of pages) {
+    for (const msg of page.messages) {
+      idSet.add(String(msg.id));
+    }
+  }
+  return idSet;
+}
+
+function hasMessage(pages: any[], messageId: string): boolean {
+  const id = String(messageId);
+  for (const page of pages) {
+    for (const msg of page.messages) {
+      if (String(msg.id) === id) return true;
+    }
+  }
+  return false;
+}
 
 // -----------------------------------------------------------------------------
 // Query Keys
@@ -92,14 +116,26 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
     initialDataUpdatedAt: cachedData?.pages?.length ? cachedData.updatedAt : undefined,
 
     // Messages sorted newest first from API, we reverse for display
-    select: (data) => ({
-      pages: data.pages,
-      pageParams: data.pageParams,
-      // Flatten all pages into single array, reversed for chronological order
-      messages: data.pages
-        .flatMap((page) => page.messages)
-        .reverse(),
-    }),
+    select: (data) => {
+      // Deduplicate using Map for O(1) lookup, preserving order
+      const messageMap = new Map<string, Message>();
+      for (const page of data.pages) {
+        for (const msg of page.messages) {
+          const id = String(msg.id);
+          if (!messageMap.has(id)) {
+            messageMap.set(id, msg);
+          }
+        }
+      }
+      // Convert to array and reverse for chronological order
+      const messages = Array.from(messageMap.values()).reverse();
+
+      return {
+        pages: data.pages,
+        pageParams: data.pageParams,
+        messages,
+      };
+    },
 
     // Keep only recent pages in memory for performance
     maxPages: 5,
@@ -137,9 +173,8 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
         (oldData: any) => {
           if (!oldData) return oldData;
 
-          // Check for duplicates using first page (most recent)
-          const allMessages = oldData.pages.flatMap((p: any) => p.messages);
-          if (allMessages.some((m: Message) => m.id === newMessage.id)) {
+          // O(n) duplicate check - still iterates but avoids flatMap allocation
+          if (hasMessage(oldData.pages, newMessage.id)) {
             logger.debug('WSE: Message already exists, skipping', { messageId: newMessage.id });
             return oldData;
           }
@@ -317,9 +352,11 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
 
       const telegramReadAt = data.telegram_read_at;
 
-      logger.debug('WSE: Messages read on Telegram (blue checkmarks)', {
+      logger.info('[READ-DEBUG] WSE: Messages read on Telegram (blue checkmarks)', {
         chatId,
         telegramReadAt,
+        lastReadMessageId: data.last_read_message_id,
+        lastReadTelegramMessageId: data.last_read_telegram_message_id,
       });
 
       queryClient.setQueryData(
@@ -327,15 +364,60 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
         (oldData: any) => {
           if (!oldData) return oldData;
 
+          let updatedCount = 0;
+
           // Update all messages that have telegram_message_id but no telegram_read_at
           const newPages = oldData.pages.map((page: any) => ({
             ...page,
             messages: page.messages.map((m: Message) => {
               // Only update messages that were delivered to Telegram
               if (m.telegram_message_id && !m.telegram_read_at) {
+                updatedCount++;
                 return {
                   ...m,
                   telegram_read_at: telegramReadAt,
+                };
+              }
+              return m;
+            }),
+          }));
+
+          logger.info(`[READ-DEBUG] Updated ${updatedCount} messages with telegram_read_at (blue checkmarks)`);
+
+          return { ...oldData, pages: newPages };
+        }
+      );
+    };
+
+    // Handle message file URL updated - async file processing complete
+    // This updates the message with permanent MinIO URL after background upload
+    const handleMessageFileUrlUpdated = (event: CustomEvent) => {
+      const data = event.detail;
+      if (String(data.chat_id) !== String(chatId)) return;
+
+      const messageId = String(data.message_id);
+
+      logger.debug('WSE: Message file URL updated (async upload complete)', {
+        chatId,
+        messageId,
+        newFileUrl: data.new_file_url,
+      });
+
+      queryClient.setQueryData(
+        chatKeys.messages(chatId),
+        (oldData: any) => {
+          if (!oldData) return oldData;
+
+          const newPages = oldData.pages.map((page: any) => ({
+            ...page,
+            messages: page.messages.map((m: Message) => {
+              if (String(m.id) === messageId) {
+                return {
+                  ...m,
+                  file_url: data.new_file_url,
+                  file_name: data.file_name ?? m.file_name,
+                  file_size: data.file_size ?? m.file_size,
+                  file_type: data.file_type ?? m.file_type,
                 };
               }
               return m;
@@ -354,6 +436,7 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
     window.addEventListener('messageSyncedToTelegram', handleMessageSyncedToTelegram as EventListener);
     window.addEventListener('messagesRead', handleMessagesRead as EventListener);
     window.addEventListener('messagesReadOnTelegram', handleMessagesReadOnTelegram as EventListener);
+    window.addEventListener('messageFileUrlUpdated', handleMessageFileUrlUpdated as EventListener);
 
     return () => {
       window.removeEventListener('messageCreated', handleMessageCreated as EventListener);
@@ -362,6 +445,7 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
       window.removeEventListener('messageSyncedToTelegram', handleMessageSyncedToTelegram as EventListener);
       window.removeEventListener('messagesRead', handleMessagesRead as EventListener);
       window.removeEventListener('messagesReadOnTelegram', handleMessagesReadOnTelegram as EventListener);
+      window.removeEventListener('messageFileUrlUpdated', handleMessageFileUrlUpdated as EventListener);
     };
   }, [chatId, queryClient]);
 

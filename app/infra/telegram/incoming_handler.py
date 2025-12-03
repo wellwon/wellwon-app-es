@@ -311,6 +311,12 @@ class TelegramIncomingHandler:
         """
         Process incoming message and dispatch to Chat Domain.
 
+        PERFORMANCE OPTIMIZATION (Fire-and-Forget Pattern):
+        - Messages with files: Get temp Telegram CDN URL (~10ms), dispatch immediately
+        - Background task downloads file and uploads to MinIO (700ms-10s)
+        - UpdateMessageFileUrlCommand updates message with permanent URL
+        - Frontend receives update via WSE and updates UI seamlessly
+
         Returns WellWon message ID if successful.
         """
         try:
@@ -334,40 +340,125 @@ class TelegramIncomingHandler:
                 # Use system user or anonymous
                 user_id = await self._get_system_user_id()
 
-            # 3. Download file if present
-            file_url = None
+            # 3. Get temporary Telegram CDN URL (fast, ~10ms)
+            # This URL expires in ~1 hour but allows instant message display
+            temp_file_url = None
             if message.file_id:
-                file_url = await self._download_and_store_file(message)
+                temp_file_url = await self._get_temp_file_url(message.file_id)
 
-            # 4. Dispatch SendMessageCommand
+            # 4. Dispatch SendMessageCommand IMMEDIATELY with temp URL
             from app.chat.commands import SendMessageCommand
+
+            # Convert Telegram message_type to domain message_type
+            domain_message_type = self._convert_message_type(message.message_type)
 
             command = SendMessageCommand(
                 chat_id=chat_id,
                 sender_id=user_id,
                 content=message.text or "",
-                message_type=message.message_type,
-                file_url=file_url,
+                message_type=domain_message_type,
+                file_url=temp_file_url,  # Temporary Telegram CDN URL
                 file_name=message.file_name,
                 file_size=message.file_size,
                 file_type=message.mime_type,
-                voice_duration=message.voice_duration,  # For voice messages
-                source="telegram",  # Mark source so listener ignores it
-                telegram_message_id=message.telegram_message_id,  # For bidirectional tracking
+                voice_duration=message.voice_duration,
+                source="telegram",
+                telegram_message_id=message.telegram_message_id,
             )
 
             result = await self._command_bus.send(command)
 
             log.info(
                 f"Processed Telegram message {message.telegram_message_id} "
-                f"-> WellWon message {result}"
+                f"-> WellWon message {result} (instant)"
             )
+
+            # 5. Fire-and-forget: Download file and update URL in background
+            if message.file_id:
+                asyncio.create_task(
+                    self._process_file_async(
+                        message_id=result,  # Snowflake ID from command result
+                        chat_id=chat_id,
+                        message=message,
+                    )
+                )
 
             return result
 
         except Exception as e:
             log.error(f"Error processing Telegram message: {e}", exc_info=True)
             return None
+
+    async def _get_temp_file_url(self, file_id: str) -> Optional[str]:
+        """
+        Get temporary Telegram CDN URL for a file (fast, ~10ms).
+
+        This URL expires in ~1 hour but allows instant message display.
+        """
+        try:
+            from app.infra.telegram.adapter import get_telegram_adapter
+
+            adapter = await get_telegram_adapter()
+            return await adapter.get_file_url(file_id)
+        except Exception as e:
+            log.warning(f"Could not get temp file URL for {file_id}: {e}")
+            return None
+
+    async def _process_file_async(
+        self,
+        message_id: int,
+        chat_id: UUID,
+        message: IncomingTelegramMessage,
+    ) -> None:
+        """
+        Background task: Download file from Telegram, upload to MinIO, update message.
+
+        This runs asynchronously after the message has already been delivered to the UI.
+        When complete, it dispatches UpdateMessageFileUrlCommand which:
+        1. Updates ScyllaDB with permanent MinIO URL
+        2. Publishes MessageFileUrlUpdated event to WSE
+        3. Frontend updates the message seamlessly
+        """
+        try:
+            log.debug(
+                f"Background file processing started for message {message_id}, "
+                f"file_id={message.file_id}"
+            )
+
+            # Download and store the file
+            permanent_url = await self._download_and_store_file(message)
+
+            if permanent_url and not permanent_url.startswith("https://api.telegram.org"):
+                # We got a MinIO URL (not a fallback Telegram URL)
+                from app.chat.commands import UpdateMessageFileUrlCommand
+
+                update_command = UpdateMessageFileUrlCommand(
+                    message_id=message_id,
+                    chat_id=chat_id,
+                    new_file_url=permanent_url,
+                    file_name=message.file_name,
+                    file_size=message.file_size,
+                    file_type=message.mime_type,
+                )
+
+                await self._command_bus.send(update_command)
+
+                log.info(
+                    f"Background file processing complete for message {message_id}: "
+                    f"{permanent_url}"
+                )
+            else:
+                log.warning(
+                    f"Background file processing failed for message {message_id}, "
+                    f"keeping temp URL"
+                )
+
+        except Exception as e:
+            # Don't fail - the message was already delivered with temp URL
+            log.error(
+                f"Background file processing error for message {message_id}: {e}",
+                exc_info=True
+            )
 
     async def _lookup_chat(
         self,
@@ -434,36 +525,131 @@ class TelegramIncomingHandler:
         message: IncomingTelegramMessage
     ) -> Optional[str]:
         """
-        Download file from Telegram and store in WellWon storage.
+        Download file from Telegram and store in MinIO/S3.
 
-        Returns WellWon file URL.
+        Strategy:
+        - Files ≤20MB: Use Bot API (faster, simpler)
+        - Files >20MB: Use MTProto (supports up to 2GB)
+
+        Returns MinIO public URL (permanent, unlike Telegram CDN URLs).
         """
         if not message.file_id:
             return None
 
         try:
             from app.infra.telegram.adapter import get_telegram_adapter
+            from app.infra.storage.minio_provider import get_storage_provider
 
             adapter = await get_telegram_adapter()
+            storage = get_storage_provider()
 
-            # Get Telegram file URL
-            telegram_url = await adapter.get_file_url(message.file_id)
-            if not telegram_url:
-                log.warning(f"Could not get URL for file {message.file_id}")
-                return None
+            # Determine download method based on file size
+            file_size = message.file_size or 0
+            BOT_API_LIMIT = 20 * 1024 * 1024  # 20MB
 
-            # TODO: Download and store in WellWon storage (MinIO/S3)
-            # For now, return the Telegram URL
-            # In production, you'd want to:
-            # 1. Download the file from Telegram
-            # 2. Upload to your storage
-            # 3. Return the permanent URL
+            file_bytes: Optional[bytes] = None
 
-            return telegram_url
+            if file_size <= BOT_API_LIMIT or file_size == 0:
+                # Use Bot API for small files (or unknown size)
+                file_bytes = await adapter.download_file(message.file_id)
+                if not file_bytes and file_size == 0:
+                    # Unknown size, Bot API might have failed - try MTProto
+                    log.info(f"Bot API download failed, trying MTProto for {message.file_id}")
+                    file_bytes = await adapter.download_file_mtproto(message.raw_data)
+            else:
+                # Use MTProto for large files (up to 2GB)
+                log.info(f"Large file ({file_size} bytes), using MTProto for {message.file_id}")
+                file_bytes = await adapter.download_file_mtproto(message.raw_data)
+
+            if not file_bytes:
+                log.warning(f"Could not download file {message.file_id}")
+                # Fallback to Telegram CDN URL (expires after ~1h)
+                return await adapter.get_file_url(message.file_id)
+
+            # Determine content type
+            content_type = message.mime_type or self._guess_content_type(message)
+
+            # Upload to MinIO
+            result = await storage.upload_file(
+                bucket="chat-files",
+                file_content=file_bytes,
+                content_type=content_type,
+                original_filename=message.file_name,
+            )
+
+            if result.success:
+                log.info(
+                    f"File stored in MinIO: {message.file_id} -> {result.public_url} "
+                    f"({len(file_bytes)} bytes, {content_type})"
+                )
+                return result.public_url
+            else:
+                log.error(f"MinIO upload failed: {result.error}")
+                # Fallback to Telegram CDN URL
+                return await adapter.get_file_url(message.file_id)
 
         except Exception as e:
-            log.error(f"Error downloading file: {e}")
+            log.error(f"Error downloading/storing file: {e}", exc_info=True)
             return None
+
+    def _guess_content_type(self, message: IncomingTelegramMessage) -> str:
+        """Guess content type from message type and filename."""
+        # Try to guess from filename extension first
+        if message.file_name:
+            ext = message.file_name.lower().split(".")[-1] if "." in message.file_name else ""
+            ext_map = {
+                "jpg": "image/jpeg",
+                "jpeg": "image/jpeg",
+                "png": "image/png",
+                "gif": "image/gif",
+                "webp": "image/webp",
+                "pdf": "application/pdf",
+                "doc": "application/msword",
+                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "xls": "application/vnd.ms-excel",
+                "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "mp4": "video/mp4",
+                "webm": "video/webm",
+                "mp3": "audio/mpeg",
+                "ogg": "audio/ogg",
+                "wav": "audio/wav",
+                "txt": "text/plain",
+                "csv": "text/csv",
+                "json": "application/json",
+                "xml": "application/xml",
+                "zip": "application/zip",
+            }
+            if ext in ext_map:
+                return ext_map[ext]
+
+        # Fall back to message type
+        type_map = {
+            "photo": "image/jpeg",
+            "voice": "audio/ogg",
+            "video": "video/mp4",
+            "audio": "audio/mpeg",
+            "sticker": "image/webp",
+            "document": "application/octet-stream",
+        }
+        return type_map.get(message.message_type, "application/octet-stream")
+
+    def _convert_message_type(self, telegram_type: str) -> str:
+        """
+        Convert Telegram message_type to domain message_type.
+
+        Telegram types: text, photo, document, voice, video, sticker, audio
+        Domain types: text, file, voice, image, system
+        """
+        conversion_map = {
+            "text": "text",
+            "photo": "image",      # Telegram photo -> domain image
+            "document": "file",    # Telegram document -> domain file
+            "voice": "voice",      # Same
+            "video": "file",       # Telegram video -> domain file
+            "audio": "file",       # Telegram audio -> domain file
+            "sticker": "image",    # Telegram sticker -> domain image
+        }
+        return conversion_map.get(telegram_type, "text")
 
 
     # =========================================================================
@@ -484,15 +670,21 @@ class TelegramIncomingHandler:
         Returns:
             True if handled successfully
         """
+        log.info(
+            f"[READ-DEBUG] handle_read_event called: chat_id={read_event.chat_id}, "
+            f"max_id={read_event.max_id}, is_outbox={read_event.is_outbox}"
+        )
         try:
             if read_event.is_outbox:
                 # OUTBOX: Others read messages YOU sent -> Blue checkmarks!
+                log.info("[READ-DEBUG] Processing OUTBOX read event (blue checkmarks)")
                 return await self._handle_outbox_read_event(read_event)
             else:
                 # INBOX: YOU read messages on Telegram -> Sync to WellWon
+                log.info("[READ-DEBUG] Processing INBOX read event (sync to WellWon)")
                 return await self._handle_inbox_read_event(read_event)
         except Exception as e:
-            log.error(f"Error handling Telegram read event: {e}", exc_info=True)
+            log.error(f"[READ-DEBUG] Error handling Telegram read event: {e}", exc_info=True)
             return False
 
     async def _handle_outbox_read_event(self, read_event: 'ReadEventInfo') -> bool:
@@ -506,12 +698,12 @@ class TelegramIncomingHandler:
         3. Frontend updates message with telegram_read_at -> blue checkmarks
         """
         if not self._event_bus:
-            log.warning("Event bus not available - cannot publish MessagesReadOnTelegram")
+            log.warning("[READ-DEBUG] Event bus not available - cannot publish MessagesReadOnTelegram")
             return False
 
         log.info(
-            f"Telegram read receipt: others read messages up to {read_event.max_id} "
-            f"in chat {read_event.chat_id}"
+            f"[READ-DEBUG] Telegram read receipt: others read messages up to {read_event.max_id} "
+            f"in Telegram chat {read_event.chat_id}"
         )
 
         try:
@@ -519,8 +711,10 @@ class TelegramIncomingHandler:
             chat_id = await self._lookup_chat_by_telegram_id(read_event.chat_id)
 
             if not chat_id:
-                log.debug(f"No WellWon chat found for Telegram chat {read_event.chat_id}")
+                log.warning(f"[READ-DEBUG] No WellWon chat found for Telegram chat {read_event.chat_id}")
                 return False
+
+            log.info(f"[READ-DEBUG] Found WellWon chat: {chat_id}")
 
             # 2. Find the WellWon message that corresponds to the Telegram max_id
             wellwon_message_id = await self._find_message_by_telegram_id(
@@ -531,12 +725,18 @@ class TelegramIncomingHandler:
 
             # If we can't find the specific message, still emit the event with chat_id only
             if not wellwon_message_id:
-                log.debug(
-                    f"No WellWon message found for Telegram message {read_event.max_id} "
+                log.warning(
+                    f"[READ-DEBUG] No WellWon message found for Telegram message {read_event.max_id} "
                     f"in chat {read_event.chat_id} - emitting event anyway"
                 )
+            else:
+                log.info(f"[READ-DEBUG] Found WellWon message: {wellwon_message_id}")
 
-            # 3. Publish MessagesReadOnTelegram event to trigger blue checkmarks
+            # 3. Get chat participants for WSE routing
+            participant_ids = await self._get_chat_participant_ids(chat_id)
+            log.info(f"[READ-DEBUG] Chat participants: {participant_ids}")
+
+            # 4. Publish MessagesReadOnTelegram event to trigger blue checkmarks
             telegram_read_at = datetime.now(timezone.utc)
             event_dict = {
                 "event_id": str(uuid4()),
@@ -548,19 +748,21 @@ class TelegramIncomingHandler:
                 "last_read_telegram_message_id": read_event.max_id,
                 "telegram_read_at": telegram_read_at.isoformat(),
                 "timestamp": telegram_read_at.isoformat(),
+                "participant_ids": participant_ids,  # For WSE routing to user topics
             }
 
             await self._event_bus.publish("transport.chat-events", event_dict)
 
             log.info(
-                f"Blue checkmark event published: chat={chat_id}, "
-                f"telegram_max_id={read_event.max_id}, wellwon_message_id={wellwon_message_id}"
+                f"[READ-DEBUG] MessagesReadOnTelegram published to event bus: chat={chat_id}, "
+                f"telegram_max_id={read_event.max_id}, wellwon_message_id={wellwon_message_id}, "
+                f"participants={len(participant_ids)}"
             )
 
             return True
 
         except Exception as e:
-            log.error(f"Error handling outbox read event: {e}", exc_info=True)
+            log.error(f"[READ-DEBUG] Error handling outbox read event: {e}", exc_info=True)
             return False
 
     async def _handle_inbox_read_event(self, read_event: 'ReadEventInfo') -> bool:
@@ -693,6 +895,33 @@ class TelegramIncomingHandler:
         except Exception as e:
             log.debug(f"MTProto user lookup failed: {e}")
             return None
+
+    async def _get_chat_participant_ids(self, chat_id: UUID) -> list:
+        """
+        Get participant IDs for a chat.
+
+        Used to include participant_ids in events for WSE routing to user topics.
+
+        Args:
+            chat_id: WellWon chat UUID
+
+        Returns:
+            List of participant user IDs as strings
+        """
+        try:
+            from app.chat.queries import GetChatParticipantsQuery
+
+            participants = await self._query_bus.query(
+                GetChatParticipantsQuery(chat_id=chat_id)
+            )
+
+            if participants:
+                return [str(p.user_id) for p in participants]
+            return []
+
+        except Exception as e:
+            log.warning(f"[READ-DEBUG] Could not get participants for chat {chat_id}: {e}")
+            return []
 
 
 # =============================================================================

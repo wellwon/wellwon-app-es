@@ -696,6 +696,65 @@ class MessageScyllaRepo:
             execution_profile='write',
         )
 
+    async def update_message_file_url(
+            self,
+            channel_id: ChannelID,
+            message_id: MessageID,
+            file_url: str,
+            file_name: Optional[str] = None,
+            file_size: Optional[int] = None,
+            file_type: Optional[str] = None,
+    ) -> None:
+        """
+        Update message file URL after async upload completes.
+
+        This is part of the fire-and-forget pattern for fast incoming Telegram messages:
+        1. Message stored immediately with temp Telegram CDN URL
+        2. Background task downloads file, uploads to MinIO
+        3. This method updates the message with permanent MinIO URL
+
+        Args:
+            channel_id: UUID of the channel
+            message_id: Snowflake ID of the message
+            file_url: New permanent file URL (MinIO/S3)
+            file_name: File name (optional, updates if provided)
+            file_size: File size in bytes (optional, updates if provided)
+            file_type: MIME type (optional, updates if provided)
+        """
+        bucket = calculate_message_bucket(message_id)
+
+        # Build dynamic SET clause based on what's provided
+        set_parts = ["file_url = ?", "updated_at = ?"]
+        params: list = [file_url, datetime.now(timezone.utc)]
+
+        if file_name is not None:
+            set_parts.append("file_name = ?")
+            params.append(file_name)
+
+        if file_size is not None:
+            set_parts.append("file_size = ?")
+            params.append(file_size)
+
+        if file_type is not None:
+            set_parts.append("file_type = ?")
+            params.append(file_type)
+
+        # Add WHERE clause params
+        params.extend([channel_id, bucket, message_id])
+
+        query = f"""UPDATE messages SET {', '.join(set_parts)}
+                   WHERE channel_id = ? AND bucket = ? AND message_id = ?"""
+
+        await self.client.execute_prepared(
+            query,
+            tuple(params),
+            execution_profile='write',
+        )
+
+        log.debug(
+            f"Updated file URL for message {message_id} in channel {channel_id}: {file_url}"
+        )
+
     async def soft_delete_message(
             self,
             channel_id: ChannelID,

@@ -42,6 +42,9 @@
 --   - Event streams per aggregate
 -- =============================================================================
 
+-- Set default schema
+SET search_path = public;
+
 -- ======================
 -- EXTENSIONS
 -- ======================

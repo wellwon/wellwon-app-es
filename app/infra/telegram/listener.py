@@ -31,6 +31,7 @@ from app.infra.telegram.message_queue import (
     TelegramMessageQueue,
     get_message_queue,
 )
+from app.infra.telegram.file_cache import TelegramFileCache, get_file_cache
 
 # Metrics import (optional)
 try:
@@ -114,6 +115,7 @@ class TelegramEventListener:
         self._redis_client = redis_client
         self._use_message_queue = use_message_queue
         self._message_queue: Optional[TelegramMessageQueue] = None
+        self._file_cache: Optional[TelegramFileCache] = None
 
         self._initialized = False
         self._running = False
@@ -146,6 +148,15 @@ class TelegramEventListener:
             except Exception as e:
                 log.warning(f"Message queue not available, using direct send: {e}")
                 self._message_queue = None
+
+        # Initialize file cache for Telegram file_id caching
+        if self._redis_client:
+            try:
+                self._file_cache = get_file_cache(self._redis_client)
+                log.info("File cache initialized for Telegram file_id caching")
+            except Exception as e:
+                log.warning(f"File cache not available: {e}")
+                self._file_cache = None
 
         self._initialized = True
         self._running = True
@@ -397,43 +408,75 @@ class TelegramEventListener:
         file_url: Optional[str],
         file_type: Optional[str],
     ) -> bool:
-        """Actually send the message via adapter."""
+        """
+        Actually send the message via adapter.
+
+        Uses file_id cache for faster file delivery:
+        - If file_url has a cached file_id, send using that (no re-upload)
+        - Otherwise, send via URL and cache the returned file_id
+        """
         if not self._telegram:
             raise RuntimeError("Telegram adapter not available")
 
-        if file_url and file_type in ("photo", "image"):
-            result = await self._telegram.send_file(
-                chat_id=telegram_chat_id,
-                file_url=file_url,
-                caption=text if text else None,
-                topic_id=topic_id
-            )
-        elif file_url and file_type == "voice":
-            result = await self._telegram.send_voice(
-                chat_id=telegram_chat_id,
-                voice_url=file_url,
-                caption=text if text else None,
-                topic_id=topic_id
-            )
-        elif file_url:
-            result = await self._telegram.send_file(
-                chat_id=telegram_chat_id,
-                file_url=file_url,
-                caption=text if text else None,
-                topic_id=topic_id
-            )
+        result = None
+
+        if file_url:
+            # Check cache for existing file_id
+            cached_file_id = None
+            if self._file_cache:
+                cached_file_id = await self._file_cache.get_by_url(file_url)
+
+            if cached_file_id:
+                # Use cached file_id (faster, no re-upload needed)
+                log.debug(f"Using cached file_id for {file_url[:50]}...")
+                result = await self._telegram.send_file_by_id(
+                    chat_id=telegram_chat_id,
+                    file_id=cached_file_id,
+                    file_type=file_type or "document",
+                    caption=text if text else None,
+                    topic_id=topic_id
+                )
+            elif file_type in ("photo", "image"):
+                result = await self._telegram.send_file(
+                    chat_id=telegram_chat_id,
+                    file_url=file_url,
+                    caption=text if text else None,
+                    topic_id=topic_id
+                )
+            elif file_type == "voice":
+                result = await self._telegram.send_voice(
+                    chat_id=telegram_chat_id,
+                    voice_url=file_url,
+                    caption=text if text else None,
+                    topic_id=topic_id
+                )
+            else:
+                result = await self._telegram.send_file(
+                    chat_id=telegram_chat_id,
+                    file_url=file_url,
+                    caption=text if text else None,
+                    topic_id=topic_id
+                )
+
+            # Cache the file_id from response for future use
+            if result and result.success and result.file_id and self._file_cache and not cached_file_id:
+                await self._file_cache.set_by_url(file_url, result.file_id, file_type or "document")
+                log.debug(f"Cached file_id for {file_url[:50]}...")
+
         else:
+            # Text-only message
             result = await self._telegram.send_message(
                 chat_id=telegram_chat_id,
                 text=text,
                 topic_id=topic_id
             )
 
-        if not result.success:
+        if not result or not result.success:
             # Check if permanent error
-            if result.error and self._is_permanent_error_str(result.error):
-                raise mark_permanent(RuntimeError(result.error))
-            raise RuntimeError(result.error or "Unknown send error")
+            error_msg = result.error if result else "Unknown send error"
+            if error_msg and self._is_permanent_error_str(error_msg):
+                raise mark_permanent(RuntimeError(error_msg))
+            raise RuntimeError(error_msg)
 
         return True
 

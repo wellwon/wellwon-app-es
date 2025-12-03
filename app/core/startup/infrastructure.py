@@ -9,8 +9,9 @@ import logging
 from app.core.fastapi_types import FastAPI
 
 from app.infra.persistence.pg_client import (
-    init_db_pool, run_schema
+    init_db_pool, run_schema, init_pool_for_db, run_schema_for_db
 )
+from app.config.pg_client_config import Database
 from app.infra.persistence.redis_client import (
     init_global_client as init_redis,
     get_global_client as get_redis_instance
@@ -71,7 +72,15 @@ async def initialize_databases(app: FastAPI) -> None:
     """
     # Main PostgreSQL Database
     await init_db_pool()
-    logger.info("PostgreSQL pool initialized.")
+    logger.info("Main PostgreSQL pool initialized.")
+
+    # Reference PostgreSQL Database (if configured)
+    reference_dsn = os.getenv("POSTGRES_REFERENCE_DSN")
+    if reference_dsn:
+        await init_pool_for_db(Database.REFERENCE)
+        logger.info("Reference PostgreSQL pool initialized.")
+    else:
+        logger.info("Reference database not configured (POSTGRES_REFERENCE_DSN not set)")
 
     # ScyllaDB (PRIMARY for messaging - REQUIRED when enabled)
     if SCYLLA_AVAILABLE and os.getenv("SCYLLA_ENABLED", "false").lower() == "true":
@@ -180,13 +189,29 @@ async def initialize_event_infrastructure(app: FastAPI) -> None:
 
 
 async def run_database_schemas() -> None:
-    """Run database schemas for main database"""
+    """Run database schemas for main and reference databases"""
     # Main database schema
-    schema_file_path = "database/pg/wellwon.sql"
+    main_schema_path = "database/pg/wellwon.sql"
     try:
-        await run_schema(schema_file_path)
+        await run_schema(main_schema_path)
         logger.info(f"Main database schema checked/applied.")
     except FileNotFoundError:
         logger.warning(f"Main schema file not found, skipping schema run.")
     except Exception as schema_error:
         logger.error(f"Error running main schema: {schema_error}")
+
+    # Reference database schema (if configured)
+    reference_dsn = os.getenv("POSTGRES_REFERENCE_DSN")
+
+    if reference_dsn:
+        reference_schema_path = "database/pg/wellwon_reference.sql"
+        logger.info(f"Applying reference database schema from {reference_schema_path}...")
+        try:
+            await run_schema_for_db(reference_schema_path, Database.REFERENCE)
+            logger.info(f"Reference database schema checked/applied.")
+        except FileNotFoundError:
+            logger.warning(f"Reference schema file not found at {reference_schema_path}, skipping.")
+        except Exception as schema_error:
+            logger.error(f"Error running reference schema: {schema_error}", exc_info=True)
+    else:
+        logger.info("Reference database not configured, skipping reference schema.")

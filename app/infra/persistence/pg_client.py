@@ -101,8 +101,8 @@ _POOL_LOCK = asyncio.Lock()
 # Circuit breakers for each database (lazily initialized)
 _CIRCUIT_BREAKERS: Dict[str, CircuitBreaker] = {}
 
-# Retry configurations for each database (lazily initialized)
-_RETRY_CONFIGS: Dict[str, Any] = {}
+# Retry configurations for each database (initialize with None for all databases)
+_RETRY_CONFIGS: Dict[str, Any] = {db.value: None for db in Database}
 
 # Global config instance
 _CONFIG: Optional[DatabaseConfig] = None
@@ -201,8 +201,19 @@ def get_postgres_dsn() -> str:
 
 
 def get_postgres_dsn_for_db(database: str = Database.MAIN) -> str:
-    """Get PostgreSQL DSN for specified database (internal use)"""
-    return get_postgres_dsn()
+    """Get PostgreSQL DSN for specified database"""
+    config = get_config()
+
+    # Use config's get_dsn() method for proper database routing
+    dsn = config.get_dsn(Database(database))
+
+    if not dsn:
+        raise RuntimeError(
+            f"DSN not configured for database '{database}'. "
+            f"Set POSTGRES_{database.upper()}_DSN in environment."
+        )
+
+    return dsn
 
 
 # =============================================================================
@@ -243,16 +254,24 @@ async def init_pool_for_db(
 
     config = get_config()
 
-    # Get pool configuration
-    pool_config = config.main_pool
+    # Get pool configuration for specified database
+    pool_config = config.get_pool_config(Database(database))
 
-    # Get defaults from env if not provided
-    min_size = min_size or int(os.getenv("PG_POOL_MIN_SIZE", str(pool_config.min_size)))
-    max_size = max_size or int(os.getenv("PG_POOL_MAX_SIZE", str(pool_config.max_size)))
-    pool_acquire_timeout_sec = pool_acquire_timeout_sec or float(
-        os.getenv("PG_POOL_TIMEOUT_SEC", str(pool_config.timeout)))
-    default_command_timeout_sec = default_command_timeout_sec or float(
-        os.getenv("PG_COMMAND_TIMEOUT_SEC", str(pool_config.command_timeout)))
+    # Get defaults from env if not provided (database-specific env vars)
+    if database == Database.REFERENCE:
+        min_size = min_size or int(os.getenv("PG_REFERENCE_POOL_MIN_SIZE", str(pool_config.min_size)))
+        max_size = max_size or int(os.getenv("PG_REFERENCE_POOL_MAX_SIZE", str(pool_config.max_size)))
+        pool_acquire_timeout_sec = pool_acquire_timeout_sec or float(
+            os.getenv("PG_REFERENCE_POOL_TIMEOUT_SEC", str(pool_config.timeout)))
+        default_command_timeout_sec = default_command_timeout_sec or float(
+            os.getenv("PG_REFERENCE_POOL_COMMAND_TIMEOUT_SEC", str(pool_config.command_timeout)))
+    else:  # MAIN or other databases
+        min_size = min_size or int(os.getenv("PG_POOL_MIN_SIZE", str(pool_config.min_size)))
+        max_size = max_size or int(os.getenv("PG_POOL_MAX_SIZE", str(pool_config.max_size)))
+        pool_acquire_timeout_sec = pool_acquire_timeout_sec or float(
+            os.getenv("PG_POOL_TIMEOUT_SEC", str(pool_config.timeout)))
+        default_command_timeout_sec = default_command_timeout_sec or float(
+            os.getenv("PG_COMMAND_TIMEOUT_SEC", str(pool_config.command_timeout)))
 
     # Initialize circuit breaker and retry config if needed
     circuit_breaker = get_circuit_breaker(database)

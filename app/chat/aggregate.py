@@ -859,7 +859,7 @@ class ChatAggregate:
                     "role": v.role,
                     "joined_at": v.joined_at.isoformat(),
                     "is_active": v.is_active,
-                    "last_read_message_id": str(v.last_read_message_id) if v.last_read_message_id else None,
+                    "last_read_message_id": v.last_read_message_id,  # Snowflake ID (int), keep as-is
                 }
                 for k, v in self.state.participants.items()
             },
@@ -895,12 +895,33 @@ class ChatAggregate:
         self.state.participants = {}
         for k, v in snapshot_data.get("participants", {}).items():
             last_read = v.get("last_read_message_id")
+            # Handle last_read_message_id migration (UUID -> Snowflake ID)
+            last_read_snowflake = None
+            if last_read is not None:
+                if isinstance(last_read, int):
+                    # Already a Snowflake ID (new format)
+                    last_read_snowflake = last_read
+                elif isinstance(last_read, str):
+                    # Could be UUID string or numeric string
+                    if len(last_read) == 36 and last_read.count('-') == 4:
+                        # Old UUID format - convert to Snowflake using same formula
+                        try:
+                            msg_uuid = uuid.UUID(last_read)
+                            last_read_snowflake = int.from_bytes(msg_uuid.bytes[:8], byteorder='big') & 0x7FFFFFFFFFFFFFFF
+                        except ValueError:
+                            last_read_snowflake = None
+                    else:
+                        # Numeric string
+                        try:
+                            last_read_snowflake = int(last_read)
+                        except ValueError:
+                            last_read_snowflake = None
             self.state.participants[k] = ParticipantState(
                 user_id=uuid.UUID(v["user_id"]),
                 role=v["role"],
                 joined_at=datetime.fromisoformat(v["joined_at"]),
                 is_active=v["is_active"],
-                last_read_message_id=uuid.UUID(last_read) if last_read else None,
+                last_read_message_id=last_read_snowflake,
             )
 
         self.version = snapshot_data.get("version", 0)

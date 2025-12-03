@@ -102,14 +102,39 @@ class TelegramFileCache:
         except Exception:
             pass
 
+    # ==========================================================================
+    # URL-based convenience methods (for MinIO/S3 URLs)
+    # ==========================================================================
+
+    async def get_by_url(self, url: str) -> Optional[str]:
+        """Get cached file_id by URL."""
+        return await self.get(self.hash_url(url))
+
+    async def set_by_url(self, url: str, file_id: str, file_type: str = "document") -> None:
+        """Cache file_id by URL."""
+        await self.set(self.hash_url(url), file_id, file_type)
+
+    async def delete_by_url(self, url: str) -> None:
+        """Delete cache entry by URL."""
+        await self.delete(self.hash_url(url))
+
 
 # Singleton
 _cache: Optional[TelegramFileCache] = None
 
 
-def get_file_cache(redis_client: Any) -> TelegramFileCache:
-    """Get file cache singleton."""
+def get_file_cache(redis_client: Optional[Any] = None) -> Optional[TelegramFileCache]:
+    """
+    Get file cache singleton.
+
+    Args:
+        redis_client: Redis client (required on first call)
+
+    Returns:
+        TelegramFileCache instance, or None if redis not available
+    """
     global _cache
-    if _cache is None:
+    if _cache is None and redis_client:
         _cache = TelegramFileCache(redis_client)
+        log.info("TelegramFileCache initialized")
     return _cache

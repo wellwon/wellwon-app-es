@@ -111,31 +111,29 @@ async def initialize_services(app: FastAPI) -> None:
 
 
 async def initialize_telegram_event_listener(app: FastAPI) -> None:
-    """Initialize Telegram Event Listener and Adapter for bidirectional chat sync"""
-    logger.info("Initializing Telegram Event Listener and Adapter...")
+    """
+    Initialize Telegram Event Listener for bidirectional chat sync.
 
-    enable_telegram = os.getenv("ENABLE_TELEGRAM_SYNC", "true").lower() == "true"
+    Note: TelegramAdapter is initialized in adapters.py (Phase 1).
+    This function only sets up event handlers and message routing.
+    """
+    logger.info("Initializing Telegram Event Listener...")
 
-    if not enable_telegram:
-        logger.info("Telegram disabled by configuration")
+    # Check if Telegram adapter was initialized in adapters.py
+    if not hasattr(app.state, 'telegram_adapter') or not app.state.telegram_adapter:
+        logger.info("Telegram adapter not initialized, skipping event listener setup")
         app.state.telegram_event_listener = None
-        app.state.telegram_adapter = None
         return
 
     # Ensure QueryBus is available (CQRS compliance)
     if not hasattr(app.state, 'query_bus') or not app.state.query_bus:
-        logger.warning("QueryBus not available, Telegram disabled")
+        logger.warning("QueryBus not available, Telegram event listener disabled")
         app.state.telegram_event_listener = None
-        app.state.telegram_adapter = None
         return
 
-    # Initialize TelegramAdapter first (singleton for API calls)
+    # Get TelegramAdapter from app.state (initialized in adapters.py)
     try:
-        from app.infra.telegram.adapter import get_telegram_adapter
-
-        telegram_adapter = await get_telegram_adapter()
-        app.state.telegram_adapter = telegram_adapter
-        logger.info("TelegramAdapter initialized - outgoing Telegram API calls enabled")
+        telegram_adapter = app.state.telegram_adapter
 
         # Register incoming message handler for MTProto
         if telegram_adapter and hasattr(app.state, 'command_bus') and hasattr(app.state, 'query_bus'):
@@ -239,12 +237,12 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
             # See start_telegram_polling() which is called from lifespan.py Phase 10
 
     except ImportError as import_error:
-        logger.warning(f"TelegramAdapter not available: {import_error}")
-        app.state.telegram_adapter = None
-    except Exception as adapter_error:
-        logger.error(f"Failed to initialize TelegramAdapter: {adapter_error}", exc_info=True)
-        logger.warning("TelegramAdapter disabled - chat topics will not be created in Telegram")
-        app.state.telegram_adapter = None
+        logger.warning(f"Telegram event listener setup failed: {import_error}")
+        app.state.telegram_event_listener = None
+    except Exception as listener_error:
+        logger.error(f"Failed to setup Telegram event listener: {listener_error}", exc_info=True)
+        logger.warning("Telegram event listener disabled - incoming messages won't be processed")
+        app.state.telegram_event_listener = None
 
 
 async def _setup_telegram_polling(app: FastAPI, telegram_adapter) -> None:

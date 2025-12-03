@@ -1045,9 +1045,11 @@ class TelegramMTProtoClient:
             # Convert chat_id to stored format (remove -100 prefix if present)
             stored_chat_id = self._from_telegram_peer_id(chat_id)
 
+            # Debug logging for tracing read receipt flow
             log.info(
-                f"MTProto MessageRead: chat_id={stored_chat_id}, max_id={max_id}, "
-                f"is_outbox={is_outbox}"
+                f"[READ-DEBUG] MTProto MessageRead received: "
+                f"chat_id={stored_chat_id}, max_id={max_id}, is_outbox={is_outbox}, "
+                f"callback_registered={self._read_callback is not None}"
             )
 
             # Create ReadEventInfo
@@ -1059,12 +1061,14 @@ class TelegramMTProtoClient:
 
             # Forward to callback if registered
             if self._read_callback is not None:
+                log.info(f"[READ-DEBUG] Invoking read callback for chat {stored_chat_id}")
                 await self._read_callback(read_info)
+                log.info(f"[READ-DEBUG] Read callback completed for chat {stored_chat_id}")
             else:
-                log.debug("No read callback registered, MessageRead event ignored")
+                log.warning("[READ-DEBUG] No read callback registered, MessageRead event IGNORED")
 
         except Exception as e:
-            log.error(f"Error handling MessageRead event: {e}", exc_info=True)
+            log.error(f"[READ-DEBUG] Error handling MessageRead event: {e}", exc_info=True)
 
     @staticmethod
     def _from_telegram_peer_id(peer_id: int) -> int:

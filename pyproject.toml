@@ -7,7 +7,7 @@
 
 [project]
 name = "wellwon"
-version = "0.2"  # SINGLE SOURCE OF TRUTH - Change version HERE only!
+version = "0.2.2"  # SINGLE SOURCE OF TRUTH - Change version HERE only!
 description = "WellWon - Enterprise Logistics Platform"
 readme = "README.md"
 requires-python = ">=3.14"

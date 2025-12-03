@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from app.infra.persistence.cache_manager import CacheManager
     from app.infra.saga.saga_manager import SagaManager
     from app.infra.telegram.adapter import TelegramAdapter
+    from app.infra.kontur.adapter import KonturAdapter
 
 
 @dataclass
@@ -49,8 +50,9 @@ class HandlerDependencies:
 
     cache_manager: Optional['CacheManager'] = None
 
-    # Telegram integration
+    # External adapters
     telegram_adapter: Optional['TelegramAdapter'] = None
+    kontur_adapter: Optional['KonturAdapter'] = None
 
     global_config: Dict[str, Any] = field(default_factory=dict)
 

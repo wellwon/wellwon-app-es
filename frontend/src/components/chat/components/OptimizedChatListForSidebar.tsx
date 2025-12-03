@@ -16,6 +16,7 @@ interface OptimizedChatListForSidebarProps {
   effectiveUserType: string;
   formatDate: (date: Date) => string;
   handleRenameChat: (e: React.MouseEvent, chatId: string) => void;
+  handleArchiveChat: (e: React.MouseEvent, chatId: string) => void;
   handleDeleteConversation: (e: React.MouseEvent, conversationId: string) => void;
   isOpen: boolean;
   contentType: string | null;
@@ -35,6 +36,7 @@ interface ChatItemProps {
   effectiveUserType: string;
   formatDate: (date: Date) => string;
   handleRenameChat: (e: React.MouseEvent, chatId: string) => void;
+  handleArchiveChat: (e: React.MouseEvent, chatId: string) => void;
   handleDeleteConversation: (e: React.MouseEvent, conversationId: string) => void;
   isOpen: boolean;
   contentType: string | null;
@@ -54,6 +56,7 @@ const ChatItem = memo<ChatItemProps>(({
   effectiveUserType,
   formatDate,
   handleRenameChat,
+  handleArchiveChat,
   handleDeleteConversation,
   isOpen,
   contentType,
@@ -142,15 +145,11 @@ const ChatItem = memo<ChatItemProps>(({
               <Edit3 size={12} />
             </Button>
 
-            {/* Archive button */}
+            {/* Archive button (soft delete) */}
             <Button
               variant="ghost"
               size="icon"
-              onClick={e => {
-                e.stopPropagation();
-                // TODO: Implement archive functionality
-                console.log('Archive chat:', conversation.id);
-              }}
+              onClick={e => handleArchiveChat(e, conversation.id)}
               className={`h-6 w-6 ${
                 isLightTheme
                   ? 'hover:bg-amber-100 text-gray-500 hover:text-amber-600'
@@ -206,6 +205,7 @@ export const OptimizedChatListForSidebar = memo<OptimizedChatListForSidebarProps
   effectiveUserType,
   formatDate,
   handleRenameChat,
+  handleArchiveChat,
   handleDeleteConversation,
   isOpen,
   contentType,
@@ -228,6 +228,7 @@ export const OptimizedChatListForSidebar = memo<OptimizedChatListForSidebarProps
           effectiveUserType={effectiveUserType}
           formatDate={formatDate}
           handleRenameChat={handleRenameChat}
+          handleArchiveChat={handleArchiveChat}
           handleDeleteConversation={handleDeleteConversation}
           isOpen={isOpen}
           contentType={contentType}

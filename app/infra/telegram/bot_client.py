@@ -59,6 +59,7 @@ class SendMessageResult:
     success: bool
     message_id: Optional[int] = None
     error: Optional[str] = None
+    file_id: Optional[str] = None  # Telegram file_id for caching
 
 
 class TelegramBotClient:
@@ -425,7 +426,11 @@ class TelegramBotClient:
         caption: Optional[str] = None,
         topic_id: Optional[int] = None,
     ) -> SendMessageResult:
-        """Send a file (document, photo, etc.)"""
+        """
+        Send a file (document, photo, etc.) from URL.
+
+        Returns SendMessageResult with file_id for caching.
+        """
         if not self._initialized:
             return SendMessageResult(success=False, error="Bot not initialized")
 
@@ -438,6 +443,7 @@ class TelegramBotClient:
         try:
             # Determine file type from extension
             file_ext = file_url.lower().split(".")[-1] if "." in file_url else ""
+            file_id = None
 
             if file_ext in ("jpg", "jpeg", "png", "gif", "webp"):
                 msg = await self._bot.send_photo(
@@ -446,6 +452,9 @@ class TelegramBotClient:
                     caption=caption,
                     message_thread_id=topic_id,
                 )
+                # Extract file_id from response (largest photo)
+                if msg.photo:
+                    file_id = msg.photo[-1].file_id
             else:
                 msg = await self._bot.send_document(
                     chat_id=normalized_chat_id,
@@ -454,11 +463,84 @@ class TelegramBotClient:
                     message_thread_id=topic_id,
                     filename=file_name,
                 )
+                # Extract file_id from response
+                if msg.document:
+                    file_id = msg.document.file_id
 
-            return SendMessageResult(success=True, message_id=msg.message_id)
+            return SendMessageResult(success=True, message_id=msg.message_id, file_id=file_id)
 
         except Exception as e:
             log.error(f"Failed to send file: {e}", exc_info=True)
+            return SendMessageResult(success=False, error=str(e))
+
+    async def send_file_by_id(
+        self,
+        chat_id: int,
+        file_id: str,
+        file_type: str = "document",
+        caption: Optional[str] = None,
+        topic_id: Optional[int] = None,
+    ) -> SendMessageResult:
+        """
+        Send a file using cached Telegram file_id (no re-upload needed).
+
+        This is faster than send_file() because Telegram doesn't need to
+        download the file from MinIO again.
+
+        Args:
+            chat_id: Telegram chat ID
+            file_id: Cached Telegram file_id
+            file_type: Type of file (photo, document, voice, video)
+            caption: Optional caption
+            topic_id: Forum topic ID
+
+        Returns:
+            SendMessageResult with success status
+        """
+        if not self._initialized:
+            return SendMessageResult(success=False, error="Bot not initialized")
+
+        # Normalize chat_id to Bot API format
+        normalized_chat_id = self._normalize_chat_id(chat_id)
+
+        # Wait for rate limit
+        await self._acquire_rate_limit(normalized_chat_id)
+
+        try:
+            if file_type in ("photo", "image"):
+                msg = await self._bot.send_photo(
+                    chat_id=normalized_chat_id,
+                    photo=file_id,
+                    caption=caption,
+                    message_thread_id=topic_id,
+                )
+            elif file_type == "voice":
+                msg = await self._bot.send_voice(
+                    chat_id=normalized_chat_id,
+                    voice=file_id,
+                    caption=caption,
+                    message_thread_id=topic_id,
+                )
+            elif file_type == "video":
+                msg = await self._bot.send_video(
+                    chat_id=normalized_chat_id,
+                    video=file_id,
+                    caption=caption,
+                    message_thread_id=topic_id,
+                )
+            else:
+                # Default to document
+                msg = await self._bot.send_document(
+                    chat_id=normalized_chat_id,
+                    document=file_id,
+                    caption=caption,
+                    message_thread_id=topic_id,
+                )
+
+            return SendMessageResult(success=True, message_id=msg.message_id, file_id=file_id)
+
+        except Exception as e:
+            log.error(f"Failed to send file by ID: {e}", exc_info=True)
             return SendMessageResult(success=False, error=str(e))
 
     async def send_voice(

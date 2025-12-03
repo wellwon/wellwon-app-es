@@ -115,6 +115,7 @@ class MinIOStorageProvider(BaseStorageProvider):
                 Key=key,
                 Body=file_content,
                 ContentType=content_type,
+                ACL='public-read',  # Make files publicly accessible
             )
 
         try:
@@ -278,7 +279,7 @@ class MinIOStorageProvider(BaseStorageProvider):
 
     async def ensure_bucket_exists(self) -> bool:
         """
-        Ensure the storage bucket exists.
+        Ensure the storage bucket exists and is publicly accessible.
 
         Returns:
             True if bucket exists or was created, False on error
@@ -295,6 +296,9 @@ class MinIOStorageProvider(BaseStorageProvider):
                 else:
                     raise
 
+            # Set bucket policy for public read access
+            await self._set_public_policy(s3)
+
         try:
             await self._circuit_breaker.call(
                 retry_async,
@@ -310,6 +314,33 @@ class MinIOStorageProvider(BaseStorageProvider):
         except Exception as e:
             log.error(f"Failed to ensure bucket exists: {e}", exc_info=True)
             return False
+
+    async def _set_public_policy(self, s3: Any) -> None:
+        """Set bucket policy for public read access (MinIO compatible)."""
+        import json
+
+        policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "PublicReadGetObject",
+                    "Effect": "Allow",
+                    "Principal": "*",
+                    "Action": ["s3:GetObject"],
+                    "Resource": [f"arn:aws:s3:::{self.config.bucket_name}/*"]
+                }
+            ]
+        }
+
+        try:
+            await s3.put_bucket_policy(
+                Bucket=self.config.bucket_name,
+                Policy=json.dumps(policy)
+            )
+            log.info(f"Bucket policy set for public read: {self.config.bucket_name}")
+        except ClientError as e:
+            # Policy might already exist or not be supported
+            log.warning(f"Could not set bucket policy: {e}")
 
 
 # =============================================================================

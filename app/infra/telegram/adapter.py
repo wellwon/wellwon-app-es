@@ -229,6 +229,38 @@ class TelegramAdapter:
             topic_id=topic_id
         )
 
+    async def send_file_by_id(
+        self,
+        chat_id: int,
+        file_id: str,
+        file_type: str = "document",
+        caption: Optional[str] = None,
+        topic_id: Optional[int] = None
+    ) -> SendMessageResult:
+        """
+        Send a file using cached Telegram file_id (faster, no re-upload).
+
+        Args:
+            chat_id: Telegram chat ID
+            file_id: Cached Telegram file_id
+            file_type: Type (photo, document, voice, video)
+            caption: Optional caption
+            topic_id: Forum topic ID
+
+        Returns:
+            SendMessageResult with success status
+        """
+        if not self._bot_client:
+            return SendMessageResult(success=False, error="Bot client not available")
+
+        return await self._bot_client.send_file_by_id(
+            chat_id=chat_id,
+            file_id=file_id,
+            file_type=file_type,
+            caption=caption,
+            topic_id=topic_id
+        )
+
     async def edit_message(
         self,
         chat_id: int,
@@ -258,6 +290,101 @@ class TelegramAdapter:
             return None
 
         return await self._bot_client.get_file_url(file_id)
+
+    async def download_file(self, file_id: str) -> Optional[bytes]:
+        """
+        Download file content from Telegram via Bot API.
+
+        Limit: 20MB maximum file size.
+
+        Args:
+            file_id: Telegram file ID
+
+        Returns:
+            File content as bytes, or None on error
+        """
+        if not self._bot_client:
+            log.warning("Bot client not available for file download")
+            return None
+
+        return await self._bot_client.download_file(file_id)
+
+    async def download_file_mtproto(self, raw_message: Optional[Dict[str, Any]]) -> Optional[bytes]:
+        """
+        Download file from Telegram via MTProto (up to 2GB).
+
+        Uses Telethon's download_media with in-memory buffer.
+        Best for large files that exceed Bot API's 20MB limit.
+
+        Args:
+            raw_message: Original Telegram message dict containing media
+
+        Returns:
+            File content as bytes, or None on error
+        """
+        if not self._mtproto_client:
+            log.warning("MTProto client not available for large file download")
+            return None
+
+        if not raw_message:
+            log.warning("No raw message data provided for MTProto download")
+            return None
+
+        try:
+            import io
+
+            # Download to memory buffer using Telethon
+            buffer = io.BytesIO()
+
+            # Telethon can download from message dict directly in some cases,
+            # but for reliability we should reconstruct from chat_id + message_id
+            chat_id = raw_message.get("chat", {}).get("id")
+            message_id = raw_message.get("message_id")
+
+            if not chat_id or not message_id:
+                log.error("Missing chat_id or message_id for MTProto download")
+                return None
+
+            # Get the message from Telegram and download media
+            client = self._mtproto_client._client
+            if not client:
+                log.error("MTProto client connection not available")
+                return None
+
+            # Get messages and download
+            from telethon.tl.types import PeerChannel
+
+            # Normalize chat_id for Telethon
+            if chat_id < 0:
+                # Remove -100 prefix if present
+                if str(abs(chat_id)).startswith("100"):
+                    peer_id = int(str(abs(chat_id))[3:])
+                else:
+                    peer_id = abs(chat_id)
+            else:
+                peer_id = chat_id
+
+            messages = await client.get_messages(peer_id, ids=message_id)
+            if not messages:
+                log.error(f"Could not find message {message_id} in chat {peer_id}")
+                return None
+
+            message = messages if not isinstance(messages, list) else messages[0]
+
+            if not message or not message.media:
+                log.error(f"Message {message_id} has no media")
+                return None
+
+            # Download media to buffer
+            await client.download_media(message, file=buffer)
+
+            file_bytes = buffer.getvalue()
+            log.info(f"MTProto downloaded {len(file_bytes)} bytes from message {message_id}")
+            return file_bytes
+
+        except Exception as e:
+            log.error(f"MTProto download failed: {e}", exc_info=True)
+            return None
 
     # =========================================================================
     # READ STATUS (MTProto)

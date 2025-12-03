@@ -71,6 +71,15 @@ class DistributedLockConfig(BaseModel):
     use_backoff: Optional[bool] = None
 
 
+class BulkheadConfig(BaseModel):
+    """Bulkhead configuration for resource isolation."""
+    name: str
+    max_concurrent: int = 10
+    max_queue_size: int = 100
+    timeout_ms: int = 5000
+    distributed: bool = True
+
+
 class ReliabilityConfigBundle(BaseModel):
     """Combined configuration for circuit breaker, retry, rate limiter, and distributed lock"""
     circuit_breaker: CircuitBreakerConfig
@@ -768,6 +777,64 @@ class ReliabilityConfigs:
         ]):
             return True
         return ReliabilityConfigs.should_retry_error(error)
+
+    # =========================================================================
+    # Kontur Declarant API
+    # =========================================================================
+    @staticmethod
+    def kontur_circuit_breaker(category: str = "kontur") -> CircuitBreakerConfig:
+        """Circuit breaker for Kontur Declarant API"""
+        return CircuitBreakerConfig(
+            name=f"kontur_{category}",
+            failure_threshold=5,
+            success_threshold=3,
+            reset_timeout_seconds=60,
+            half_open_max_calls=3,
+            window_size=20,
+            failure_rate_threshold=0.5
+        )
+
+    @staticmethod
+    def kontur_retry() -> RetryConfig:
+        """Retry configuration for Kontur Declarant API"""
+        return RetryConfig(
+            max_attempts=3,
+            initial_delay_ms=1000,
+            max_delay_ms=30000,
+            backoff_factor=2.0,
+            jitter=True,
+            jitter_type="full"
+        )
+
+    @staticmethod
+    def kontur_rate_limiter() -> RateLimiterConfig:
+        """Rate limiter for Kontur API (10 req/s global)"""
+        return RateLimiterConfig(
+            algorithm="token_bucket",
+            capacity=100,
+            refill_rate=10.0,
+            distributed=True
+        )
+
+    @staticmethod
+    def kontur_bulkhead() -> BulkheadConfig:
+        """Bulkhead for Kontur API (limit concurrent requests)"""
+        return BulkheadConfig(
+            name="kontur",
+            max_concurrent=20,
+            max_queue_size=100,
+            timeout_ms=30000,
+            distributed=True
+        )
+
+    @staticmethod
+    def kontur_reliability() -> ReliabilityConfigBundle:
+        """Combined reliability configuration for Kontur Declarant API"""
+        return ReliabilityConfigBundle(
+            circuit_breaker=ReliabilityConfigs.kontur_circuit_breaker(),
+            retry=ReliabilityConfigs.kontur_retry(),
+            rate_limiter=ReliabilityConfigs.kontur_rate_limiter()
+        )
 
 
 # =============================================================================

@@ -17,9 +17,10 @@ from app.chat.commands import (
     MarkMessagesAsReadCommand,
     StartTypingCommand,
     StopTypingCommand,
+    UpdateMessageFileUrlCommand,
 )
 from app.chat.aggregate import ChatAggregate
-from app.chat.events import TypingStarted, TypingStopped
+from app.chat.events import TypingStarted, TypingStopped, MessageFileUrlUpdated
 from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
 
@@ -438,3 +439,69 @@ class StopTypingHandler(BaseCommandHandler):
         await self.event_bus.publish(self.transport_topic, event_dict)
 
         return command.chat_id
+
+
+@command_handler(UpdateMessageFileUrlCommand)
+class UpdateMessageFileUrlHandler(BaseCommandHandler):
+    """
+    Handle UpdateMessageFileUrlCommand - update message file URL after async upload.
+
+    This handler is part of the fire-and-forget pattern for fast incoming Telegram messages:
+    1. Message arrives from Telegram with file_id
+    2. Message is stored immediately with temp Telegram CDN URL
+    3. Background task downloads file, uploads to MinIO
+    4. This handler updates the message with permanent MinIO URL
+    5. Event is published to WSE for real-time frontend update
+
+    Performance: Direct ScyllaDB update (no aggregate needed) + WSE publish.
+    """
+
+    def __init__(self, deps: 'HandlerDependencies'):
+        super().__init__(
+            event_bus=deps.event_bus,
+            transport_topic="transport.chat-events",
+            event_store=None  # Direct ScyllaDB update, not via aggregate
+        )
+        # Lazy import to avoid circular dependency
+        self._scylla_repo = None
+
+    @property
+    def scylla_repo(self):
+        if self._scylla_repo is None:
+            from app.infra.read_repos.message_scylla_repo import get_message_scylla_repo
+            self._scylla_repo = get_message_scylla_repo()
+        return self._scylla_repo
+
+    async def handle(self, command: UpdateMessageFileUrlCommand) -> int:
+        log.info(
+            f"Updating file URL for message {command.message_id} in chat {command.chat_id}"
+        )
+
+        # Direct ScyllaDB update (no aggregate - performance optimization)
+        await self.scylla_repo.update_message_file_url(
+            channel_id=command.chat_id,
+            message_id=command.message_id,
+            file_url=command.new_file_url,
+            file_name=command.file_name,
+            file_size=command.file_size,
+            file_type=command.file_type,
+        )
+
+        # Create and publish event for WSE real-time update
+        event = MessageFileUrlUpdated(
+            message_id=command.message_id,
+            chat_id=command.chat_id,
+            new_file_url=command.new_file_url,
+            file_name=command.file_name,
+            file_size=command.file_size,
+            file_type=command.file_type,
+        )
+
+        # Publish directly to transport for real-time delivery
+        event_dict = event.model_dump(mode='json', by_alias=True)
+        await self.event_bus.publish(self.transport_topic, event_dict)
+
+        log.info(
+            f"File URL updated for message {command.message_id}: {command.new_file_url}"
+        )
+        return command.message_id

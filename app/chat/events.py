@@ -257,6 +257,26 @@ class MessagesReadOnTelegram(BaseEvent):
     telegram_read_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+@domain_event(category="domain")
+class MessageFileUrlUpdated(BaseEvent):
+    """Event emitted when a message's file URL is updated after async upload.
+
+    Fire-and-forget pattern for fast incoming Telegram messages:
+    1. Message stored immediately with temp Telegram CDN URL
+    2. Background task downloads and uploads to MinIO
+    3. This event updates the message with permanent MinIO URL
+    4. Frontend receives via WSE and updates the UI seamlessly
+    """
+    event_type: Literal["MessageFileUrlUpdated"] = "MessageFileUrlUpdated"
+    message_id: int  # Snowflake ID (bigint)
+    chat_id: uuid.UUID
+    new_file_url: str
+    file_name: Optional[str] = None
+    file_size: Optional[int] = None
+    file_type: Optional[str] = None
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 # =============================================================================
 # Typing Events (ephemeral, not stored in event store)
 # =============================================================================
@@ -339,6 +359,7 @@ CHAT_EVENT_TYPES = {
     "MessagesMarkedAsRead": MessagesMarkedAsRead,
     "MessageSyncedToTelegram": MessageSyncedToTelegram,
     "MessagesReadOnTelegram": MessagesReadOnTelegram,
+    "MessageFileUrlUpdated": MessageFileUrlUpdated,
     "TypingStarted": TypingStarted,
     "TypingStopped": TypingStopped,
     "TelegramChatLinked": TelegramChatLinked,
