@@ -207,6 +207,28 @@ class KonturAdapter:
         """Mark docflow as opened/viewed."""
         return await self._docflows.set_opened(docflow_id)
 
+    async def get_docflow(self, docflow_id: str) -> Optional[DocflowDto]:
+        """
+        Get single docflow by ID.
+
+        Uses list_docflows to find specific docflow since Kontur API
+        doesn't have a direct get-by-id endpoint.
+
+        Args:
+            docflow_id: Docflow UUID
+
+        Returns:
+            DocflowDto if found, None otherwise
+        """
+        # List all docflows and find by ID
+        # Note: For better performance with large datasets, consider using
+        # search_docflows with appropriate filters
+        docflows = await self.list_docflows(take=1000)
+        for df in docflows:
+            if df.id == docflow_id:
+                return df
+        return None
+
     # =========================================================================
     # Documents API (5 endpoints)
     # =========================================================================

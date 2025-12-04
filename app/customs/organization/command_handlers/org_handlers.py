@@ -100,16 +100,16 @@ class CreateCommonOrgHandler(BaseCommandHandler):
             from app.infra.kontur.adapter import get_kontur_adapter
 
             adapter = await get_kontur_adapter()
-            kontur_org = await adapter.get_or_create_common_org_by_inn(inn)
+            kontur_org = await adapter.get_or_create_org_by_inn(inn)
 
             if kontur_org:
                 return {
-                    "org_name": kontur_org.get("orgName", ""),
-                    "short_name": kontur_org.get("shortName"),
-                    "kpp": kontur_org.get("kpp"),
-                    "ogrn": kontur_org.get("ogrn"),
-                    "kontur_org_id": kontur_org.get("id"),
-                    "legal_address": kontur_org.get("legalAddress"),
+                    "org_name": kontur_org.org_name or "",
+                    "short_name": kontur_org.short_name,
+                    "kpp": kontur_org.kpp,
+                    "ogrn": kontur_org.ogrn,
+                    "kontur_org_id": kontur_org.id,
+                    "legal_address": kontur_org.legal_address.model_dump() if kontur_org.legal_address else None,
                 }
 
         except Exception as e:
@@ -223,12 +223,12 @@ class SyncOrgFromRegistryHandler(BaseCommandHandler):
 
             org.sync_from_registry(
                 inn=command.inn,
-                org_name=kontur_org.get("orgName", ""),
-                short_name=kontur_org.get("shortName"),
-                kpp=kontur_org.get("kpp"),
-                ogrn=kontur_org.get("ogrn"),
-                kontur_org_id=kontur_org.get("id"),
-                legal_address=kontur_org.get("legalAddress"),
+                org_name=kontur_org.org_name or "",
+                short_name=kontur_org.short_name,
+                kpp=kontur_org.kpp,
+                ogrn=kontur_org.ogrn,
+                kontur_org_id=kontur_org.id,
+                legal_address=kontur_org.legal_address.model_dump() if kontur_org.legal_address else None,
             )
 
         except Exception as e:

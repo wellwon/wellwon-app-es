@@ -289,8 +289,13 @@ const SidebarChat: React.FC = () => {
       });
     }
 
-    // В режиме групповых чатов
+    // В режиме групповых чатов - показываем ТОЛЬКО темы из групп
     let filtered = conversations.filter(conversation => {
+      // Базовый фильтр: показываем только чаты, принадлежащие группам
+      // (имеют telegram_supergroup_id или company_id)
+      const belongsToGroup = conversation.telegram_supergroup_id !== null || conversation.company_id;
+      if (!belongsToGroup) return false;
+
       if (selectedSupergroupId !== null) {
         // Группа выбрана - фильтруем по ней
 
@@ -310,7 +315,7 @@ const SidebarChat: React.FC = () => {
 
         return matchesBySupergroupId || matchesByCompanyId;
       }
-      // Группа НЕ выбрана - показываем ВСЕ чаты (режим "Все чаты")
+      // Группа НЕ выбрана - показываем все темы из всех групп
       return true;
     });
 
@@ -626,18 +631,11 @@ const SidebarChat: React.FC = () => {
                   {filteredConversations.length} чатов
                 </p>
               </div>
-            ) : selectedSupergroupId !== null ? (
+            ) : (
               <div className="text-white">
                 <h2 className="font-semibold text-lg">Темы / запросы</h2>
                 <p className="text-xs text-gray-400">
                   {filteredConversations.length} тем
-                </p>
-              </div>
-            ) : (
-              <div className="text-white">
-                <h2 className="font-semibold text-lg">Все чаты</h2>
-                <p className="text-xs text-gray-400">
-                  {conversations.length} диалогов
                 </p>
               </div>
             )}
@@ -733,8 +731,13 @@ const SidebarChat: React.FC = () => {
                       if (activeMode === 'personal') {
                         return chat.telegram_supergroup_id === null;
                       }
+
+                      // Режим "Темы / запросы" - показываем только чаты из групп
+                      const belongsToGroup = chat.telegram_supergroup_id !== null || chat.company_id;
+                      if (!belongsToGroup) return false;
+
                       if (selectedSupergroupId !== null) {
-                        // Group is selected - filter by supergroup_id or company_id
+                        // Группа выбрана - фильтруем по ней
                         const isOptimistic = (chat as any)?._isOptimistic === true;
                         if (isOptimistic) return true;
 
@@ -749,7 +752,7 @@ const SidebarChat: React.FC = () => {
                         const matchesByCompanyId = selectedGroupCompanyId && chat.company_id === selectedGroupCompanyId;
                         return matchesBySupergroupId || matchesByCompanyId;
                       }
-                      // No group selected = "Все чаты" mode - show ALL chats
+                      // Группа НЕ выбрана - показываем все темы из всех групп
                       return true;
                     })}
                     activeChat={activeChat}

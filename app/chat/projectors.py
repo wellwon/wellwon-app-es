@@ -150,6 +150,9 @@ class ChatProjector:
         """
         Project ChatHardDeleted - ScyllaDB + PostgreSQL cleanup.
 
+        ASYNC PROJECTION: Runs in EventProcessor worker (eventual consistency).
+        Better for performance - doesn't block HTTP response.
+
         Order:
             1. ScyllaDB - delete ALL message data (messages, reactions, pins, etc.)
             2. PostgreSQL - delete chat metadata (CASCADE handles participants)
