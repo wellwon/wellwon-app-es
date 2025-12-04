@@ -1538,41 +1538,39 @@ class MessageScyllaRepo:
                 log.warning(f"Error deleting messages from bucket {bucket}: {e}")
 
         # ---------------------------------------------------------------------
-        # 4. Fallback: If no messages found in expected buckets, try ALLOW FILTERING
-        # This handles edge cases where bucket calculation differs
+        # 4. ALWAYS run comprehensive scan to catch any missed buckets
+        # Snowflake IDs can produce buckets outside the time-based range
         # ---------------------------------------------------------------------
-        if messages_found == 0:
-            log.warning(f"No messages found in expected buckets for channel {channel_id}, trying direct query")
-            try:
-                # Direct query with ALLOW FILTERING (expensive but comprehensive)
-                all_messages = await self.client.execute(
-                    "SELECT bucket, message_id FROM messages WHERE channel_id = %s ALLOW FILTERING LIMIT 1000",
-                    (channel_id,),
-                )
-                if all_messages:
-                    # Group by bucket and delete
-                    found_buckets: set[int] = set()
-                    for row in all_messages:
-                        if row.get('bucket') is not None:
-                            found_buckets.add(row['bucket'])
+        try:
+            # Direct query with ALLOW FILTERING to catch any remaining messages
+            all_messages = await self.client.execute(
+                "SELECT bucket, message_id FROM messages WHERE channel_id = %s ALLOW FILTERING LIMIT 1000",
+                (channel_id,),
+            )
+            if all_messages:
+                # Group by bucket and delete
+                found_buckets: set[int] = set()
+                for row in all_messages:
+                    if row.get('bucket') is not None:
+                        found_buckets.add(row['bucket'])
 
-                    log.info(f"Direct query found {len(all_messages)} messages in buckets: {list(found_buckets)}")
+                log.info(f"Comprehensive scan found {len(all_messages)} remaining messages in buckets: {list(found_buckets)}")
 
-                    for bucket in found_buckets:
-                        try:
-                            await self.client.execute(
-                                "DELETE FROM messages WHERE channel_id = %s AND bucket = %s",
-                                (channel_id, bucket),
-                                execution_profile='write',
-                            )
-                            buckets_deleted += 1
-                            log.info(f"Deleted messages from channel {channel_id} bucket {bucket} (fallback)")
-                        except Exception as e:
-                            log.warning(f"Error deleting messages from bucket {bucket} (fallback): {e}")
-                else:
-                    log.info(f"No messages found for channel {channel_id} (channel may have no messages)")
-            except Exception as e:
-                log.warning(f"Error in fallback message query for channel {channel_id}: {e}")
+                for bucket in found_buckets:
+                    try:
+                        await self.client.execute(
+                            "DELETE FROM messages WHERE channel_id = %s AND bucket = %s",
+                            (channel_id, bucket),
+                            execution_profile='write',
+                        )
+                        buckets_deleted += 1
+                        log.info(f"Deleted remaining messages from channel {channel_id} bucket {bucket}")
+                    except Exception as e:
+                        log.warning(f"Error deleting messages from bucket {bucket}: {e}")
+            else:
+                log.info(f"No remaining messages for channel {channel_id}")
+        except Exception as e:
+            log.warning(f"Error in comprehensive message scan for channel {channel_id}: {e}")
 
         log.info(f"Deleted messages from {buckets_deleted} buckets for channel {channel_id}")
         return buckets_deleted

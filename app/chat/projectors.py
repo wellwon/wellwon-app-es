@@ -176,9 +176,8 @@ class ChatProjector:
                 f"telegram_mappings={scylla_result.get('telegram_mappings', 0)}"
             )
         except Exception as e:
-            # Log error but continue with PostgreSQL cleanup
-            # ScyllaDB data will be orphaned but won't break the system
             log.error(f"ScyllaDB cleanup failed for chat {chat_id}: {e}", exc_info=True)
+            raise  # Fail loudly - don't leave orphaned data
 
         # -----------------------------------------------------------------
         # 2. PostgreSQL - delete chat metadata (CASCADE handles participants)
