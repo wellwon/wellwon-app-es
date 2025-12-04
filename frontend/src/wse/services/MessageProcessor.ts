@@ -539,9 +539,15 @@ export class MessageProcessor {
     }
 
     // Check for a registered handler
+    // DEBUG: Log all incoming messages for saga events
+    if (type.includes('group_') || type.includes('saga') || type.includes('completion')) {
+      console.log('[WSE DEBUG] Received saga-related event:', type, message);
+    }
+
     const handler = this.messageHandlers.get(type);
     if (handler) {
       try {
+        console.log('[WSE DEBUG] Calling handler for:', type);
         handler(message);
       } catch (error) {
         logger.error(`Error in handler for ${type}:`, error);

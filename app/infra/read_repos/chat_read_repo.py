@@ -223,6 +223,7 @@ class ChatReadRepo:
 
         Note: Parameter is telegram_chat_id but DB column is telegram_supergroup_id.
         """
+        log.info(f"[LOOKUP] Searching chat: tg_chat_id={telegram_chat_id}, tg_topic_id={telegram_topic_id}")
         if telegram_topic_id:
             row = await pg_client.fetchrow(
                 """
@@ -279,8 +280,11 @@ class ChatReadRepo:
                     telegram_chat_id
                 )
         if not row:
+            log.warning(f"[LOOKUP] No chat found for tg_chat_id={telegram_chat_id}, tg_topic_id={telegram_topic_id}")
             return None
-        return ChatReadModel(**dict(row))
+        model = ChatReadModel(**dict(row))
+        log.info(f"[LOOKUP] Found chat: id={model.id}, name={model.name}, db_topic={model.telegram_topic_id}")
+        return model
 
     @staticmethod
     async def get_chats_by_user(

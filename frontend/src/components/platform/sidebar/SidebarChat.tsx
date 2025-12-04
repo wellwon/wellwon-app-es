@@ -290,6 +290,15 @@ const SidebarChat: React.FC = () => {
     }
 
     // В режиме групповых чатов - показываем ТОЛЬКО темы из групп
+    // DEBUG: Log filter inputs
+    console.log('[FILTER DEBUG]', {
+      selectedSupergroupId,
+      selectedGroupCompanyId,
+      conversationsCount: conversations.length,
+      chatsWithSupergroupId: conversations.filter(c => c.telegram_supergroup_id !== null).length,
+      chatsWithCompanyId: conversations.filter(c => c.company_id).length,
+    });
+
     let filtered = conversations.filter(conversation => {
       // Базовый фильтр: показываем только чаты, принадлежащие группам
       // (имеют telegram_supergroup_id или company_id)
@@ -302,7 +311,9 @@ const SidebarChat: React.FC = () => {
         // SPECIAL CASE: When selectedSupergroupId === 0 (optimistic group),
         // we MUST filter by company_id because chats don't have telegram_supergroup_id=0
         if (selectedSupergroupId === 0) {
-          return selectedGroupCompanyId && conversation.company_id === selectedGroupCompanyId;
+          const match = selectedGroupCompanyId && conversation.company_id === selectedGroupCompanyId;
+          console.log('[FILTER] optimistic mode', { chatId: conversation.id, company_id: conversation.company_id, selectedGroupCompanyId, match });
+          return match;
         }
 
         // Match by telegram_supergroup_id (main filter)
@@ -313,7 +324,20 @@ const SidebarChat: React.FC = () => {
         const matchesByCompanyId = selectedGroupCompanyId &&
           conversation.company_id === selectedGroupCompanyId;
 
-        return matchesBySupergroupId || matchesByCompanyId;
+        const match = matchesBySupergroupId || matchesByCompanyId;
+        if (conversation.telegram_supergroup_id || conversation.company_id) {
+          console.log('[FILTER] group mode', {
+            chatId: conversation.id,
+            telegram_supergroup_id: conversation.telegram_supergroup_id,
+            company_id: conversation.company_id,
+            selectedSupergroupId,
+            selectedGroupCompanyId,
+            matchesBySupergroupId,
+            matchesByCompanyId,
+            match
+          });
+        }
+        return match;
       }
       // Группа НЕ выбрана - показываем все темы из всех групп
       return true;

@@ -490,6 +490,13 @@ export function useChatList(options: UseChatListOptions = {}) {
       const companyId = data.company_id;
       const telegramGroupId = data.telegram_group_id;
 
+      console.log('[OPTIMISTIC DEBUG] handleGroupCreationCompleted received:', {
+        chatId,
+        companyId,
+        telegramGroupId,
+        fullData: data
+      });
+
       if (!chatId) {
         logger.warn('WSE: groupCreationCompleted missing chat_id', { data });
         return;
@@ -550,6 +557,13 @@ export function useChatList(options: UseChatListOptions = {}) {
       );
 
       syncZustandCache();
+
+      console.log('[OPTIMISTIC DEBUG] Chat added to cache:', {
+        chatId: newChat.id,
+        telegram_supergroup_id: newChat.telegram_supergroup_id,
+        company_id: newChat.company_id,
+        cacheKeyUsed: chatKeys.list({ includeArchived, limit })
+      });
 
       // Also dispatch chatCreated event for any other listeners
       window.dispatchEvent(new CustomEvent('chatCreated', { detail: newChat }));

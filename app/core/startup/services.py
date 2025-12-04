@@ -145,8 +145,15 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
 
             async def handle_incoming_telegram_message(msg: IncomingMessage):
                 """Handle incoming message from Telegram MTProto and dispatch to Chat domain"""
-                logger.info(f"Received Telegram message: chat_id={msg.chat_id}, topic_id={msg.topic_id}")
+                import time
+                t0 = time.perf_counter()
+                logger.info(f"[LATENCY] T+0ms: Received Telegram message: chat_id={msg.chat_id}, topic_id={msg.topic_id}, msg_id={msg.message_id}")
                 try:
+                    # Secondary safeguard: skip bot messages (primary filter is in MTProto client)
+                    if msg.sender_is_bot:
+                        logger.info(f"[HANDLER] Skipping bot message from {msg.sender_username or msg.sender_id}")
+                        return
+
                     # Normalize chat ID (remove -100 prefix for supergroups)
                     chat_id_str = str(msg.chat_id)
                     if chat_id_str.startswith("-100") and len(chat_id_str) > 4:
@@ -157,17 +164,23 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
                     logger.debug(f"Normalized chat_id={normalized_chat_id}, querying for WellWon chat")
 
                     # Find WellWon chat by Telegram ID
+                    t1 = time.perf_counter()
                     query = GetChatByTelegramIdQuery(
                         telegram_chat_id=normalized_chat_id,
                         telegram_topic_id=msg.topic_id,
                     )
                     chat_detail = await app.state.query_bus.query(query)
+                    t2 = time.perf_counter()
+                    logger.info(f"[LATENCY] T+{(t2-t0)*1000:.0f}ms: Chat lookup took {(t2-t1)*1000:.0f}ms")
 
                     if not chat_detail:
                         logger.warning(f"No chat found for telegram_chat_id={normalized_chat_id}, topic_id={msg.topic_id}")
                         return
 
-                    logger.info(f"Found chat id={chat_detail.id}, dispatching command")
+                    logger.info(
+                        f"[ROUTING] Matched message: tg_chat={normalized_chat_id}, tg_topic={msg.topic_id} "
+                        f"-> wellwon_chat={chat_detail.id}, chat_topic={chat_detail.telegram_topic_id}, chat_name={chat_detail.name}"
+                    )
 
                     # Determine message type
                     message_type = "text"
@@ -203,8 +216,10 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
                                     "is_bot": msg.sender_is_bot,
                                 },
                             )
+                            t3 = time.perf_counter()
                             await app.state.command_bus.send(command)
-                            logger.info(f"Command dispatched for chat {chat_detail.id}")
+                            t4 = time.perf_counter()
+                            logger.info(f"[LATENCY] T+{(t4-t0)*1000:.0f}ms: Command dispatch took {(t4-t3)*1000:.0f}ms for chat {chat_detail.id}")
                             break  # Success - exit retry loop
 
                         except ConcurrencyError as ce:

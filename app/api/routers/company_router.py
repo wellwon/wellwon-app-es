@@ -756,13 +756,20 @@ async def get_company_balance(
     query_bus=Depends(get_query_bus),
 ):
     """Get company balance"""
-    query = GetCompanyBalanceQuery(company_id=company_id)
-    result = await query_bus.query(query)
+    try:
+        query = GetCompanyBalanceQuery(company_id=company_id)
+        result = await query_bus.query(query)
 
-    if not result:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+        if not result:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
 
-    return BalanceResponse(**result.model_dump())
+        return BalanceResponse(**result.model_dump())
+    except HTTPException:
+        raise
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+        raise
 
 
 @router.post("/{company_id}/balance", response_model=BalanceResponse)

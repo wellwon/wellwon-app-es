@@ -404,8 +404,11 @@ class WSEDomainPublisher:
     async def _handle_chat_event(self, event: Dict[str, Any]) -> None:
         """Handle chat domain event"""
         try:
+            import time
+            t_start = time.perf_counter()
             event_type = event.get("event_type")
             chat_id = event.get("chat_id") or event.get("aggregate_id")
+            log.info(f"[LATENCY] WSE received {event_type} for chat {chat_id}")
 
             if not event_type or not chat_id:
                 log.warning(f"Chat event missing event_type or chat_id: {event}")
@@ -481,7 +484,8 @@ class WSEDomainPublisher:
                 log.debug(f"Also forwarded {event_type} to linker topic {linker_topic}")
 
             self._events_forwarded += 1
-            log.debug(f"Forwarded {event_type} -> {ws_event_type} to {topic}")
+            t_end = time.perf_counter()
+            log.info(f"[LATENCY] Forwarded {event_type} to WSE PubSub in {(t_end-t_start)*1000:.0f}ms")
 
         except Exception as e:
             self._forwarding_errors += 1

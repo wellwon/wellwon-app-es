@@ -826,6 +826,18 @@ class TelegramMTProtoClient:
     async def _process_polled_message(self, msg, sender, chat_id: int) -> None:
         """Process a message obtained via polling."""
         try:
+            # Get sender info early to check for bot
+            sender_id = sender.id if sender else None
+            sender_username = getattr(sender, 'username', None)
+            sender_first_name = getattr(sender, 'first_name', None)
+            sender_last_name = getattr(sender, 'last_name', None)
+            sender_is_bot = getattr(sender, 'bot', False) if sender else False
+
+            # Skip messages from bots (avoid echo from our own bot messages)
+            if sender_is_bot:
+                log.info(f"[POLLING] Skipping message from bot: {sender_username or 'unknown'}")
+                return
+
             # Extract topic_id for forum messages
             topic_id = None
             if hasattr(msg, 'reply_to') and msg.reply_to:
@@ -833,13 +845,6 @@ class TelegramMTProtoClient:
                 is_forum_topic = getattr(reply_to, 'forum_topic', False)
                 if is_forum_topic:
                     topic_id = getattr(reply_to, 'reply_to_top_id', None) or getattr(reply_to, 'reply_to_msg_id', None)
-
-            # Get sender info
-            sender_id = sender.id if sender else None
-            sender_username = getattr(sender, 'username', None)
-            sender_first_name = getattr(sender, 'first_name', None)
-            sender_last_name = getattr(sender, 'last_name', None)
-            sender_is_bot = getattr(sender, 'bot', False) if sender else False
 
             # Get message text
             text = msg.text or msg.message
@@ -1859,8 +1864,9 @@ class TelegramMTProtoClient:
         """
         Mark messages as read in a Telegram chat.
 
-        Uses Telethon's send_read_acknowledge which wraps messages.readHistory.
-        This marks all messages up to max_id as read.
+        Uses appropriate method based on chat type:
+        - For channels/supergroups: channels.ReadHistoryRequest
+        - For regular chats: messages.ReadHistoryRequest
 
         Args:
             chat_id: Telegram chat ID (as stored in DB, without -100 prefix)
@@ -1873,15 +1879,30 @@ class TelegramMTProtoClient:
             return False
 
         try:
+            from telethon.tl.functions.channels import ReadHistoryRequest as ChannelReadHistoryRequest
+            from telethon.tl.functions.messages import ReadHistoryRequest as MessageReadHistoryRequest
+            from telethon.tl.types import Channel
+
             peer_id = TelegramMTProtoClient._to_telegram_peer_id(chat_id)
             entity = await self._client.get_entity(peer_id)
 
-            # send_read_acknowledge marks messages as read
-            # If max_id=0 or None, it marks all messages as read
-            await self._client.send_read_acknowledge(
-                entity=entity,
-                max_id=max_id if max_id > 0 else None,
-            )
+            log.info(f"[READ_SYNC] Marking messages read: chat_id={chat_id}, max_id={max_id}, entity_type={type(entity).__name__}")
+
+            # Use correct method based on entity type
+            if isinstance(entity, Channel):
+                # Channels and supergroups (megagroups) use channels.ReadHistoryRequest
+                await self._client(ChannelReadHistoryRequest(
+                    channel=entity,
+                    max_id=max_id if max_id > 0 else 0,
+                ))
+                log.info(f"[READ_SYNC] Used channels.ReadHistoryRequest for supergroup {chat_id}")
+            else:
+                # Regular chats use messages.ReadHistoryRequest
+                await self._client(MessageReadHistoryRequest(
+                    peer=entity,
+                    max_id=max_id if max_id > 0 else 0,
+                ))
+                log.info(f"[READ_SYNC] Used messages.ReadHistoryRequest for chat {chat_id}")
 
             log.info(f"Marked messages as read in chat {chat_id} up to {max_id}")
             return True
@@ -1899,9 +1920,12 @@ class TelegramMTProtoClient:
         """
         Mark messages as read in a Telegram forum topic.
 
+        Uses ReadDiscussionRequest which is specifically for forum topics.
+        Reference: https://tl.telethon.dev/methods/messages/read_discussion.html
+
         Args:
             group_id: Telegram group ID (as stored in DB, without -100 prefix)
-            topic_id: Forum topic ID
+            topic_id: Forum topic ID (the thread's root message ID)
             max_id: Mark all messages up to this ID as read (0 = all messages)
 
         Returns:
@@ -1916,13 +1940,18 @@ class TelegramMTProtoClient:
             peer_id = TelegramMTProtoClient._to_telegram_peer_id(group_id)
             group = await self._client.get_entity(peer_id)
 
+            log.info(f"[READ_SYNC] Marking topic messages read: group={group_id}, topic={topic_id}, max_id={max_id}")
+
             # ReadDiscussionRequest marks messages in a forum topic as read
-            await self._client(ReadDiscussionRequest(
+            # msg_id = topic_id (the thread's root message ID)
+            # read_max_id = the max message ID to mark as read
+            result = await self._client(ReadDiscussionRequest(
                 peer=group,
                 msg_id=topic_id,  # Topic's thread message ID
                 read_max_id=max_id if max_id > 0 else 2147483647,  # Max int for "all"
             ))
 
+            log.info(f"[READ_SYNC] ReadDiscussionRequest result: {result}")
             log.info(f"Marked messages as read in group {group_id} topic {topic_id} up to {max_id}")
             return True
 

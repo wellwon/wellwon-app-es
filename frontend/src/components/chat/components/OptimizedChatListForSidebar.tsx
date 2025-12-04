@@ -128,8 +128,8 @@ const ChatItem = memo<ChatItemProps>(({
           </div>
         </div>
 
-        {/* Chat controls - Rename, Archive, Delete - visible for all users */}
-        <div className="absolute top-2 right-2 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        {/* Chat controls - Rename, Archive, Delete - always visible */}
+        <div className="absolute top-2 right-2 flex gap-0.5">
             {/* Rename button */}
             <Button
               variant="ghost"

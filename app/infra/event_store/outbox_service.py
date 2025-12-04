@@ -1039,7 +1039,7 @@ class OutboxPublisher:
 
                     # Instant signal to process events
                     self._process_event.set()
-                    log.debug(f"NOTIFY received: {payload}")
+                    log.info(f"[LATENCY] NOTIFY received instantly: event_id={payload}")
 
                 except asyncio.TimeoutError:
                     # Normal timeout - continue loop
@@ -1099,7 +1099,9 @@ class OutboxPublisher:
                     self._consecutive_empty_polls = 0
                     self._adaptive_interval = self.poll_interval_seconds
 
-                    log.debug(f"Publishing {len(entries)} events from outbox")
+                    import time
+                    t_start = time.perf_counter()
+                    log.info(f"[LATENCY] Publishing {len(entries)} events from outbox")
 
                     # Publish each event - use transactional if enabled
                     success_count = 0
@@ -1115,9 +1117,10 @@ class OutboxPublisher:
                             if await self.outbox_service.publish_event(entry):
                                 success_count += 1
 
+                    t_end = time.perf_counter()
                     log.info(
-                        f"Published {success_count}/{len(entries)} events "
-                        f"from outbox to transport"
+                        f"[LATENCY] Published {success_count}/{len(entries)} events "
+                        f"from outbox to transport in {(t_end-t_start)*1000:.0f}ms"
                     )
 
                     # Move very old failed events to dead letter

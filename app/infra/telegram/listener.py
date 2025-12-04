@@ -757,15 +757,17 @@ class TelegramEventListener:
             "telegram_topic_id": int | None,    # From aggregate state
         }
         """
+        log.info(f"[READ_SYNC] Received MessagesMarkedAsRead event: {event}")
+
         if not self._initialized or not self._telegram:
-            log.warning("Listener not initialized, skipping read sync")
+            log.warning("[READ_SYNC] Listener not initialized, skipping read sync")
             return
 
         # CRITICAL: Only sync reads from WEB to Telegram
         # If source is 'telegram', the read already came from Telegram - don't loop back
         source = event.get("source", "web")
         if source == "telegram":
-            log.debug("Skipping read sync - already from Telegram")
+            log.info("[READ_SYNC] Skipping - already from Telegram")
             return
 
         try:

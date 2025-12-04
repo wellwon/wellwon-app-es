@@ -986,7 +986,7 @@ class MessageScyllaRepo:
 
         # Fallback: Scan mapping table (still better than ALLOW FILTERING on messages)
         # This path is taken when telegram_chat_id is not available
-        mapping_results = await self.client.execute(
+        mapping_results = await self.client.execute_prepared(
             """SELECT channel_id, bucket, message_id
                FROM telegram_message_mapping
                WHERE telegram_message_id = ? ALLOW FILTERING""",
@@ -1062,7 +1062,7 @@ class MessageScyllaRepo:
             execution_profile='write',
         )
         # Increment counter (ScyllaDB counter table)
-        await self.client.execute(
+        await self.client.execute_prepared(
             """UPDATE message_reaction_counts SET count = count + 1
                WHERE channel_id = ? AND message_id = ? AND emoji = ?""",
             (channel_id, message_id, emoji),
@@ -1093,7 +1093,7 @@ class MessageScyllaRepo:
             execution_profile='write',
         )
         # Decrement counter
-        await self.client.execute(
+        await self.client.execute_prepared(
             """UPDATE message_reaction_counts SET count = count - 1
                WHERE channel_id = ? AND message_id = ? AND emoji = ?""",
             (channel_id, message_id, emoji),
@@ -1397,7 +1397,7 @@ class MessageScyllaRepo:
             Channel UUID if found, None otherwise
         """
         # Note: Uses ALLOW FILTERING on secondary index - acceptable for rare lookups
-        result = await self.client.execute(
+        result = await self.client.execute_prepared(
             "SELECT channel_id FROM telegram_sync_state WHERE telegram_chat_id = ? ALLOW FILTERING",
             (telegram_chat_id,),
         )
@@ -1488,8 +1488,8 @@ class MessageScyllaRepo:
         # These may have non-standard bucket values due to deterministic IDs
         # ---------------------------------------------------------------------
         try:
-            telegram_mappings = await self.client.execute(
-                "SELECT bucket FROM telegram_message_mapping WHERE channel_id = %s ALLOW FILTERING",
+            telegram_mappings = await self.client.execute_prepared(
+                "SELECT bucket FROM telegram_message_mapping WHERE channel_id = ? ALLOW FILTERING",
                 (channel_id,),
             )
             for row in telegram_mappings:
@@ -1527,8 +1527,8 @@ class MessageScyllaRepo:
                 if result:
                     messages_found += 1
                     # Delete all messages in this bucket
-                    await self.client.execute(
-                        "DELETE FROM messages WHERE channel_id = %s AND bucket = %s",
+                    await self.client.execute_prepared(
+                        "DELETE FROM messages WHERE channel_id = ? AND bucket = ?",
                         (channel_id, bucket),
                         execution_profile='write',
                     )
@@ -1543,8 +1543,8 @@ class MessageScyllaRepo:
         # ---------------------------------------------------------------------
         try:
             # Direct query with ALLOW FILTERING to catch any remaining messages
-            all_messages = await self.client.execute(
-                "SELECT bucket, message_id FROM messages WHERE channel_id = %s ALLOW FILTERING LIMIT 1000",
+            all_messages = await self.client.execute_prepared(
+                "SELECT bucket, message_id FROM messages WHERE channel_id = ? ALLOW FILTERING LIMIT 1000",
                 (channel_id,),
             )
             if all_messages:
@@ -1558,8 +1558,8 @@ class MessageScyllaRepo:
 
                 for bucket in found_buckets:
                     try:
-                        await self.client.execute(
-                            "DELETE FROM messages WHERE channel_id = %s AND bucket = %s",
+                        await self.client.execute_prepared(
+                            "DELETE FROM messages WHERE channel_id = ? AND bucket = ?",
                             (channel_id, bucket),
                             execution_profile='write',
                         )
@@ -1592,21 +1592,21 @@ class MessageScyllaRepo:
         try:
             # Get all reactions for this channel (scan is acceptable for deletion)
             # Note: SELECT DISTINCT requires all partition key columns in SELECT list
-            reactions = await self.client.execute(
-                "SELECT DISTINCT channel_id, message_id FROM message_reactions WHERE channel_id = %s ALLOW FILTERING",
+            reactions = await self.client.execute_prepared(
+                "SELECT DISTINCT channel_id, message_id FROM message_reactions WHERE channel_id = ? ALLOW FILTERING",
                 (channel_id,),
             )
             for row in reactions:
                 message_id = row['message_id']
                 # Delete reactions
-                await self.client.execute(
-                    "DELETE FROM message_reactions WHERE channel_id = %s AND message_id = %s",
+                await self.client.execute_prepared(
+                    "DELETE FROM message_reactions WHERE channel_id = ? AND message_id = ?",
                     (channel_id, message_id),
                     execution_profile='write',
                 )
                 # Delete reaction counts
-                await self.client.execute(
-                    "DELETE FROM message_reaction_counts WHERE channel_id = %s AND message_id = %s",
+                await self.client.execute_prepared(
+                    "DELETE FROM message_reaction_counts WHERE channel_id = ? AND message_id = ?",
                     (channel_id, message_id),
                     execution_profile='write',
                 )
@@ -1636,8 +1636,8 @@ class MessageScyllaRepo:
             count = len(pinned)
 
             # Delete all pinned for this channel
-            await self.client.execute(
-                "DELETE FROM pinned_messages WHERE channel_id = %s",
+            await self.client.execute_prepared(
+                "DELETE FROM pinned_messages WHERE channel_id = ?",
                 (channel_id,),
                 execution_profile='write',
             )
@@ -1659,14 +1659,14 @@ class MessageScyllaRepo:
         """
         try:
             # Get all user read positions for this channel
-            positions = await self.client.execute(
-                "SELECT user_id FROM message_read_positions WHERE channel_id = %s ALLOW FILTERING",
+            positions = await self.client.execute_prepared(
+                "SELECT user_id FROM message_read_positions WHERE channel_id = ? ALLOW FILTERING",
                 (channel_id,),
             )
             count = 0
             for row in positions:
-                await self.client.execute(
-                    "DELETE FROM message_read_positions WHERE channel_id = %s AND user_id = %s",
+                await self.client.execute_prepared(
+                    "DELETE FROM message_read_positions WHERE channel_id = ? AND user_id = ?",
                     (channel_id, row['user_id']),
                     execution_profile='write',
                 )
@@ -1689,8 +1689,8 @@ class MessageScyllaRepo:
             True if deleted, False otherwise
         """
         try:
-            await self.client.execute(
-                "DELETE FROM telegram_sync_state WHERE channel_id = %s",
+            await self.client.execute_prepared(
+                "DELETE FROM telegram_sync_state WHERE channel_id = ?",
                 (channel_id,),
                 execution_profile='write',
             )
@@ -1715,14 +1715,14 @@ class MessageScyllaRepo:
         """
         try:
             # Scan mappings for this channel (acceptable for deletion)
-            mappings = await self.client.execute(
-                "SELECT telegram_message_id, telegram_chat_id FROM telegram_message_mapping WHERE channel_id = %s ALLOW FILTERING",
+            mappings = await self.client.execute_prepared(
+                "SELECT telegram_message_id, telegram_chat_id FROM telegram_message_mapping WHERE channel_id = ? ALLOW FILTERING",
                 (channel_id,),
             )
             count = 0
             for row in mappings:
-                await self.client.execute(
-                    "DELETE FROM telegram_message_mapping WHERE telegram_message_id = %s AND telegram_chat_id = %s",
+                await self.client.execute_prepared(
+                    "DELETE FROM telegram_message_mapping WHERE telegram_message_id = ? AND telegram_chat_id = ?",
                     (row['telegram_message_id'], row['telegram_chat_id']),
                     execution_profile='write',
                 )
