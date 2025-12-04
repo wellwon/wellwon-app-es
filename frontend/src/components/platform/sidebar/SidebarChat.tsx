@@ -38,7 +38,8 @@ const SidebarChat: React.FC = () => {
     updateChat,
     setScopeBySupergroup,
     setScopeByCompany,
-    loadChats
+    loadChats,
+    chatScope,
   } = useRealtimeChatContext();
   const {
     openSidebar,
@@ -120,10 +121,7 @@ const SidebarChat: React.FC = () => {
 
       // Устанавливаем scope только если supergroup изменилась
       if (selectedSupergroupId !== chat.telegram_supergroup_id) {
-        setScopeBySupergroup({
-          id: chat.telegram_supergroup_id,
-          company_id: chat.company_id
-        });
+        setScopeBySupergroup(chat.telegram_supergroup_id, chat.company_id);
 
         logger.debug('Sidebar state synchronized with active chat', {
           chatId: activeChat.id,
@@ -182,20 +180,42 @@ const SidebarChat: React.FC = () => {
 
     // Prevent infinite loop - only sync if supergroup actually changed
     if (scopeSyncedRef.current === selectedSupergroupId) return;
+
+    // CRITICAL: Don't overwrite scope if it was already set correctly by GroupsPanel
+    // GroupsPanel calls setScopeBySupergroup before onSelectGroup, so scope may already be correct
+    if (chatScope.supergroupId === selectedSupergroupId && chatScope.companyId !== null) {
+      logger.debug('Skipping scope sync: scope already set correctly by GroupsPanel', {
+        supergroupId: selectedSupergroupId,
+        scopeCompanyId: chatScope.companyId,
+        component: 'SidebarChat'
+      });
+      scopeSyncedRef.current = selectedSupergroupId;
+      return;
+    }
+
+    // CRITICAL: Don't set scope with null company_id when we're in a transitional state
+    // This happens when optimistic group (id=0) is replaced with real ID but selectedSupergroupId
+    // hasn't been updated yet. Wait for company_id to be resolved.
+    if (selectedSupergroupId !== 0 && selectedGroupCompanyId === null) {
+      logger.debug('Skipping scope sync: waiting for company_id to resolve', {
+        supergroupId: selectedSupergroupId,
+        component: 'SidebarChat'
+      });
+      return;
+    }
+
     scopeSyncedRef.current = selectedSupergroupId;
 
     // Устанавливаем scope для загрузки чатов выбранной группы
-    setScopeBySupergroup({
-      id: selectedSupergroupId,
-      company_id: null // company_id определится автоматически при загрузке чатов
-    });
+    // Use selectedGroupCompanyId from activeSupergroups lookup
+    setScopeBySupergroup(selectedSupergroupId, selectedGroupCompanyId);
 
     logger.debug('Setting scope for visually selected supergroup', {
       supergroupId: selectedSupergroupId,
+      companyId: selectedGroupCompanyId,
       component: 'SidebarChat'
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSupergroupId, activeChat]);
+  }, [selectedSupergroupId, activeChat, selectedGroupCompanyId, setScopeBySupergroup, chatScope]);
 
   // Обработчик события manual group selection из useRealtimeChat
   useEffect(() => {

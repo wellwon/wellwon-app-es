@@ -1543,8 +1543,9 @@ class MessageScyllaRepo:
         # ---------------------------------------------------------------------
         try:
             # Direct query with ALLOW FILTERING to catch any remaining messages
+            # NOTE: In CQL, LIMIT must come before ALLOW FILTERING
             all_messages = await self.client.execute_prepared(
-                "SELECT bucket, message_id FROM messages WHERE channel_id = ? ALLOW FILTERING LIMIT 1000",
+                "SELECT bucket, message_id FROM messages WHERE channel_id = ? LIMIT 1000 ALLOW FILTERING",
                 (channel_id,),
             )
             if all_messages:

@@ -297,7 +297,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
 
       // Auto-select the new group
       onSelectGroup(newGroup.id);
-      setScopeBySupergroup(newGroup);
+      setScopeBySupergroup(newGroup.id, newGroup.company_id);
     }
   }, [activeSupergroups, onSelectGroup, setScopeBySupergroup]);
 
@@ -741,7 +741,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                          onSelectGroup(null);
                        } else {
                          onSelectGroup(group.id);
-                         setScopeBySupergroup(group);
+                         setScopeBySupergroup(group.id, group.company_id);
                        }
                      }}
               title={group.title}
@@ -937,7 +937,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                          setExpandedGroupId(null);
                        } else {
                          onSelectGroup(group.id);
-                         setScopeBySupergroup(group);
+                         setScopeBySupergroup(group.id, group.company_id);
                          setExpandedGroupId(group.id);
                        }
                      }}
