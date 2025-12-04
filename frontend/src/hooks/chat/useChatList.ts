@@ -47,15 +47,22 @@ export function useChatList(options: UseChatListOptions = {}) {
     }
   }, []);
 
+  // Zustand clearCache for when all chats are removed
+  const clearCache = useChatsStore((s) => s.clearCache);
+
   // Helper to sync Zustand after any cache update
   const syncZustandCache = useCallback(() => {
     const currentChats = queryClient.getQueryData<ChatListItem[]>(
       chatKeys.list({ includeArchived, limit })
     );
-    if (currentChats) {
+    if (currentChats && currentChats.length > 0) {
       setCachedChats(currentChats);
+    } else if (currentChats && currentChats.length === 0) {
+      // CRITICAL: Clear Zustand cache when all chats are removed
+      // This prevents deleted chats from reappearing on page refresh
+      clearCache();
     }
-  }, [queryClient, includeArchived, limit, setCachedChats]);
+  }, [queryClient, includeArchived, limit, setCachedChats, clearCache]);
 
   const query = useQuery({
     queryKey: chatKeys.list({ includeArchived, limit }),
@@ -439,6 +446,115 @@ export function useChatList(options: UseChatListOptions = {}) {
       syncZustandCache();
     };
 
+    // CRITICAL: Handle company deletion - remove all chats for the deleted company
+    // This is dispatched from GroupsPanel when user deletes a group
+    const handleCompanyDeleted = (event: CustomEvent) => {
+      const data = event.detail;
+      const companyId = data.company_id || data.id;
+
+      if (!companyId) {
+        logger.warn('WSE: companyDeleted missing company_id', { data });
+        return;
+      }
+
+      logger.info('WSE: Company deleted, removing all chats for company', { companyId });
+
+      // Cancel any pending retries for chats being deleted
+      pendingRetriesRef.current.forEach((controller) => {
+        controller.abort();
+      });
+      pendingRetriesRef.current.clear();
+
+      // Remove all chats belonging to this company
+      queryClient.setQueryData(
+        chatKeys.list({ includeArchived, limit }),
+        (oldData: ChatListItem[] | undefined) => {
+          if (!oldData) return oldData;
+          const filtered = oldData.filter((chat) => chat.company_id !== companyId);
+          logger.debug('WSE: Removed chats for company', {
+            companyId,
+            removedCount: oldData.length - filtered.length,
+            remainingCount: filtered.length
+          });
+          return filtered;
+        }
+      );
+
+      syncZustandCache();
+    };
+
+    // CRITICAL: Handle group creation saga completion - add the chat that was created
+    const handleGroupCreationCompleted = async (event: CustomEvent) => {
+      const data = event.detail;
+      const chatId = data.chat_id;
+      const companyId = data.company_id;
+      const telegramGroupId = data.telegram_group_id;
+
+      if (!chatId) {
+        logger.warn('WSE: groupCreationCompleted missing chat_id', { data });
+        return;
+      }
+
+      logger.info('WSE: Group creation completed, adding chat', {
+        chatId,
+        companyId,
+        telegramGroupId
+      });
+
+      // Cancel any in-flight refetches
+      await queryClient.cancelQueries({
+        queryKey: chatKeys.list({ includeArchived, limit })
+      });
+
+      // Create chat entry from saga completion data
+      const newChat: OptimisticChatListItem = {
+        id: chatId,
+        name: data.company_name || 'General',
+        chat_type: 'company',
+        is_active: true,
+        created_at: data.timestamp || new Date().toISOString(),
+        company_id: companyId,
+        telegram_chat_id: null,
+        telegram_supergroup_id: telegramGroupId,
+        telegram_topic_id: 1, // General topic
+        last_message_at: data.timestamp || new Date().toISOString(),
+        last_message_content: null,
+        last_message_sender_id: null,
+        unread_count: 0,
+        participant_count: 1,
+        other_participant_name: null,
+        _isOptimistic: false, // Not optimistic - saga completed
+      };
+
+      // Add to cache
+      queryClient.setQueryData(
+        chatKeys.list({ includeArchived, limit }),
+        (oldData: ChatListItem[] | undefined) => {
+          if (!oldData) return [newChat];
+
+          // Remove any optimistic entries for this company and add the real chat
+          const filtered = oldData.filter(c => {
+            // Remove optimistic chats with matching company_id
+            if ((c as any)._isOptimistic && c.company_id === companyId) {
+              return false;
+            }
+            // Remove if same chat_id already exists
+            if (c.id === chatId) {
+              return false;
+            }
+            return true;
+          });
+
+          return [newChat, ...filtered];
+        }
+      );
+
+      syncZustandCache();
+
+      // Also dispatch chatCreated event for any other listeners
+      window.dispatchEvent(new CustomEvent('chatCreated', { detail: newChat }));
+    };
+
     // Subscribe to WSE events
     window.addEventListener('chatCreated', handleChatCreated as EventListener);
     window.addEventListener('chatUpdated', handleChatUpdated as EventListener);
@@ -447,6 +563,8 @@ export function useChatList(options: UseChatListOptions = {}) {
     window.addEventListener('messageCreated', handleMessageCreated as EventListener);
     window.addEventListener('chatTelegramLinked', handleChatTelegramLinked as EventListener);
     window.addEventListener('groupDeletionCompleted', handleGroupDeletionCompleted as EventListener);
+    window.addEventListener('groupCreationCompleted', handleGroupCreationCompleted as EventListener);
+    window.addEventListener('companyDeleted', handleCompanyDeleted as EventListener);
 
     return () => {
       // Cleanup event listeners
@@ -457,6 +575,8 @@ export function useChatList(options: UseChatListOptions = {}) {
       window.removeEventListener('messageCreated', handleMessageCreated as EventListener);
       window.removeEventListener('chatTelegramLinked', handleChatTelegramLinked as EventListener);
       window.removeEventListener('groupDeletionCompleted', handleGroupDeletionCompleted as EventListener);
+      window.removeEventListener('groupCreationCompleted', handleGroupCreationCompleted as EventListener);
+      window.removeEventListener('companyDeleted', handleCompanyDeleted as EventListener);
 
       // CRITICAL: Cancel all pending retries on unmount to prevent stale writes
       pendingRetriesRef.current.forEach((controller) => {

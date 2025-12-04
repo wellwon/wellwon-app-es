@@ -1,5 +1,6 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import * as telegramApi from '@/api/telegram';
 import * as companyApi from '@/api/company';
 import { useRealtimeChatContext } from '@/contexts/RealtimeChatContext';
@@ -18,7 +19,7 @@ import AppConfirmDialog from '@/components/shared/AppConfirmDialog';
 import DeleteGroupDialog from './DeleteGroupDialog';
 import type { TelegramSupergroup } from '@/types/chat';
 import type { CompanyFormData, SupergroupFormData } from '@/types/company-form';
-import { useSupergroups, useInvalidateSupergroups } from '@/hooks/useSupergroups';
+import { useSupergroups, useInvalidateSupergroups, supergroupKeys } from '@/hooks/useSupergroups';
 
 interface GroupsPanelProps {
   selectedSupergroupId: number | null;
@@ -39,6 +40,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
   activeMode,
   onModeChange
 }) => {
+  const queryClient = useQueryClient();
   const { setScopeBySupergroup } = useRealtimeChatContext();
   const { profile } = useAuth();
 
@@ -60,6 +62,57 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
   } = useSupergroups();
 
   const invalidateSupergroups = useInvalidateSupergroups();
+
+  // Helper: Optimistically remove group from cache
+  const optimisticRemoveGroup = (group: TelegramSupergroup) => {
+    // Remove from active cache - match by id OR company_id (for optimistic entries)
+    queryClient.setQueryData(
+      supergroupKeys.active,
+      (oldData: TelegramSupergroup[] | undefined) => {
+        if (!oldData) return oldData;
+        return oldData.filter((g) => {
+          // Match by id or by company_id (optimistic entries may have id=0)
+          const matchesById = g.id === group.id && group.id !== 0;
+          const matchesByCompanyId = g.company_id === group.company_id && group.company_id;
+          return !matchesById && !matchesByCompanyId;
+        });
+      }
+    );
+    // Remove from archived cache
+    queryClient.setQueryData(
+      supergroupKeys.archived,
+      (oldData: TelegramSupergroup[] | undefined) => {
+        if (!oldData) return oldData;
+        return oldData.filter((g) => {
+          const matchesById = g.id === group.id && group.id !== 0;
+          const matchesByCompanyId = g.company_id === group.company_id && group.company_id;
+          return !matchesById && !matchesByCompanyId;
+        });
+      }
+    );
+    // Clear selection if this group was selected
+    if (selectedSupergroupId === group.id) {
+      onSelectGroup(null);
+    }
+    // Also clear pending auto-select if it matches this company
+    if (pendingAutoSelectRef.current === group.company_id) {
+      pendingAutoSelectRef.current = null;
+    }
+  };
+
+  // Helper: Rollback - add group back to cache
+  const rollbackRemoveGroup = (group: TelegramSupergroup, wasActive: boolean) => {
+    const targetKey = wasActive ? supergroupKeys.active : supergroupKeys.archived;
+    queryClient.setQueryData(
+      targetKey,
+      (oldData: TelegramSupergroup[] | undefined) => {
+        if (!oldData) return [group];
+        // Add back if not already there
+        if (oldData.some((g) => g.id === group.id)) return oldData;
+        return [group, ...oldData];
+      }
+    );
+  };
 
   // Local UI state (not data state)
   const [isCreateCompanyModalOpen, setIsCreateCompanyModalOpen] = useState(false);
@@ -177,27 +230,104 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
   
   const filteredSupergroups = useMemo(() => {
     let result = currentSupergroups;
-    
+
     // Фильтр по поиску
     if (searchQuery.trim()) {
-      result = result.filter(group => 
+      result = result.filter(group =>
         group.title.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
-    
+
     // Фильтр по типу группы
     if (selectedTypeFilter) {
       result = result.filter(group => group.group_type === selectedTypeFilter);
     }
-    
+
     return result;
   }, [currentSupergroups, searchQuery, selectedTypeFilter]);
+
+  // Ref to track pending auto-select after company creation
+  const pendingAutoSelectRef = useRef<string | null>(null);
+
+  // AUTO-SELECT: Listen for companyCreated events and auto-select the new group
+  useEffect(() => {
+    const handleCompanyCreated = (event: CustomEvent) => {
+      const data = event.detail;
+      const companyId = data.company_id || data.id;
+
+      logger.info('GroupsPanel: companyCreated event received, will auto-select', {
+        companyId,
+        companyName: data.name || data.company_name
+      });
+
+      // Store the company_id to auto-select once the group appears in the list
+      pendingAutoSelectRef.current = companyId;
+    };
+
+    window.addEventListener('companyCreated', handleCompanyCreated as EventListener);
+    return () => window.removeEventListener('companyCreated', handleCompanyCreated as EventListener);
+  }, []);
+
+  // AUTO-SELECT: When activeSupergroups updates, check if we need to auto-select a new group
+  useEffect(() => {
+    if (!pendingAutoSelectRef.current) return;
+
+    const targetCompanyId = pendingAutoSelectRef.current;
+    const newGroup = activeSupergroups.find(g => g.company_id === targetCompanyId);
+
+    if (newGroup) {
+      // Wait for real ID if this is still an optimistic entry (id=0)
+      // We need a valid ID for proper selection
+      if (newGroup.id === 0 || (newGroup as any)._isOptimistic) {
+        logger.debug('GroupsPanel: Found optimistic group, waiting for real ID', {
+          companyId: targetCompanyId,
+          groupTitle: newGroup.title
+        });
+        return; // Wait for next update with real ID
+      }
+
+      logger.info('GroupsPanel: Auto-selecting newly created group', {
+        groupId: newGroup.id,
+        companyId: targetCompanyId,
+        groupTitle: newGroup.title
+      });
+
+      // Clear the pending ref
+      pendingAutoSelectRef.current = null;
+
+      // Auto-select the new group
+      onSelectGroup(newGroup.id);
+      setScopeBySupergroup(newGroup);
+    }
+  }, [activeSupergroups, onSelectGroup, setScopeBySupergroup]);
 
   // Функция архивирования/разархивирования
   // Pattern: Mutate then invalidate - React Query will refetch
   const handleToggleArchive = async (supergroupId: number, currentIsActive: boolean) => {
+    const group = [...activeSupergroups, ...archivedSupergroups].find(g => g.id === supergroupId);
+    if (!group) return;
+
     try {
       const newIsActive = !currentIsActive;
+
+      // OPTIMISTIC UI: Dispatch archive/restore event immediately
+      if (newIsActive) {
+        // Restoring from archive
+        window.dispatchEvent(new CustomEvent('companyRestored', {
+          detail: {
+            company_id: group.company_id,
+            id: group.company_id,
+          }
+        }));
+      } else {
+        // Archiving
+        window.dispatchEvent(new CustomEvent('companyArchived', {
+          detail: {
+            company_id: group.company_id,
+            id: group.company_id,
+          }
+        }));
+      }
 
       await telegramApi.updateSupergroup(supergroupId, {
         is_active: newIsActive
@@ -217,28 +347,63 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
         supergroupId,
         component: 'GroupsPanel'
       });
+      // Rollback optimistic update on error
+      invalidateSupergroups();
     }
   };
 
   // Функция удаления супергруппы (только группа, без компании)
   const handleDeleteSupergroupOnly = async (supergroupId: number) => {
-    const success = await telegramApi.deleteSupergroup(supergroupId);
+    // Find group for optimistic update
+    const group = [...activeSupergroups, ...archivedSupergroups].find(g => g.id === supergroupId);
+    if (!group) return;
 
-    if (success) {
-      // Clear selection if deleted group was selected
-      if (selectedSupergroupId === supergroupId) {
-        onSelectGroup(null);
+    const wasActive = activeSupergroups.some(g => g.id === supergroupId);
+
+    // Close expanded card immediately to prevent "stuck" UI
+    if (expandedGroupId === supergroupId) {
+      setExpandedGroupId(null);
+    }
+
+    // Optimistic: remove immediately from UI
+    optimisticRemoveGroup(group);
+
+    // OPTIMISTIC UI: Dispatch companyDeleted event for instant UI update
+    if (group.company_id) {
+      window.dispatchEvent(new CustomEvent('companyDeleted', {
+        detail: {
+          company_id: group.company_id,
+          id: group.company_id,
+        }
+      }));
+
+      logger.info('Dispatched companyDeleted event for supergroup only delete', {
+        companyId: group.company_id,
+        groupId: supergroupId
+      });
+    }
+
+    try {
+      const success = await telegramApi.deleteSupergroup(supergroupId);
+
+      if (!success) {
+        // Rollback on failure
+        rollbackRemoveGroup(group, wasActive);
+        throw new Error('Failed to delete supergroup');
       }
 
-      // Invalidate React Query cache
+      // Success - invalidate to sync with server
       invalidateSupergroups();
 
       logger.info('Supergroup deleted (group only)', {
         supergroupId,
         component: 'GroupsPanel'
       });
-    } else {
-      throw new Error('Failed to delete supergroup');
+    } catch (error) {
+      // Rollback on error
+      rollbackRemoveGroup(group, wasActive);
+      logger.error('Failed to delete supergroup', error, { supergroupId });
+      throw error;
     }
   };
 
@@ -250,25 +415,53 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
       return;
     }
 
-    // Delete company with cascade (this triggers GroupDeletionSaga)
-    await companyApi.deleteCompany(String(group.company_id), {
-      cascade: true,
-      preserveCompany: false,
-    });
+    const wasActive = activeSupergroups.some(g => g.id === group.id);
 
-    // Clear selection if deleted group was selected
-    if (selectedSupergroupId === group.id) {
-      onSelectGroup(null);
+    // Close expanded card immediately to prevent "stuck" UI
+    if (expandedGroupId === group.id) {
+      setExpandedGroupId(null);
     }
 
-    // Invalidate React Query cache
-    invalidateSupergroups();
+    // Optimistic: remove immediately from UI
+    optimisticRemoveGroup(group);
 
-    logger.info('Company and supergroup deleted', {
-      supergroupId: group.id,
+    // OPTIMISTIC UI: Dispatch companyDeleted event immediately for instant UI update
+    window.dispatchEvent(new CustomEvent('companyDeleted', {
+      detail: {
+        company_id: group.company_id,
+        id: group.company_id,
+      }
+    }));
+
+    logger.info('Dispatched companyDeleted event for optimistic UI', {
       companyId: group.company_id,
-      component: 'GroupsPanel'
+      groupId: group.id
     });
+
+    try {
+      // Delete company with cascade (this triggers GroupDeletionSaga)
+      await companyApi.deleteCompany(String(group.company_id), {
+        cascade: true,
+        preserveCompany: false,
+      });
+
+      // Success - invalidate to sync with server
+      invalidateSupergroups();
+
+      logger.info('Company and supergroup deleted', {
+        supergroupId: group.id,
+        companyId: group.company_id,
+        component: 'GroupsPanel'
+      });
+    } catch (error) {
+      // Rollback on error
+      rollbackRemoveGroup(group, wasActive);
+      logger.error('Failed to delete company and supergroup', error, {
+        supergroupId: group.id,
+        companyId: group.company_id
+      });
+      throw error;
+    }
   };
 
   // Функция удаления с сохранением компании (для будущей привязки)
@@ -279,25 +472,54 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
       return;
     }
 
-    // Delete with preserve_company=true (keeps company record)
-    await companyApi.deleteCompany(String(group.company_id), {
-      cascade: true,
-      preserveCompany: true,
-    });
+    const wasActive = activeSupergroups.some(g => g.id === group.id);
 
-    // Clear selection if deleted group was selected
-    if (selectedSupergroupId === group.id) {
-      onSelectGroup(null);
+    // Close expanded card immediately to prevent "stuck" UI
+    if (expandedGroupId === group.id) {
+      setExpandedGroupId(null);
     }
 
-    // Invalidate React Query cache
-    invalidateSupergroups();
+    // Optimistic: remove immediately from UI
+    optimisticRemoveGroup(group);
 
-    logger.info('Supergroup deleted, company preserved', {
-      supergroupId: group.id,
+    // OPTIMISTIC UI: Dispatch companyDeleted event immediately for instant UI update
+    // Note: Even though company is preserved, the supergroup is removed from list
+    window.dispatchEvent(new CustomEvent('companyDeleted', {
+      detail: {
+        company_id: group.company_id,
+        id: group.company_id,
+      }
+    }));
+
+    logger.info('Dispatched companyDeleted event for optimistic UI (preserve company)', {
       companyId: group.company_id,
-      component: 'GroupsPanel'
+      groupId: group.id
     });
+
+    try {
+      // Delete with preserve_company=true (keeps company record)
+      await companyApi.deleteCompany(String(group.company_id), {
+        cascade: true,
+        preserveCompany: true,
+      });
+
+      // Success - invalidate to sync with server
+      invalidateSupergroups();
+
+      logger.info('Supergroup deleted, company preserved', {
+        supergroupId: group.id,
+        companyId: group.company_id,
+        component: 'GroupsPanel'
+      });
+    } catch (error) {
+      // Rollback on error
+      rollbackRemoveGroup(group, wasActive);
+      logger.error('Failed to delete supergroup (preserve company)', error, {
+        supergroupId: group.id,
+        companyId: group.company_id
+      });
+      throw error;
+    }
   };
 
   if (loading) {
@@ -512,18 +734,23 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
         <div className="flex-1 flex flex-col items-center py-3 space-y-3">
           {filteredSupergroups.map((group) => (
             <div
-              key={group.id}
+              key={group.company_id || group.id}
                      onClick={() => {
-                       onSelectGroup(group.id);
-                       setScopeBySupergroup(group);
+                       // Toggle: if already selected, deselect (show "Все чаты")
+                       if (selectedSupergroupId === group.id) {
+                         onSelectGroup(null);
+                       } else {
+                         onSelectGroup(group.id);
+                         setScopeBySupergroup(group);
+                       }
                      }}
               title={group.title}
               className={`
-                ${selectedSupergroupId === group.id ? 'w-14 h-14' : 'w-12 h-12'} 
+                ${selectedSupergroupId === group.id ? 'w-14 h-14' : 'w-12 h-12'}
                 flex items-center justify-center rounded-md cursor-pointer overflow-hidden
                 backdrop-blur-sm border transition-all duration-200
-                ${selectedSupergroupId === group.id 
-                  ? 'bg-primary/20 border-primary/30 text-primary' 
+                ${selectedSupergroupId === group.id
+                  ? 'bg-primary/20 border-primary/30 text-primary'
                   : 'bg-medium-gray/60 text-gray-400 border-white/10 hover:text-white hover:bg-medium-gray/80 hover:border-white/20'
                 }
               `}
@@ -687,10 +914,10 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
             filteredSupergroups.map((group) => {
               const isExpanded = expandedGroupId === group.id;
               const companyBalance = group.company_id ? companyBalances[group.company_id] : null;
-              
+
               return (
                 <div
-                  key={group.id}
+                  key={group.company_id || group.id}
                   className={`
                     border rounded-lg overflow-hidden
                     ${selectedSupergroupId === group.id
@@ -704,15 +931,26 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                     role="button"
                     tabIndex={0}
                      onClick={() => {
-                       onSelectGroup(group.id);
-                       setScopeBySupergroup(group);
-                       setExpandedGroupId(isExpanded ? null : group.id);
+                       // Toggle: if already selected, deselect (show "Все чаты")
+                       if (selectedSupergroupId === group.id) {
+                         onSelectGroup(null);
+                         setExpandedGroupId(null);
+                       } else {
+                         onSelectGroup(group.id);
+                         setScopeBySupergroup(group);
+                         setExpandedGroupId(group.id);
+                       }
                      }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        onSelectGroup(group.id);
-                        setExpandedGroupId(isExpanded ? null : group.id);
+                        if (selectedSupergroupId === group.id) {
+                          onSelectGroup(null);
+                          setExpandedGroupId(null);
+                        } else {
+                          onSelectGroup(group.id);
+                          setExpandedGroupId(group.id);
+                        }
                       }
                     }}
                     className={`w-full px-3 py-2.5 cursor-pointer transition-colors rounded-lg ${
@@ -745,11 +983,13 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                            </p>
                             <div className="flex items-center gap-2 ml-2">
                               {chatCounts[group.id] && (
-                                <Badge 
-                                  variant="secondary" 
+                                <Badge
+                                  variant="secondary"
                                   className="bg-white/10 text-white text-xs border-white/20"
                                 >
-                                  {chatCounts[group.id]}
+                                  {typeof chatCounts[group.id] === 'object'
+                                    ? (chatCounts[group.id] as any)?.chat_count ?? 0
+                                    : chatCounts[group.id]}
                                 </Badge>
                               )}
                             </div>
@@ -783,7 +1023,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                           <span className="text-sm font-medium text-white">
                             {companyBalance != null
                               ? `${companyBalance.toLocaleString('ru-RU')} ₽`
-                              : 'Загрузка...'
+                              : '— ₽'
                             }
                           </span>
                         </div>

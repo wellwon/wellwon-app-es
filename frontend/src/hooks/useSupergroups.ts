@@ -141,9 +141,11 @@ export function useActiveSupergroups() {
             group.company_id === companyId
               ? {
                   ...group,
+                  id: telegramGroupId, // CRITICAL: Update id for selectedSupergroupId matching
                   telegram_group_id: telegramGroupId,
                   invite_link: data.invite_link || group.invite_link,
                   bot_is_admin: true,
+                  _isOptimistic: false, // No longer optimistic
                 }
               : group
           );
@@ -567,9 +569,11 @@ export function useSupergroups() {
             group.company_id === companyId
               ? {
                   ...group,
+                  id: telegramGroupId, // CRITICAL: Update id for selectedSupergroupId matching
                   telegram_group_id: telegramGroupId,
                   invite_link: data.invite_link || group.invite_link,
                   bot_is_admin: true,
+                  _isOptimistic: false, // No longer optimistic
                 }
               : group
           );

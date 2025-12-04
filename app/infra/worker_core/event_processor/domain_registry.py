@@ -18,6 +18,7 @@ log = logging.getLogger("wellwon.worker.domain_registry")
 USER_ACCOUNT_EVENTS_TOPIC = "transport.user-account-events"
 COMPANY_EVENTS_TOPIC = "transport.company-events"
 CHAT_EVENTS_TOPIC = "transport.chat-events"
+CUSTOMS_EVENTS_TOPIC = "transport.customs-events"
 
 
 # =============================================================================
@@ -289,6 +290,46 @@ def create_chat_domain() -> DomainRegistration:
 
 
 # =============================================================================
+# CUSTOMS DOMAIN CONFIGURATION
+# =============================================================================
+
+def create_customs_domain() -> DomainRegistration:
+    """Factory function for customs domain configuration"""
+
+    # Import projector module to trigger decorator registration
+    import app.customs.projectors
+
+    from app.customs.declaration.events import DECLARATION_EVENT_TYPES
+    from app.customs.organization.events import ORGANIZATION_EVENT_TYPES
+
+    def customs_projector_factory():
+        from app.customs.projectors import CustomsProjector
+        from app.infra.read_repos.customs_read_repo import (
+            CustomsDeclarationReadRepo,
+            CommonOrganizationReadRepo,
+        )
+
+        declaration_repo = CustomsDeclarationReadRepo()
+        organization_repo = CommonOrganizationReadRepo()
+        return CustomsProjector(declaration_repo, organization_repo)
+
+    # Merge declaration and organization event types
+    all_event_models = {**DECLARATION_EVENT_TYPES, **ORGANIZATION_EVENT_TYPES}
+
+    return DomainRegistration(
+        name="customs",
+        topics=[CUSTOMS_EVENTS_TOPIC],
+        projector_factory=customs_projector_factory,
+        event_models=all_event_models,
+        projection_config={
+            "aggregate_type": "CustomsDeclaration",
+            "transport_topic": CUSTOMS_EVENTS_TOPIC
+        },
+        enable_sequence_tracking=True
+    )
+
+
+# =============================================================================
 # DOMAIN REGISTRY CLASS
 # =============================================================================
 
@@ -389,6 +430,7 @@ def create_domain_registry() -> DomainRegistry:
         registry.register(create_user_account_domain())
         registry.register(create_company_domain())
         registry.register(create_chat_domain())
+        registry.register(create_customs_domain())
 
         log.info(f"Domain registry created with {len(registry._domains)} domains")
         _domain_registry = registry

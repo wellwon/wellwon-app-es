@@ -155,7 +155,22 @@ export const RealtimeChatProvider: React.FC<{ children: React.ReactNode }> = ({ 
         telegram_supergroup_id: chatScope.type === 'supergroup' ? chatScope.supergroupId : undefined,
       });
 
-      logger.info('Chat created', { chatId: newChat.id, name });
+      // OPTIMISTIC UI: Dispatch chatCreated event immediately for instant UI update
+      // This triggers useChatList WSE handler to add chat to list instantly
+      window.dispatchEvent(new CustomEvent('chatCreated', {
+        detail: {
+          id: newChat.id,
+          chat_id: newChat.id,
+          name: name,
+          chat_name: name,
+          chat_type: chatType,
+          company_id: chatScope.companyId || null,
+          telegram_supergroup_id: chatScope.type === 'supergroup' ? chatScope.supergroupId : null,
+          created_at: new Date().toISOString(),
+        }
+      }));
+
+      logger.info('Chat created with optimistic dispatch', { chatId: newChat.id, name });
       return newChat;
     } finally {
       setIsCreatingChat(false);

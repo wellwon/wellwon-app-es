@@ -296,6 +296,32 @@ class GroupDeletionSagaFailed(BaseEvent):
     timestamp: str
 
 
+@saga_event()
+class DeclarationSubmissionSagaCompleted(BaseEvent):
+    """Raised when declaration submission saga completes successfully"""
+    event_type: Literal["DeclarationSubmissionSagaCompleted"] = "DeclarationSubmissionSagaCompleted"
+    saga_id: str
+    declaration_id: str
+    kontur_docflow_id: str
+    form_imported: bool = False
+    documents_uploaded: int = 0
+    organization_set: bool = False
+    timestamp: str
+
+
+@saga_event()
+class DeclarationSubmissionSagaFailed(BaseEvent):
+    """Raised when declaration submission saga fails"""
+    event_type: Literal["DeclarationSubmissionSagaFailed"] = "DeclarationSubmissionSagaFailed"
+    saga_id: str
+    declaration_id: str
+    kontur_docflow_id: Optional[str] = None
+    failure_reason: str
+    failed_step: str
+    requires_manual_intervention: bool = False
+    timestamp: str
+
+
 # =============================================================================
 # Saga Compensation Events
 # =============================================================================

@@ -310,6 +310,24 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
         foundDuplicateCompany.name
       );
 
+      // OPTIMISTIC UI: Dispatch companyCreated event for instant UI update
+      window.dispatchEvent(new CustomEvent('companyCreated', {
+        detail: {
+          company_id: foundDuplicateCompany.id,
+          id: foundDuplicateCompany.id,
+          name: foundDuplicateCompany.name,
+          company_name: foundDuplicateCompany.name,
+          company_type: foundDuplicateCompany.company_type || 'company',
+          created_at: new Date().toISOString(),
+          logo_url: null,
+        }
+      }));
+
+      logger.info('Dispatched companyCreated event for linked company', {
+        companyId: foundDuplicateCompany.id,
+        companyName: foundDuplicateCompany.name
+      });
+
       updateStepStatus(1, 'success');
       updateStepStatus(2, 'success');
       updateStepStatus(3, 'success');
@@ -477,6 +495,29 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
       logger.info('Company created, saga triggered', {
         companyId: newCompany.id,
         sagaTriggered: true
+      });
+
+      // OPTIMISTIC UI: Dispatch companyCreated event immediately for instant UI update
+      // This adds the group to the sidebar before WSE event arrives from backend
+      window.dispatchEvent(new CustomEvent('companyCreated', {
+        detail: {
+          company_id: createResponse.id,
+          id: createResponse.id,
+          name: companyData.name,
+          company_name: companyData.name,
+          company_type: companyData.company_type,
+          description: companyData.telegram_group_description,
+          created_at: new Date().toISOString(),
+          logo_url: null,
+        }
+      }));
+
+      // Note: Chat will be added when groupCreationCompleted WSE event arrives
+      // This event contains the real chat_id from the saga
+
+      logger.info('Dispatched companyCreated event for optimistic UI', {
+        companyId: createResponse.id,
+        companyName: companyData.name
       });
 
       // Mark all steps as successful since saga will handle them

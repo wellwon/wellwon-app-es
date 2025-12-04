@@ -24,6 +24,7 @@ import {
   useGroupsPanelCollapsed,
   useSelectedSupergroupId,
 } from '@/hooks/chat/useChatUIStore';
+import { useSupergroups } from '@/hooks/useSupergroups';
 
 const SidebarChat: React.FC = () => {
   const {
@@ -70,6 +71,14 @@ const SidebarChat: React.FC = () => {
   const setGroupsPanelCollapsed = useChatUIStore((s) => s.setGroupsPanelCollapsed);
   const setSelectedSupergroupId = useChatUIStore((s) => s.setSelectedSupergroupId);
   const groupPanelWidth = groupsPanelCollapsed ? 80 : 320;
+
+  // Get supergroups to find company_id of selected group (for optimistic chat filtering)
+  const { activeSupergroups } = useSupergroups();
+  const selectedGroupCompanyId = useMemo(() => {
+    if (!selectedSupergroupId) return null;
+    const group = activeSupergroups.find(g => g.id === selectedSupergroupId);
+    return group?.company_id || null;
+  }, [selectedSupergroupId, activeSupergroups]);
 
   // Ref для отслеживания последнего ручного выбора группы
   const lastManualGroupSelectionRef = useRef<{ supergroupId: number | null; timestamp: number } | null>(null);
@@ -124,9 +133,20 @@ const SidebarChat: React.FC = () => {
         });
       }
     } else if (chat && !chat.telegram_supergroup_id) {
-      // Чат без supergroup - переключаемся на company scope
-      setScopeByCompany(chat.company_id || null);
-      setSelectedSupergroupId(null);
+      // Don't reset selectedSupergroupId for optimistic chats
+      // They don't have telegram_supergroup_id yet, but belong to the selected group
+      const isOptimistic = (chat as any)?._isOptimistic === true;
+      if (!isOptimistic) {
+        // IMPORTANT: Only reset selectedSupergroupId if we're NOT in supergroups mode
+        // This prevents the section from switching when user manually selected a group
+        if (activeMode !== 'supergroups' || selectedSupergroupId === null) {
+          // Чат без supergroup - переключаемся на company scope
+          setScopeByCompany(chat.company_id || null);
+          setSelectedSupergroupId(null);
+        }
+        // If user is in supergroups mode with a selected group, keep it
+      }
+      // Optimistic chats: keep current selectedSupergroupId to prevent disappearing
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeChat?.id, chats]);
@@ -183,10 +203,57 @@ const SidebarChat: React.FC = () => {
       lastManualGroupSelectionRef.current = event.detail;
       logger.debug('Received manual group selection event', { detail: event.detail, component: 'SidebarChat' });
     };
-    
+
     window.addEventListener('manualGroupSelection', handleManualGroupSelection as EventListener);
     return () => window.removeEventListener('manualGroupSelection', handleManualGroupSelection as EventListener);
   }, []);
+
+  // CRITICAL: Update selectedSupergroupId when real telegram ID arrives
+  // This fixes the issue where user selects optimistic group (id=0) but chats have real telegram_supergroup_id
+  useEffect(() => {
+    const updateSelectedSupergroupId = (telegramGroupId: number, companyId: string, eventName: string) => {
+      // Check if user currently has an optimistic group selected (id=0 or matching company)
+      if (selectedSupergroupId === 0 || selectedSupergroupId === null) {
+        // User has optimistic group selected - update to real ID
+        if (telegramGroupId && companyId) {
+          logger.info(`SidebarChat: Updating selectedSupergroupId from ${eventName}`, {
+            oldId: selectedSupergroupId,
+            newId: telegramGroupId,
+            companyId
+          });
+          setSelectedSupergroupId(telegramGroupId);
+        }
+      } else if (selectedGroupCompanyId === companyId) {
+        // User has this company's group selected - update ID
+        if (telegramGroupId && telegramGroupId !== selectedSupergroupId) {
+          logger.info(`SidebarChat: Updating selectedSupergroupId for company from ${eventName}`, {
+            oldId: selectedSupergroupId,
+            newId: telegramGroupId,
+            companyId
+          });
+          setSelectedSupergroupId(telegramGroupId);
+        }
+      }
+    };
+
+    const handleGroupCreationCompleted = (event: CustomEvent) => {
+      const data = event.detail;
+      updateSelectedSupergroupId(data.telegram_group_id, data.company_id, 'groupCreationCompleted');
+    };
+
+    // Also listen for companyTelegramCreated - this fires when telegram group is created
+    const handleCompanyTelegramCreated = (event: CustomEvent) => {
+      const data = event.detail;
+      updateSelectedSupergroupId(data.telegram_group_id, data.company_id, 'companyTelegramCreated');
+    };
+
+    window.addEventListener('groupCreationCompleted', handleGroupCreationCompleted as EventListener);
+    window.addEventListener('companyTelegramCreated', handleCompanyTelegramCreated as EventListener);
+    return () => {
+      window.removeEventListener('groupCreationCompleted', handleGroupCreationCompleted as EventListener);
+      window.removeEventListener('companyTelegramCreated', handleCompanyTelegramCreated as EventListener);
+    };
+  }, [selectedSupergroupId, selectedGroupCompanyId, setSelectedSupergroupId]);
 
   // Note: State persistence is handled automatically by Zustand persist middleware
 
@@ -222,16 +289,29 @@ const SidebarChat: React.FC = () => {
       });
     }
 
-    // В режиме групповых чатов (оригинальная логика)
+    // В режиме групповых чатов
     let filtered = conversations.filter(conversation => {
       if (selectedSupergroupId !== null) {
-        const matches = conversation.telegram_supergroup_id === selectedSupergroupId;
-        if (!matches) {
-          console.log('[SidebarChat] Chat filtered out:', conversation.id, 'supergroup:', conversation.telegram_supergroup_id, 'expected:', selectedSupergroupId);
+        // Группа выбрана - фильтруем по ней
+
+        // SPECIAL CASE: When selectedSupergroupId === 0 (optimistic group),
+        // we MUST filter by company_id because chats don't have telegram_supergroup_id=0
+        if (selectedSupergroupId === 0) {
+          return selectedGroupCompanyId && conversation.company_id === selectedGroupCompanyId;
         }
-        return matches;
+
+        // Match by telegram_supergroup_id (main filter)
+        const matchesBySupergroupId = conversation.telegram_supergroup_id === selectedSupergroupId;
+
+        // ALSO match by company_id - this catches newly created chats
+        // before telegram_supergroup_id is set (saga just completed)
+        const matchesByCompanyId = selectedGroupCompanyId &&
+          conversation.company_id === selectedGroupCompanyId;
+
+        return matchesBySupergroupId || matchesByCompanyId;
       }
-      return !groupsPanelCollapsed ? conversation.telegram_supergroup_id == null : true;
+      // Группа НЕ выбрана - показываем ВСЕ чаты (режим "Все чаты")
+      return true;
     });
 
     // Фильтруем по топикам - показываем только активные чаты
@@ -244,20 +324,24 @@ const SidebarChat: React.FC = () => {
         if (chat.is_active === false) return false;
 
         // Показываем:
-        // 1. General (topic_id = 1 или null)
-        // 2. Проверенные топики (обнаруженные через webhook и подтвержденные)
-        // 3. Топики созданные через приложение (имеют topic_id > 1, не требуют верификации)
-        const isGeneral = chat.telegram_topic_id === 1 || chat.telegram_topic_id === null;
+        // 1. General (topic_id = 1 или null или undefined)
+        // 2. Проверенные топики
+        // 3. Топики созданные через приложение (topic_id > 1)
+        // 4. Новые чаты без topic_id (только что созданы)
+        const isGeneral = chat.telegram_topic_id === 1 ||
+                          chat.telegram_topic_id === null ||
+                          chat.telegram_topic_id === undefined;
         const isVerified = chat.metadata?.topic_verified === true;
-        const isAppCreatedTopic = chat.telegram_topic_id !== null && chat.telegram_topic_id > 1;
+        const isAppCreatedTopic = chat.telegram_topic_id !== null &&
+                                  chat.telegram_topic_id !== undefined &&
+                                  chat.telegram_topic_id > 1;
 
-        const passes = isGeneral || isVerified || isAppCreatedTopic;
-        return passes;
+        return isGeneral || isVerified || isAppCreatedTopic;
       });
     }
 
     return filtered;
-  }, [conversations, selectedSupergroupId, groupsPanelCollapsed, chats, activeMode]);
+  }, [conversations, selectedSupergroupId, groupsPanelCollapsed, chats, activeMode, selectedGroupCompanyId]);
 
   // Автовыбор первого чата при смене группы - НУЖЕН!
   React.useEffect(() => {
@@ -650,9 +734,23 @@ const SidebarChat: React.FC = () => {
                         return chat.telegram_supergroup_id === null;
                       }
                       if (selectedSupergroupId !== null) {
-                        return chat.telegram_supergroup_id === selectedSupergroupId;
+                        // Group is selected - filter by supergroup_id or company_id
+                        const isOptimistic = (chat as any)?._isOptimistic === true;
+                        if (isOptimistic) return true;
+
+                        // SPECIAL CASE: When selectedSupergroupId === 0 (optimistic group),
+                        // filter only by company_id
+                        if (selectedSupergroupId === 0) {
+                          return selectedGroupCompanyId && chat.company_id === selectedGroupCompanyId;
+                        }
+
+                        // Match by supergroup_id OR company_id (for newly created chats)
+                        const matchesBySupergroupId = chat.telegram_supergroup_id === selectedSupergroupId;
+                        const matchesByCompanyId = selectedGroupCompanyId && chat.company_id === selectedGroupCompanyId;
+                        return matchesBySupergroupId || matchesByCompanyId;
                       }
-                      return !groupsPanelCollapsed ? chat.telegram_supergroup_id == null : true;
+                      // No group selected = "Все чаты" mode - show ALL chats
+                      return true;
                     })}
                     activeChat={activeChat}
                     onChatSelect={selectChat}
