@@ -263,6 +263,7 @@ class ProcessTelegramMessageCommand(Command):
     message_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     chat_id: uuid.UUID
     telegram_message_id: int
+    telegram_chat_id: int  # Required for deduplication lookup
     telegram_user_id: int
     sender_id: Optional[uuid.UUID] = None  # Mapped WellWon user if exists
     content: str

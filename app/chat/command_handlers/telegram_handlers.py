@@ -95,6 +95,9 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
 
     For mapped WellWon users: uses send_message() (requires participant check)
     For external Telegram users: uses receive_external_message() (no participant check)
+
+    IMPORTANT: Includes deduplication check to prevent re-processing messages
+    that were originally sent FROM WellWon and synced to Telegram.
     """
 
     def __init__(self, deps: 'HandlerDependencies'):
@@ -103,9 +106,34 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
+        self._query_bus = deps.query_bus  # For deduplication queries
 
     async def handle(self, command: ProcessTelegramMessageCommand) -> uuid.UUID:
         log.debug(f"Processing Telegram message {command.telegram_message_id} for chat {command.chat_id}")
+
+        # DEDUPLICATION: Check if message with this telegram_message_id already exists
+        # This prevents re-processing messages that were originally sent from WellWon
+        # and synced to Telegram (they would come back via polling as "incoming")
+        if command.telegram_message_id and command.telegram_chat_id:
+            from app.chat.queries import GetMessageByTelegramIdQuery
+            try:
+                existing = await self._query_bus.query(
+                    GetMessageByTelegramIdQuery(
+                        chat_id=command.chat_id,
+                        telegram_chat_id=command.telegram_chat_id,
+                        telegram_message_id=command.telegram_message_id,
+                    )
+                )
+                if existing:
+                    log.info(
+                        f"[DEDUP] Skipping duplicate Telegram message: telegram_message_id={command.telegram_message_id} "
+                        f"already exists as WellWon message {existing.message_id}"
+                    )
+                    # Return the existing message ID to indicate success (idempotent)
+                    return existing.message_id
+            except Exception as e:
+                # Don't fail processing if dedup check fails - just log and continue
+                log.warning(f"[DEDUP] Deduplication check failed: {e}")
 
         # Load aggregate from event store (proper Event Sourcing)
         chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)

@@ -29,6 +29,8 @@ function buildMessageIdSet(pages: any[]): Set<string> {
 }
 
 function hasMessage(pages: any[], messageId: string): boolean {
+  // O(n) with early exit - fine for small page sizes (30 msgs)
+  // Building a Set would also be O(n) so no benefit
   const id = String(messageId);
   for (const page of pages) {
     for (const msg of page.messages) {

@@ -199,6 +199,7 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
                                 chat_id=chat_detail.id,
                                 message_id=uuid.uuid4(),  # New UUID for each retry
                                 telegram_message_id=msg.message_id,
+                                telegram_chat_id=normalized_chat_id,  # For deduplication lookup
                                 telegram_user_id=msg.sender_id,
                                 sender_id=None,  # External Telegram user
                                 content=msg.text or "",

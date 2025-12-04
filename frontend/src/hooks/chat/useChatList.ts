@@ -514,6 +514,8 @@ export function useChatList(options: UseChatListOptions = {}) {
       });
 
       // Create chat entry from saga completion data
+      // CRITICAL: Keep _isOptimistic: true until the chat appears in API response
+      // Otherwise queryFn will drop it on refetch since it only preserves _isOptimistic entries
       const newChat: OptimisticChatListItem = {
         id: chatId,
         name: data.company_name || 'General',
@@ -530,7 +532,7 @@ export function useChatList(options: UseChatListOptions = {}) {
         unread_count: 0,
         participant_count: 1,
         other_participant_name: null,
-        _isOptimistic: false, // Not optimistic - saga completed
+        _isOptimistic: true, // IMPORTANT: Keep as true until API confirms!
       };
 
       // Add to cache

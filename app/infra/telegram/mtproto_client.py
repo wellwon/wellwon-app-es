@@ -345,6 +345,12 @@ class TelegramMTProtoClient:
         self._reconnect_attempts = 0
         self._last_disconnect_time: Optional[float] = None
 
+        # Message deduplication - prevents processing same message via both event-driven and polling
+        # Key: (chat_id, message_id), Value: timestamp when processed
+        self._processed_messages: Dict[Tuple[int, int], float] = {}
+        self._processed_messages_ttl = 300.0  # 5 minutes TTL
+        self._last_dedup_cleanup = time.time()
+
     async def connect(self) -> bool:
         """Connect to Telegram MTProto servers"""
         if not TELETHON_AVAILABLE:
@@ -484,6 +490,44 @@ class TelegramMTProtoClient:
             await self._client.disconnect()
             self._connected = False
             log.info("MTProto disconnected")
+
+    def _is_message_processed(self, chat_id: int, message_id: int) -> bool:
+        """
+        Check if a message has already been processed (deduplication).
+
+        This prevents duplicate processing when both event-driven and polling
+        receive the same message.
+
+        Returns:
+            True if message was already processed, False otherwise
+        """
+        key = (chat_id, message_id)
+
+        # Cleanup old entries periodically (every 60 seconds)
+        current_time = time.time()
+        if current_time - self._last_dedup_cleanup > 60.0:
+            self._cleanup_processed_messages()
+            self._last_dedup_cleanup = current_time
+
+        return key in self._processed_messages
+
+    def _mark_message_processed(self, chat_id: int, message_id: int) -> None:
+        """Mark a message as processed (for deduplication)."""
+        key = (chat_id, message_id)
+        self._processed_messages[key] = time.time()
+
+    def _cleanup_processed_messages(self) -> None:
+        """Remove old entries from the processed messages cache."""
+        current_time = time.time()
+        expired_keys = [
+            key for key, timestamp in self._processed_messages.items()
+            if current_time - timestamp > self._processed_messages_ttl
+        ]
+        for key in expired_keys:
+            del self._processed_messages[key]
+
+        if expired_keys:
+            log.debug(f"Cleaned up {len(expired_keys)} expired message dedup entries")
 
     async def get_me_id(self) -> Optional[int]:
         """
@@ -826,6 +870,11 @@ class TelegramMTProtoClient:
     async def _process_polled_message(self, msg, sender, chat_id: int) -> None:
         """Process a message obtained via polling."""
         try:
+            # Deduplication check - skip if already processed by event-driven handler
+            if self._is_message_processed(chat_id, msg.id):
+                log.debug(f"[POLLING] Skipping duplicate message {msg.id} in chat {chat_id} (already processed)")
+                return
+
             # Get sender info early to check for bot
             sender_id = sender.id if sender else None
             sender_username = getattr(sender, 'username', None)
@@ -900,27 +949,38 @@ class TelegramMTProtoClient:
             )
             print(f"[MTPROTO] [POLLING] Message from {sender_username or sender_id}: {text[:30] if text else '[no text]'}...")
 
+            # Mark as processed BEFORE forwarding (prevents event-driven from processing same message)
+            self._mark_message_processed(chat_id, msg.id)
+
             # Forward to callback if registered
             if self._message_callback is not None:
                 await self._message_callback(incoming_msg)
             else:
-                log.warning("No message callback registered, incoming message ignored")
+                log.warning("[POLLING] No message callback registered, incoming message ignored")
 
         except (AttributeError, TypeError, ValueError) as proc_err:
             log.error(f"[POLLING] Error processing message: {proc_err}", exc_info=True)
 
     async def _handle_new_message(self, event) -> None:
         """
-        Handle incoming message from Telegram.
+        Handle incoming message from Telegram via event-driven mode.
 
         This is called by Telethon for every incoming message.
         We parse it and forward to the registered callback.
         """
-        print(f"[MTPROTO] _handle_new_message called! event={type(event)}")
-        log.info(f"MTProto _handle_new_message triggered for event: {type(event)}")
+        print(f"[MTPROTO] [EVENT] _handle_new_message called! event={type(event)}")
+        log.info(f"[EVENT] MTProto event handler triggered for event: {type(event)}")
         try:
             message = event.message
-            print(f"[MTPROTO] Message: id={message.id}, out={message.out}, chat_id={event.chat_id}")
+            chat_id = event.chat_id
+
+            # Deduplication check - skip if already processed by polling
+            if self._is_message_processed(chat_id, message.id):
+                log.info(f"[EVENT] Skipping duplicate message {message.id} in chat {chat_id} (already processed)")
+                print(f"[MTPROTO] [EVENT] Skipping duplicate message {message.id}")
+                return
+
+            print(f"[MTPROTO] [EVENT] Message: id={message.id}, out={message.out}, chat_id={chat_id}")
 
             # Note: We DON'T filter out=True because the MTProto session owner
             # may send from their phone and we want those messages in WellWon
@@ -931,11 +991,8 @@ class TelegramMTProtoClient:
 
             # Skip messages from bots (avoid echo from our own bot messages)
             if sender_is_bot:
-                log.info(f"Skipping message from bot: {getattr(sender, 'username', 'unknown')}")
+                log.info(f"[EVENT] Skipping message from bot: {getattr(sender, 'username', 'unknown')}")
                 return
-
-            # Get chat ID
-            chat_id = event.chat_id
 
             # Get topic ID (message_thread_id in Telegram API terms)
             # In forum groups, messages have reply_to with forum_topic=True
@@ -1021,19 +1078,30 @@ class TelegramMTProtoClient:
             )
 
             log.info(
-                f"MTProto incoming message: chat_id={chat_id}, topic_id={topic_id}, "
+                f"[EVENT] Processing message: chat_id={chat_id}, topic_id={topic_id}, "
                 f"from={sender_username or sender_id}, text={text[:50] if text else 'N/A'}..."
             )
-            log.info(f"MTProto message details: has_reply_to={hasattr(message, 'reply_to') and message.reply_to is not None}")
+            print(f"[MTPROTO] [EVENT] Processing message from {sender_username or sender_id}: {text[:30] if text else '[no text]'}...")
+
+            # Mark as processed BEFORE forwarding (prevents polling from processing same message)
+            self._mark_message_processed(chat_id, message.id)
+
+            # Also update monitored_chats to keep polling in sync
+            stored_chat_id = self._from_telegram_peer_id(chat_id)
+            if stored_chat_id in self._monitored_chats:
+                current_last = self._monitored_chats[stored_chat_id]
+                if message.id > current_last:
+                    self._monitored_chats[stored_chat_id] = message.id
+                    log.debug(f"[EVENT] Updated monitored chat {stored_chat_id} last_msg_id: {current_last} -> {message.id}")
 
             # Forward to callback if registered
             if self._message_callback is not None:
                 await self._message_callback(incoming_msg)
             else:
-                log.warning("No message callback registered, incoming message ignored")
+                log.warning("[EVENT] No message callback registered, incoming message ignored")
 
         except (AttributeError, TypeError, ValueError) as msg_err:
-            log.error(f"Error handling incoming message: {msg_err}", exc_info=True)
+            log.error(f"[EVENT] Error handling incoming message: {msg_err}", exc_info=True)
 
     async def _handle_message_read(self, event) -> None:
         """

@@ -127,8 +127,9 @@ export function useSendMessage() {
     onSuccess: (data, params) => {
       logger.debug('Message sent successfully', { messageId: data.messageId, chatId: params.chatId });
 
-      // Invalidate chat list to update last_message
-      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+      // DON'T invalidate chat lists - WSE handles real-time updates via handleMessageCreated
+      // Invalidating here causes refetch which can lose optimistic chats that aren't in API yet
+      // queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
     },
 
     // Don't refetch on settle - WSE will update the cache
@@ -247,8 +248,8 @@ export function useDeleteMessage() {
     onSuccess: (data, params) => {
       logger.debug('Message deleted successfully', { messageId: params.messageId });
 
-      // Invalidate chat list to update last_message
-      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+      // DON'T invalidate chat lists - WSE handles real-time updates
+      // queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
     },
   });
 }

@@ -286,6 +286,7 @@ async def telegram_webhook(
                 command = ProcessTelegramMessageCommand(
                     chat_id=chat_detail.id,
                     telegram_message_id=telegram_message.message_id,
+                    telegram_chat_id=normalized_chat_id,  # Required for deduplication lookup
                     telegram_user_id=telegram_message.from_user_id,
                     sender_id=None,  # TODO: Map telegram user to WellWon user if exists
                     content=telegram_message.text or "",

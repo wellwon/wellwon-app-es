@@ -13,6 +13,7 @@ import axios, {
   InternalAxiosRequestConfig,
   AxiosResponse,
 } from "axios";
+import { useAuthStore } from "@/hooks/auth";
 
 // -----------------------------------------------------------------------------
 // Axios base client for all REST API calls
@@ -152,6 +153,25 @@ API.interceptors.response.use(
 
           localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(persistData));
           console.log('[API] Token refreshed successfully');
+
+          // CRITICAL: Also update Zustand store's in-memory state
+          // The persist middleware only syncs FROM localStorage on initial load,
+          // so we must update the store directly to trigger React re-renders
+          useAuthStore.getState().setTokens({
+            token: data.access_token,
+            refresh_token: data.refresh_token || refreshToken,
+            expires_at: updatedState.expiresAt,
+            token_type: 'Bearer',
+            session_id: authData.sessionId,
+          });
+          console.log('[API] Zustand auth store updated with new token');
+
+          // CRITICAL: Dispatch authSuccess event so WSEProvider knows to reconnect
+          // This ensures the WSE connection picks up the new token
+          window.dispatchEvent(new CustomEvent('authSuccess', {
+            detail: { token: data.access_token, refreshed: true }
+          }));
+          console.log('[API] authSuccess event dispatched after token refresh');
 
           // Update the authorization header for the original request
           originalRequest.headers["Authorization"] = `Bearer ${data.access_token}`;
