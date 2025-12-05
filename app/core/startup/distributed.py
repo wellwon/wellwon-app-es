@@ -289,12 +289,12 @@ async def register_sync_projections_phase(app: FastAPI) -> None:
 
     logger.info("Registering synchronous projections...")
 
-    # Import ONLY UserAccount projector for SYNC projections
-    # Company and Chat projections run ASYNC through Worker (cleaner architecture)
+    # Import projector modules to register @sync_projection decorators
+    # MessageSent projection needs to be SYNC for immediate ScyllaDB writes
     modules_to_import = [
         "app.user_account.projectors",
-        # NOTE: Company and Chat removed - they use Worker async projections only
-        # This prevents duplicate projections and simplifies the system
+        "app.company.projectors",
+        "app.chat.projectors",  # CRITICAL: MessageSent sync projection for ScyllaDB
     ]
 
     for module in modules_to_import:

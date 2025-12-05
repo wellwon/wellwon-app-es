@@ -81,8 +81,8 @@ class GetChatMessagesQuery(Query):
     chat_id: uuid.UUID
     limit: int = Field(default=50, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
-    before_id: Optional[uuid.UUID] = None  # For cursor-based pagination
-    after_id: Optional[uuid.UUID] = None
+    before_id: Optional[int] = None  # Snowflake ID for cursor-based pagination
+    after_id: Optional[int] = None   # Snowflake ID for cursor-based pagination
 
 
 class GetMessageByIdQuery(Query):
@@ -186,14 +186,13 @@ class ParticipantInfo(BaseModel):
 
 
 class MessageDetail(BaseModel):
-    """Message details for API response"""
-    id: Optional[uuid.UUID] = None  # PostgreSQL UUID (legacy, not used with ScyllaDB)
-    message_id: Optional[int] = None  # Snowflake ID (PRIMARY with ScyllaDB)
+    """Message details for API response (Industry Standard - Discord/Slack pattern)"""
+    id: Optional[int] = None  # Server-generated Snowflake ID (int64)
     chat_id: uuid.UUID
     sender_id: Optional[uuid.UUID] = None  # None for external Telegram users
     content: str
     message_type: str = "text"
-    reply_to_id: Optional[uuid.UUID] = None
+    reply_to_id: Optional[int] = None  # Snowflake ID of replied message
     file_url: Optional[str] = None
     file_name: Optional[str] = None
     file_size: Optional[int] = None
@@ -213,6 +212,7 @@ class MessageDetail(BaseModel):
     telegram_forward_data: Optional[Dict[str, Any]] = None  # Forward info if forwarded
     telegram_topic_id: Optional[int] = None  # Forum topic ID
     sync_direction: Optional[str] = None  # 'telegram_to_web' | 'web_to_telegram'
+    telegram_read_at: Optional[datetime] = None  # When message was read on Telegram (blue checkmarks)
     # Sender info (joined) - for WellWon users
     sender_name: Optional[str] = None
     sender_avatar_url: Optional[str] = None
@@ -223,8 +223,8 @@ class MessageDetail(BaseModel):
 
 class MessageSummary(BaseModel):
     """Lightweight message for lists"""
-    id: uuid.UUID
-    sender_id: uuid.UUID
+    id: int  # Snowflake ID (int64)
+    sender_id: Optional[uuid.UUID] = None  # None for external Telegram users
     content: str
     message_type: str
     created_at: datetime

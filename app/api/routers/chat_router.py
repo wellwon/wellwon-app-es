@@ -18,6 +18,7 @@ from app.chat.commands import (
     CreateChatCommand,
     UpdateChatCommand,
     ArchiveChatCommand,
+    RestoreChatCommand,
     DeleteChatCommand,
     AddParticipantCommand,
     RemoveParticipantCommand,
@@ -109,11 +110,16 @@ class ChangeRoleRequest(BaseModel):
 
 
 class SendMessageRequest(BaseModel):
-    """Request to send a message"""
-    message_id: Optional[uuid.UUID] = None  # Client-generated UUID for idempotency
+    """
+    Request to send a message.
+
+    Server generates Snowflake ID (Discord/Slack pattern).
+    Client can provide client_temp_id for optimistic UI reconciliation.
+    """
     content: str = Field(..., max_length=10000)
     message_type: str = Field(default="text")
-    reply_to_id: Optional[uuid.UUID] = None
+    reply_to_id: Optional[int] = None  # Snowflake ID of message to reply to
+    client_temp_id: Optional[str] = None  # Client temp ID for optimistic UI reconciliation
     file_url: Optional[str] = None
     file_name: Optional[str] = None
     file_size: Optional[int] = None
@@ -137,16 +143,22 @@ class MarkAsReadRequest(BaseModel):
     """
     last_read_message_id: Union[int, str]  # UUID or Snowflake ID
 
-    def get_snowflake_id(self) -> int:
+    def get_snowflake_id(self) -> Optional[int]:
         """Convert last_read_message_id to Snowflake ID.
 
         If it's a UUID string, converts using deterministic formula.
         If it's a numeric string or int, returns as-is.
+        Returns None for temp IDs (client-side optimistic IDs not yet reconciled).
         """
         if isinstance(self.last_read_message_id, int):
             return self.last_read_message_id
 
         value = str(self.last_read_message_id).strip()
+
+        # Skip temp IDs - these are client-side optimistic IDs not yet reconciled
+        # Frontend should wait for server confirmation before marking as read
+        if value.startswith("temp_"):
+            return None
 
         # Check if it looks like a UUID (36 chars with dashes)
         if len(value) == 36 and value.count('-') == 4:
@@ -183,8 +195,9 @@ class ChatResponse(BaseModel):
 
 
 class MessageResponse(BaseModel):
-    """Generic message response"""
-    id: uuid.UUID
+    """Message send response (Industry Standard - Discord/Slack pattern)"""
+    id: str  # Server-generated Snowflake ID (string for JS precision)
+    client_id: Optional[str] = None  # Echo client temp ID for reconciliation
     status: str = "sent"
 
 
@@ -398,6 +411,37 @@ async def archive_chat(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@router.post("/{chat_id}/restore", response_model=ChatResponse)
+async def restore_chat(
+    chat_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    command_bus=Depends(get_command_bus),
+):
+    """Restore an archived chat"""
+    try:
+        command = RestoreChatCommand(
+            chat_id=chat_id,
+            restored_by=current_user["user_id"],
+        )
+
+        await command_bus.send(command)
+        return ChatResponse(id=chat_id, message="Chat restored")
+
+    except UserNotParticipantError as e:
+        log.warning(f"Restore chat denied - not participant: {e}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except InsufficientPermissionsError as e:
+        log.warning(f"Restore chat denied - insufficient permissions: {e}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ChatNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        log.error(f"Failed to restore chat {chat_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 @router.post("/{chat_id}/delete", response_model=ChatResponse)
 async def hard_delete_chat(
     chat_id: uuid.UUID,
@@ -563,10 +607,10 @@ async def get_messages(
     query_bus=Depends(get_query_bus),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    before_id: Optional[uuid.UUID] = Query(None),
-    after_id: Optional[uuid.UUID] = Query(None),
+    before_id: Optional[int] = Query(None, description="Snowflake ID for cursor-based pagination"),
+    after_id: Optional[int] = Query(None, description="Snowflake ID for cursor-based pagination"),
 ):
-    """Get messages from a chat"""
+    """Get messages from a chat with cursor-based pagination using Snowflake IDs"""
     query = GetChatMessagesQuery(
         chat_id=chat_id,
         limit=limit,
@@ -586,18 +630,20 @@ async def send_message(
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
 ):
-    """Send a message to chat"""
-    try:
-        # Use client-provided message_id for idempotency, or generate new one
-        message_id = request.message_id or uuid.uuid4()
+    """
+    Send a message to chat.
 
+    Server generates Snowflake ID (Discord/Slack pattern).
+    Client can provide client_temp_id for optimistic UI reconciliation.
+    """
+    try:
         command = SendMessageCommand(
-            message_id=message_id,
             chat_id=chat_id,
             sender_id=current_user["user_id"],
             content=request.content,
             message_type=request.message_type,
             reply_to_id=request.reply_to_id,
+            client_temp_id=request.client_temp_id,  # For frontend reconciliation
             file_url=request.file_url,
             file_name=request.file_name,
             file_size=request.file_size,
@@ -606,8 +652,13 @@ async def send_message(
             source="web",
         )
 
-        message_id = await command_bus.send(command)
-        return MessageResponse(id=message_id, status="sent")
+        # Handler returns (snowflake_id, client_temp_id)
+        snowflake_id, client_temp_id = await command_bus.send(command)
+        return MessageResponse(
+            id=str(snowflake_id),  # Server-generated Snowflake ID (string for JS precision)
+            client_id=client_temp_id,  # Echo for reconciliation
+            status="sent"
+        )
 
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -697,6 +748,11 @@ async def mark_messages_as_read(
 
     # Convert snowflake ID (frontend sends as string due to JS number limits)
     snowflake_id = request.get_snowflake_id()
+
+    # Skip if temp ID (not yet reconciled with server)
+    if snowflake_id is None:
+        log.debug(f"Skipping mark as read for temp ID: {request.last_read_message_id}")
+        return ChatResponse(id=chat_id, message="Skipped temp ID")
 
     # Enrich command with telegram_message_id for Telegram sync
     # Query the message to get its telegram_message_id (if any)

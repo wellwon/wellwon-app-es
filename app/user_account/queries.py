@@ -85,6 +85,30 @@ class CheckUserExistsQuery(Query):
     email: Optional[str] = None
 
 
+# =============================================================================
+# External Identity Queries
+# =============================================================================
+
+class GetUserByExternalIdQuery(Query):
+    """Find WellWon user by external provider ID (Telegram, Google, etc.)"""
+    provider: str  # 'telegram', 'google', 'apple', etc.
+    external_id: str  # Provider's user ID
+
+
+class GetUserExternalIdentitiesQuery(Query):
+    """Get all linked external identities for a user"""
+    user_id: uuid.UUID
+
+
+class ExternalIdentityResult(BaseModel):
+    """Result of external identity lookup"""
+    user_id: uuid.UUID
+    provider: str
+    external_id: str
+    external_username: Optional[str] = None
+    linked_at: datetime
+
+
 class GetUserNotificationPreferencesQuery(Query):
     """Get user notification preferences"""
     user_id: uuid.UUID

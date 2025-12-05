@@ -186,6 +186,8 @@ class CompanyProjector:
         Project UserAddedToCompany event.
 
         ASYNC: Frontend uses optimistic UI, WSE notifies when ready.
+        Uses RetriableProjectionError to handle race condition when
+        CompanyCreated event hasn't been projected yet.
         """
         event_data = envelope.event_data
         company_id = envelope.aggregate_id
@@ -193,15 +195,28 @@ class CompanyProjector:
 
         log.info(f"Projecting UserAddedToCompany: company={company_id}, user={user_id}")
 
-        await self.company_read_repo.insert_user_company(
-            company_id=company_id,
-            user_id=user_id,
-            relationship_type=event_data.get('relationship_type', 'participant'),
-            joined_at=envelope.stored_at,
-        )
+        try:
+            await self.company_read_repo.insert_user_company(
+                company_id=company_id,
+                user_id=user_id,
+                relationship_type=event_data.get('relationship_type', 'participant'),
+                joined_at=envelope.stored_at,
+            )
 
-        # Update user count on company
-        await self.company_read_repo.increment_user_count(company_id)
+            # Update user count on company
+            await self.company_read_repo.increment_user_count(company_id)
+        except Exception as e:
+            error_str = str(e).lower()
+            # Check for FK violation (company doesn't exist yet - race condition)
+            if 'foreign key' in error_str or 'violates foreign key constraint' in error_str:
+                log.warning(
+                    f"FK violation for UserAddedToCompany: company={company_id} may not exist yet. "
+                    f"Event will be retried."
+                )
+                raise RetriableProjectionError(
+                    f"Company {company_id} not yet projected. UserAddedToCompany will be retried."
+                ) from e
+            raise
 
     # ASYNC: User removal is not time-critical
     @async_projection("UserRemovedFromCompany")

@@ -563,10 +563,50 @@
   border-radius: 16px !important;
 }
 
+/* =============================================================================
+   INFINITE SCROLL PERFORMANCE OPTIMIZATIONS (2025 Best Practices)
+   Based on: web.dev/content-visibility, CSS containment specs
+   ============================================================================= */
+
+/* Scroll container optimization */
+[data-radix-scroll-area-viewport] {
+  /* Prevent layout shift from scrollbar appearance */
+  scrollbar-gutter: stable;
+  /* Native scroll anchoring - browser maintains position when content added above */
+  overflow-anchor: auto;
+}
+
+/* Message container - CSS containment for performance */
+[data-message-id] {
+  /* Skip rendering of off-screen messages - HUGE performance win */
+  content-visibility: auto;
+  /* Prevent layout shift - estimate 80px per message (adjusts after first render) */
+  contain-intrinsic-block-size: auto 80px;
+  /* Full containment - isolate layout/paint calculations */
+  contain: layout style paint;
+}
+
+/* Anchor element for scroll position stability */
+.scroll-anchor {
+  overflow-anchor: auto;
+  height: 1px;
+}
+
+/* Disable content-visibility during history load to prevent flicker */
+.chat-loading-history [data-message-id] {
+  content-visibility: visible;
+  contain-intrinsic-block-size: auto;
+}
+
 /* Заморозка анимаций и переходов во время загрузки истории */
 .chat-freeze * {
   transition: none !important;
   animation: none !important;
+}
+
+.chat-freeze [data-message-id] {
+  /* Force visibility during freeze to calculate correct positions */
+  content-visibility: visible !important;
 }
 
 /* Плавная пагинация - fade in для загруженных сообщений */

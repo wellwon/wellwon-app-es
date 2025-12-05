@@ -129,9 +129,17 @@ const ChatInterface = React.memo(() => {
   }, [getViewport]);
 
   // Стабильный callback для отметки сообщений как прочитанных
+  // Deduplication at call site to prevent flood (additional layer over mutation throttle)
   const handleMarkAsRead = useCallback(() => {
     if (displayedMessages.length > 0) {
       const lastMessage = displayedMessages[displayedMessages.length - 1];
+
+      // Skip if same message already marked (prevents excessive mutation calls)
+      if (lastMarkedAsReadRef.current === lastMessage.id) {
+        return;
+      }
+
+      lastMarkedAsReadRef.current = lastMessage.id;
       markAsRead(lastMessage.id);
     }
   }, [displayedMessages, markAsRead]);
@@ -147,6 +155,7 @@ const ChatInterface = React.memo(() => {
     setReplyTarget(null);
     setNewMessagesCount(0); // Сброс счётчика при смене чата
     setIsAtBottom(true);
+    lastMarkedAsReadRef.current = null; // Reset mark as read tracking
   }, [activeChat?.id]);
 
   // Отслеживание позиции скролла с IntersectionObserver
@@ -177,6 +186,9 @@ const ChatInterface = React.memo(() => {
 
   // Track the last message ID to detect new incoming messages
   const lastProcessedMessageIdRef = useRef<string | null>(null);
+
+  // Track last marked as read message to prevent flood
+  const lastMarkedAsReadRef = useRef<string | null>(null);
 
   // Подсчёт новых сообщений когда пользователь не внизу
   useEffect(() => {
@@ -223,15 +235,15 @@ const ChatInterface = React.memo(() => {
     const viewport = getViewport();
     if (!viewport) return;
 
-    // Заморозка анимаций во время загрузки (отключаем animation для новых сообщений)
+    // Freeze animations and enable CSS containment during load
     viewport.classList.add('chat-freeze');
     viewport.classList.add('chat-loading-history');
 
-    // Запоминаем текущую позицию скролла и высоту
+    // Save current scroll position and anchor message
     const prevScrollHeight = viewport.scrollHeight;
     const prevScrollTop = viewport.scrollTop;
 
-    // Жесткий анчоринг: запоминаем первое видимое сообщение
+    // Find first visible message for anchoring
     const allMessages = Array.from(viewport.querySelectorAll('[data-message-id]'));
     const firstVisibleMessage = allMessages.find(el => {
       const rect = el.getBoundingClientRect();
@@ -245,41 +257,36 @@ const ChatInterface = React.memo(() => {
     try {
       await loadMoreMessages();
 
-      // Мгновенное восстановление позиции без анимации
+      // Double RAF for reliable timing after React render + browser layout
       requestAnimationFrame(() => {
-        const newScrollHeight = viewport.scrollHeight;
-        const heightDelta = newScrollHeight - prevScrollHeight;
+        requestAnimationFrame(() => {
+          const newScrollHeight = viewport.scrollHeight;
+          const heightDelta = newScrollHeight - prevScrollHeight;
 
-        if (anchorMessageId && !atBottomRef.current) {
-          // Пытаемся найти якорное сообщение
-          const anchorElement = viewport.querySelector(`[data-message-id="${anchorMessageId}"]`) as HTMLElement;
-          if (anchorElement) {
-            // Восстанавливаем позицию относительно якоря
-            const newAnchorOffsetTop = anchorElement.offsetTop;
-            const offsetDelta = newAnchorOffsetTop - anchorOffsetTop;
-            viewport.scrollTop = prevScrollTop + offsetDelta;
-          } else {
-            // Fallback: просто добавляем дельту высоты
+          if (anchorMessageId && !atBottomRef.current) {
+            const anchorElement = viewport.querySelector(`[data-message-id="${anchorMessageId}"]`) as HTMLElement;
+            if (anchorElement) {
+              const newAnchorOffsetTop = anchorElement.offsetTop;
+              const offsetDelta = newAnchorOffsetTop - anchorOffsetTop;
+              viewport.scrollTop = prevScrollTop + offsetDelta;
+            } else {
+              viewport.scrollTop = prevScrollTop + heightDelta;
+            }
+          } else if (heightDelta > 0) {
             viewport.scrollTop = prevScrollTop + heightDelta;
           }
-        } else if (heightDelta > 0) {
-          // Просто корректируем на дельту высоты
-          viewport.scrollTop = prevScrollTop + heightDelta;
-        }
-      });
-    } finally {
-      // Плавно убираем заморозку
-      setTimeout(() => {
-        viewport.classList.remove('chat-freeze');
-        // Добавляем fade-in эффект
-        viewport.classList.add('pagination-reveal');
 
-        setTimeout(() => {
+          // Remove freeze immediately after scroll position is restored
+          viewport.classList.remove('chat-freeze');
           viewport.classList.remove('chat-loading-history');
-          viewport.classList.remove('pagination-reveal');
           anchoringRef.current = false;
-        }, 150);
-      }, 50);
+        });
+      });
+    } catch (error) {
+      // Clean up on error
+      viewport.classList.remove('chat-freeze');
+      viewport.classList.remove('chat-loading-history');
+      anchoringRef.current = false;
     }
   }, [activeChat, loadingMoreMessages, loadMoreMessages, checkIfAtBottom, getViewport]);
   

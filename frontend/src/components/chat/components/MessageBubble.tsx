@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -63,6 +63,36 @@ export function MessageBubble({
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
   const openVoiceRef = useRef(false);
   const [avatarLoaded, setAvatarLoaded] = useState(() => avatarCache.isLoaded(message.sender_profile?.avatar_url || ''));
+
+  // Voice player state
+  const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+  const [voiceProgress, setVoiceProgress] = useState(0);
+  const [voiceCurrentTime, setVoiceCurrentTime] = useState(0);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const animationFrameRef = useRef<number | null>(null);
+
+  // Smooth progress update using requestAnimationFrame
+  useEffect(() => {
+    const updateProgress = () => {
+      const audio = audioRef.current;
+      if (audio && isVoicePlaying && !audio.paused) {
+        const progress = (audio.currentTime / audio.duration) * 100;
+        setVoiceProgress(isNaN(progress) ? 0 : progress);
+        setVoiceCurrentTime(audio.currentTime);
+        animationFrameRef.current = requestAnimationFrame(updateProgress);
+      }
+    };
+
+    if (isVoicePlaying) {
+      animationFrameRef.current = requestAnimationFrame(updateProgress);
+    }
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [isVoicePlaying]);
   
   // Avatar optimization
   useEffect(() => {
@@ -122,7 +152,12 @@ export function MessageBubble({
 
   // Utility functions
   const needsInlineTimestamp = (message: Message): boolean => {
-    return (message.message_type === 'image') 
+    // Text messages have time at end of last line (rendered in renderContent)
+    if (message.message_type === 'text') {
+      return true;
+    }
+    // Image, video and video_note messages have overlay timestamps
+    return (message.message_type === 'image' || message.message_type === 'video' || message.message_type === 'video_note')
            && !message.content?.trim();
   };
 
@@ -395,14 +430,55 @@ export function MessageBubble({
     return fileUrl;
   };
 
+  // Inline voice player toggle
+  const handleVoiceToggle = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isVoicePlaying) {
+      audio.pause();
+    } else {
+      audio.play().catch((error) => {
+        logger.error('Failed to play voice message', error);
+      });
+    }
+  };
+
+  // Voice player event handlers
+  const handleVoiceTimeUpdate = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const progress = (audio.currentTime / audio.duration) * 100;
+    setVoiceProgress(isNaN(progress) ? 0 : progress);
+    setVoiceCurrentTime(audio.currentTime);
+  };
+
+  const handleVoiceEnded = () => {
+    setIsVoicePlaying(false);
+    setVoiceProgress(0);
+    setVoiceCurrentTime(0);
+  };
+
+  const handleVoiceSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = x / rect.width;
+    audio.currentTime = percentage * audio.duration;
+  };
+
+  // Legacy function for fallback (open in new tab)
   const handleVoicePlay = async () => {
     if (!message.file_url || openVoiceRef.current) return;
-    
+
     try {
       openVoiceRef.current = true;
       const audioUrl = await createSignedUrl(message.file_url);
       window.open(audioUrl, '_blank');
-      
+
       // Dispatch event to indicate external player was opened
       window.dispatchEvent(new CustomEvent('chat:externalPlayerOpened'));
     } catch (error) {
@@ -660,6 +736,7 @@ export function MessageBubble({
     
     switch (message.message_type) {
       case 'text':
+        // Time floats at the end of the last line (WhatsApp/Telegram style)
         return (
           <div className="space-y-2">
             {googleLinks.map((linkInfo, index) => (
@@ -668,8 +745,16 @@ export function MessageBubble({
               </div>
             ))}
             {processedText && (
-              <div className="whitespace-pre-wrap break-words text-sm font-medium pr-16">
-                {linkifyText(processedText)}
+              <div className="relative">
+                <span className="whitespace-pre-wrap break-words text-sm font-medium">
+                  {linkifyText(processedText)}
+                  {/* Invisible spacer to reserve space for time at end of last line */}
+                  <span className="inline-block w-[75px]">&nbsp;</span>
+                </span>
+                {/* Time positioned at bottom-right corner */}
+                <span className="absolute -bottom-1 -right-1 flex items-center gap-1">
+                  {renderTimeAndStatus()}
+                </span>
               </div>
             )}
           </div>
@@ -691,24 +776,24 @@ export function MessageBubble({
         const fileTypeInfo = getFileTypeInfo(extension);
         const IconComponent = fileTypeInfo.icon;
         const fileGoogleLinks = extractGoogleLinks(message.content || '');
-        
+
         return (
           <div className="space-y-2">
-            <div className="flex items-center gap-3 pr-16">
+            <div className="flex items-center gap-3">
               {/* File icon */}
               <div className="flex-shrink-0">
                 <div className={`w-10 h-10 rounded-full border flex items-center justify-center ${fileTypeInfo.wrapperClass}`}>
                   <IconComponent size={20} className={fileTypeInfo.iconClass} />
                 </div>
               </div>
-              
+
               {/* File name and size/download */}
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-white truncate">
                   {message.file_name || 'Файл'}
                 </div>
                 <div className="text-xs text-white/70">
-                  {formatBytes(message.file_size)} • <button 
+                  {formatBytes(message.file_size)} • <button
                     onClick={handleDownload}
                     className="text-white/70 hover:text-white underline"
                   >
@@ -723,48 +808,78 @@ export function MessageBubble({
               </div>
             ))}
             {message.content && (
-              <div className="text-sm pr-16">{linkifyText(message.content)}</div>
+              <div className="text-sm">{linkifyText(message.content)}</div>
             )}
           </div>
         );
 
       case 'voice':
         const voiceGoogleLinks = extractGoogleLinks(message.content || '');
-        
+        const displayDuration = isVoicePlaying
+          ? formatVoiceDuration(Math.floor(voiceCurrentTime))
+          : formatVoiceDuration(message.voice_duration);
+
         return (
-          <div className="space-y-2 pr-20">
+          <div className="space-y-2">
+            {/* Hidden audio element - no crossOrigin to support Telegram CDN and other external sources */}
+            <audio
+              ref={audioRef}
+              src={message.file_url || ''}
+              preload="metadata"
+              onPlay={() => setIsVoicePlaying(true)}
+              onPause={() => setIsVoicePlaying(false)}
+              onTimeUpdate={handleVoiceTimeUpdate}
+              onEnded={handleVoiceEnded}
+              onError={(e) => {
+                const audio = e.currentTarget as HTMLAudioElement;
+                logger.error('Audio playback error', {
+                  error: audio.error?.message || 'Unknown error',
+                  code: audio.error?.code,
+                  url: message.file_url?.substring(0, 50)
+                });
+              }}
+            />
+
             <div className="flex items-center gap-3">
-              {/* Voice icon/play button */}
+              {/* Voice play/pause button */}
               <div className="flex-shrink-0">
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={handleVoicePlay}
-                  className="w-10 h-10 p-0 rounded-full bg-accent-red/20 hover:bg-accent-red/30 border border-accent-red/30"
+                  onClick={handleVoiceToggle}
+                  className="w-10 h-10 p-0 rounded-full bg-accent-red/20 hover:bg-accent-red/30 border border-accent-red/30 transition-transform active:scale-95"
                 >
-                  <Play size={16} className="text-accent-red" />
+                  {isVoicePlaying ? (
+                    <Pause size={16} className="text-accent-red" />
+                  ) : (
+                    <Play size={16} className="text-accent-red ml-0.5" />
+                  )}
                 </Button>
               </div>
-              
+
               {/* Voice info and progress */}
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-white mb-1">
                   Голосовое сообщение
                 </div>
                 <div className="text-xs text-white/70 mb-2">
-                  {formatVoiceDuration(message.voice_duration)} • <button 
-                    onClick={handleDownload}
-                    className="text-white/70 hover:text-white underline"
-                  >
-                    скачать
-                  </button>
+                  {displayDuration}
+                  {message.voice_duration && !isVoicePlaying && (
+                    <> / {formatVoiceDuration(message.voice_duration)}</>
+                  )}
                 </div>
-                {/* Static progress bar */}
-                <div className="w-full h-[2px] bg-white/20 rounded-full">
-                  <div 
-                    className="h-[2px] bg-accent-red rounded-full"
-                    style={{ width: '0%' }}
-                  ></div>
+                {/* Interactive progress bar - smooth 60fps via requestAnimationFrame */}
+                <div
+                  className="w-full h-[6px] bg-white/20 rounded-full cursor-pointer group"
+                  onClick={handleVoiceSeek}
+                >
+                  <div
+                    className="h-[6px] bg-accent-red rounded-full relative"
+                    style={{ width: `${voiceProgress}%` }}
+                  >
+                    {/* Progress handle */}
+                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-accent-red rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-md" />
+                  </div>
                 </div>
               </div>
             </div>
@@ -779,9 +894,113 @@ export function MessageBubble({
           </div>
         );
 
+      case 'video':
+        const videoGoogleLinks = extractGoogleLinks(message.content || '');
+
+        return (
+          <div className="space-y-2">
+            {/* Video thumbnail with play button overlay */}
+            <div className="relative group rounded-lg overflow-hidden bg-black max-w-[280px]">
+              <video
+                src={message.file_url || ''}
+                controls
+                preload="metadata"
+                className="w-full max-h-[180px] object-cover cursor-pointer"
+                playsInline
+                onClick={(e) => {
+                  const video = e.currentTarget;
+                  if (video.paused) {
+                    video.play();
+                  }
+                }}
+              >
+                Ваш браузер не поддерживает воспроизведение видео.
+              </video>
+              {/* Play button overlay - hidden when video has controls visible */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none group-hover:opacity-0 transition-opacity">
+                <div className="w-14 h-14 rounded-full bg-black/60 flex items-center justify-center">
+                  <Play size={28} className="text-white ml-1" fill="white" />
+                </div>
+              </div>
+              {/* Inline timestamp overlay for video */}
+              {renderTimeAndStatus(true)}
+            </div>
+
+            {/* Video info with download link */}
+            <div className="flex items-center gap-2 text-xs text-white/70">
+              <FileVideo size={14} className="text-white/50" />
+              <span className="truncate">{message.file_name || 'Видео'}</span>
+              {message.file_size && (
+                <>
+                  <span>•</span>
+                  <span>{formatBytes(message.file_size)}</span>
+                </>
+              )}
+              <span>•</span>
+              <button
+                onClick={handleDownload}
+                className="text-white/70 hover:text-white underline"
+              >
+                скачать
+              </button>
+            </div>
+
+            {/* Google links if any */}
+            {videoGoogleLinks.map((linkInfo, index) => (
+              <div key={index}>
+                {renderGoogleLinkCard(linkInfo)}
+              </div>
+            ))}
+
+            {/* Caption if any */}
+            {message.content && (
+              <div className="text-sm">{linkifyText(message.content)}</div>
+            )}
+          </div>
+        );
+
+      case 'video_note':
+        // Circular video message (кружочек from Telegram)
+        return (
+          <div className="space-y-1">
+            {/* Circular video player with play button */}
+            <div className="relative group inline-block">
+              <video
+                src={message.file_url || ''}
+                controls
+                preload="metadata"
+                className="w-[160px] h-[160px] object-cover rounded-full cursor-pointer"
+                playsInline
+                onClick={(e) => {
+                  const video = e.currentTarget;
+                  if (video.paused) {
+                    video.play();
+                  }
+                }}
+              >
+                Ваш браузер не поддерживает воспроизведение видео.
+              </video>
+              {/* Play button overlay */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none group-hover:opacity-0 transition-opacity">
+                <div className="w-12 h-12 rounded-full bg-black/50 flex items-center justify-center">
+                  <Play size={24} className="text-white ml-1" fill="white" />
+                </div>
+              </div>
+            </div>
+
+            {/* Simple label */}
+            <div className="text-xs text-white/70">
+              Видеосообщение
+              {message.voice_duration && (
+                <span> • {formatVoiceDuration(message.voice_duration)}</span>
+              )}
+            </div>
+          </div>
+        );
+
       case 'interactive':
         return (
-          <div className="pr-16">
+          <div>
             {renderInteractiveContent()}
           </div>
         );
@@ -794,7 +1013,7 @@ export function MessageBubble({
         );
 
       default:
-        return <div className="pr-16">{message.content}</div>;
+        return <div>{message.content}</div>;
     }
   };
 
@@ -806,14 +1025,23 @@ export function MessageBubble({
     );
   }
 
+  // Only animate messages created within last 3 seconds (realtime messages)
+  // Historical messages loaded from pagination should not animate
+  const isRecentMessage = useMemo(() => {
+    const messageTime = new Date(message.created_at).getTime();
+    const now = Date.now();
+    return now - messageTime < 3000; // 3 seconds threshold
+  }, [message.created_at]);
+
+  // Animation class - only for recent realtime messages, not historical
+  const animationClass = isRecentMessage
+    ? (isOwn ? 'animate-message-out' : 'animate-message-in')
+    : '';
+
   return (
     <>
       <div
-        className={`w-full max-w-4xl mx-auto group ${className} ${
-          isOwn
-            ? 'animate-message-out'
-            : 'animate-message-in'
-        }`}
+        className={`w-full max-w-4xl mx-auto group ${className} ${animationClass}`}
         data-message-id={message.id}
       >
         <div className={`flex gap-4 items-start ${isOwn ? 'flex-row-reverse' : ''}`}>
@@ -855,15 +1083,12 @@ export function MessageBubble({
 
           {/* Пузырь сообщения с именем внутри */}
           <div className={`flex-1 flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
-            <div 
+            <div
               className={`
                 message-bubble relative rounded-2xl min-w-0
-                ${message.message_type === 'image' ? 
-                  (message.metadata?.imageDimensions?.aspectRatio && message.metadata.imageDimensions.aspectRatio < 1 
-                    ? 'inline-block w-auto' // Портретные изображения - автоширина по содержимому
-                    : 'w-[92%] sm:w-[min(70%,450px)]' // Горизонтальные и квадратные - шире
-                  ) 
-                  : 'max-w-[66.666%]'
+                ${message.message_type === 'image' || message.message_type === 'video_note'
+                  ? 'inline-block w-auto'
+                  : 'max-w-[66.666%] min-w-[140px]'
                 }
                 ${isOwn
                   ? `bg-accent-red/20 ${isLightTheme ? 'text-gray-600' : 'text-white'} rounded-br-md border border-accent-red/30 group-hover:bg-accent-red/25`
@@ -875,12 +1100,12 @@ export function MessageBubble({
               {/* Имя и тип пользователя внутри сообщения */}
               <div className={`px-3 pt-2 pb-1 border-b ${isOwn ? 'border-gray-900/10' : 'border-white/10'}`}>
                 <div className={`text-xs font-medium flex items-center gap-2 ${isOwn ? 'justify-end text-gray-500' : 'justify-start text-white/90'}`}>
-                  {isOwn && (
+                  {isOwn && message.metadata?.role_label && (
                     <Badge
                       variant="outline"
                       className="text-[10px] py-0 px-1 h-4 bg-accent-red/20 border-accent-red/30 text-red-400"
                     >
-                      {message.metadata?.role_label || 'Нет роли'}
+                      {message.metadata.role_label}
                     </Badge>
                   )}
                   <div className="flex items-center gap-1">
@@ -889,14 +1114,12 @@ export function MessageBubble({
                       <TelegramIcon className="w-3 h-3 text-blue-400" />
                     )}
                   </div>
-                  {!isOwn && (
-                    <Badge 
-                      variant="outline" 
-                      className={`text-[10px] py-0 px-1 h-4 bg-white/10 border-white/20 ${
-                        message.metadata?.role_label === 'Нет роли' ? 'text-accent-red' : 'text-white/60'
-                      }`}
+                  {!isOwn && message.metadata?.role_label && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] py-0 px-1 h-4 bg-white/10 border-white/20 text-white/60"
                     >
-                      {message.metadata?.role_label || 'Нет роли'}
+                      {message.metadata.role_label}
                     </Badge>
                   )}
                 </div>
@@ -976,13 +1199,13 @@ export function MessageBubble({
                 </div>
               )}
 
-              <div className="p-3">
+              <div className={`p-3 ${needsInlineTimestamp(message) ? 'pb-3' : 'pb-8'}`}>
                 {renderContent()}
               </div>
 
               {/* Время и статус прочтения - только если НЕ inline */}
               {!needsInlineTimestamp(message) && (
-                <div className="absolute bottom-2 right-3">
+                <div className="absolute bottom-1.5 right-3 flex items-center gap-1">
                   {renderTimeAndStatus()}
                 </div>
               )}

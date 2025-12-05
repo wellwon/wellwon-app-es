@@ -85,6 +85,8 @@ const SidebarChat: React.FC = () => {
   const lastManualGroupSelectionRef = useRef<{ supergroupId: number | null; timestamp: number } | null>(null);
   // Ref для автовыбора первого чата при загрузке
   const selectFirstChatOnLoadRef = useRef(false);
+  // Ref to track initial auto-selection on page load
+  const initialAutoSelectDoneRef = useRef(false);
 
 
   // Ref to track last synced chat id
@@ -409,6 +411,36 @@ const SidebarChat: React.FC = () => {
     }
   }, [filteredConversations.length, initialLoading, selectedSupergroupId, chats, selectChat]);
 
+  // AUTO-SELECT FIRST CHAT ON INITIAL PAGE LOAD
+  // This ensures messages load immediately after login without requiring manual click
+  React.useEffect(() => {
+    // Only run once on initial load
+    if (initialAutoSelectDoneRef.current) return;
+
+    // Wait for chats to load
+    if (initialLoading || filteredConversations.length === 0) return;
+
+    // If a chat is already selected, skip
+    if (activeChat) {
+      initialAutoSelectDoneRef.current = true;
+      return;
+    }
+
+    console.log('[AUTO-SELECT] Initial page load - auto-selecting first chat');
+    console.log('[AUTO-SELECT] filteredConversations:', filteredConversations.length, 'activeChat:', activeChat?.id);
+
+    // Find the best chat to select
+    const firstChat = filteredConversations[0];
+    if (firstChat) {
+      const chat = chats.find(c => c.id === firstChat.id);
+      if (chat) {
+        console.log('[AUTO-SELECT] Selecting first chat:', chat.id, chat.name);
+        selectChat(chat.id, true);
+        initialAutoSelectDoneRef.current = true;
+      }
+    }
+  }, [filteredConversations, initialLoading, activeChat, chats, selectChat]);
+
   // Управление показом hint "Нет чатов в выбранной группе" с задержкой 2 секунды
   React.useEffect(() => {
     if (selectedSupergroupId !== null && !initialLoading && filteredConversations.length === 0) {
@@ -524,12 +556,15 @@ const SidebarChat: React.FC = () => {
 
 
   const handleChatClick = (conversation: any) => {
+    console.log('[CHAT-CLICK] Chat clicked:', conversation.id);
     logger.debug('Chat clicked', { conversationId: conversation.id, component: 'SidebarChat' });
     const chat = chats.find(c => c.id === conversation.id);
     if (chat) {
+      console.log('[CHAT-CLICK] Found chat, calling selectChat:', chat.id);
       logger.debug('Found chat, selecting', { chat, component: 'SidebarChat' });
       selectChat(chat.id, true); // обновляем URL при клике
     } else {
+      console.error('[CHAT-CLICK] Chat not found in chats list:', conversation.id);
       logger.error('Chat not found in chats list', null, { conversationId: conversation.id, component: 'SidebarChat' });
     }
   };

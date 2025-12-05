@@ -119,6 +119,34 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [platformActions]);
 
+  // CRITICAL: Clear selectedCompany when it's deleted
+  // This prevents repeated "Company not found" errors from persisted localStorage
+  useEffect(() => {
+    const handleCompanyDeleted = (event: CustomEvent) => {
+      const deletedId = event.detail?.company_id || event.detail?.id;
+      if (deletedId && selectedCompany?.id === deletedId) {
+        logger.info('Company deleted - clearing selectedCompany from store', { deletedId });
+        platformActions.clearCompany();
+      }
+    };
+
+    const handleGroupDeletionCompleted = (event: CustomEvent) => {
+      const deletedId = event.detail?.company_id;
+      if (deletedId && selectedCompany?.id === deletedId) {
+        logger.info('Group deletion completed - clearing selectedCompany from store', { deletedId });
+        platformActions.clearCompany();
+      }
+    };
+
+    window.addEventListener('companyDeleted', handleCompanyDeleted as EventListener);
+    window.addEventListener('groupDeletionCompleted', handleGroupDeletionCompleted as EventListener);
+
+    return () => {
+      window.removeEventListener('companyDeleted', handleCompanyDeleted as EventListener);
+      window.removeEventListener('groupDeletionCompleted', handleGroupDeletionCompleted as EventListener);
+    };
+  }, [selectedCompany?.id, platformActions]);
+
   // Toggle theme function (light/dark for content area, sidebar stays dark)
   // Disables transitions for instant theme switch
   const toggleTheme = useCallback(() => {

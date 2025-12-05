@@ -63,7 +63,7 @@ class ParticipantState(BaseModel):
 
 class MessageState(BaseModel):
     """Lightweight message state in aggregate"""
-    message_id: uuid.UUID
+    message_id: int  # Server-generated Snowflake ID (int64)
     sender_id: Optional[uuid.UUID] = None  # None for external Telegram users
     is_deleted: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -332,11 +332,11 @@ class ChatAggregate:
 
     def send_message(
         self,
-        message_id: uuid.UUID,
+        message_id: int,  # Server-generated Snowflake ID (int64)
         sender_id: uuid.UUID,
         content: str,
         message_type: str = "text",
-        reply_to_id: Optional[uuid.UUID] = None,
+        reply_to_id: Optional[int] = None,  # Snowflake ID of replied message
         file_url: Optional[str] = None,
         file_name: Optional[str] = None,
         file_size: Optional[int] = None,
@@ -348,8 +348,15 @@ class ChatAggregate:
         telegram_user_data: Optional[Dict[str, Any]] = None,
         telegram_forward_data: Optional[Dict[str, Any]] = None,
         telegram_topic_id: Optional[int] = None,
+        client_temp_id: Optional[str] = None,  # For frontend reconciliation
     ) -> None:
-        """Send a message to the chat"""
+        """
+        Send a message to the chat.
+
+        Args:
+            message_id: Server-generated Snowflake ID (int64) - permanent ID
+            client_temp_id: Optional client temp ID for optimistic UI reconciliation
+        """
         self._ensure_active()
         self._ensure_participant(sender_id)
 
@@ -360,7 +367,7 @@ class ChatAggregate:
         ]
 
         event = MessageSent(
-            message_id=message_id,
+            message_id=message_id,  # Snowflake ID (int64)
             chat_id=self.id,
             sender_id=sender_id,
             content=content,
@@ -378,12 +385,13 @@ class ChatAggregate:
             telegram_user_data=telegram_user_data,
             telegram_forward_data=telegram_forward_data,
             telegram_topic_id=telegram_topic_id,
+            client_temp_id=client_temp_id,  # Echo for frontend reconciliation
         )
         self._apply_and_record(event)
 
     def receive_external_message(
         self,
-        message_id: uuid.UUID,
+        message_id: int,  # Server-generated Snowflake ID (int64)
         content: str,
         message_type: str = "text",
         source: str = "telegram",

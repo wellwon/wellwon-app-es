@@ -23,6 +23,8 @@ export function VoiceRecordButton({ disabled }: VoiceRecordButtonProps) {
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Use ref to track recording time to avoid stale closure in onstop callback
+  const recordingTimeRef = useRef(0);
 
   const { sendVoice } = useRealtimeChatContext();
   const { toast } = useToast();
@@ -68,18 +70,21 @@ export function VoiceRecordButton({ disabled }: VoiceRecordButtonProps) {
         // Create blob for preview (don't auto-send)
         const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
         setPreviewBlob(audioBlob);
-        setPreviewDuration(recordingTime);
+        // Use ref to get current time (avoids stale closure issue)
+        setPreviewDuration(recordingTimeRef.current);
       };
 
       // Start recording
       mediaRecorder.start();
       setIsRecording(true);
       setRecordingTime(0);
+      recordingTimeRef.current = 0;
 
       // Start timer
       timerRef.current = setInterval(() => {
         setRecordingTime(prev => {
           const newTime = prev + 1;
+          recordingTimeRef.current = newTime; // Keep ref in sync for onstop callback
           // Auto-stop after 5 minutes
           if (newTime >= 300) {
             stopRecording();

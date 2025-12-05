@@ -11,6 +11,7 @@ import type { ChatListItem } from '@/api/chat';
 import { chatKeys } from './useChatMessages';
 import { logger } from '@/utils/logger';
 import { useChatsStore } from '@/stores/useChatsStore';
+import { useMessagesStore } from '@/stores/useMessagesStore';
 import { useChatUIStore } from './useChatUIStore';
 
 // -----------------------------------------------------------------------------
@@ -82,17 +83,29 @@ export function useChatList(options: UseChatListOptions = {}) {
           // Build a map of optimistic entries for quick lookup
           const optimisticMap = new Map(optimisticEntries.map(o => [o.id, o]));
 
-          // Merge API data with optimistic entries, preserving telegram_supergroup_id
+          // Placeholder names that should NOT overwrite real names
+          const PLACEHOLDER_NAMES = ['Чат компании', 'Chat Company', 'General', 'Новый чат', 'New chat', ''];
+
+          // Merge API data with optimistic entries, preserving telegram_supergroup_id and real names
           const mergedApiChats = apiChats.map(apiChat => {
             const optimistic = optimisticMap.get(apiChat.id);
-            if (optimistic && !apiChat.telegram_supergroup_id && optimistic.telegram_supergroup_id) {
-              // API doesn't have telegram_supergroup_id yet, preserve from optimistic
-              return {
-                ...apiChat,
-                telegram_supergroup_id: optimistic.telegram_supergroup_id,
-              };
-            }
-            return apiChat;
+            if (!optimistic) return apiChat;
+
+            // Preserve telegram_supergroup_id if API doesn't have it yet
+            const preservedSupergroupId = apiChat.telegram_supergroup_id || optimistic.telegram_supergroup_id;
+
+            // STABILIZATION: Don't let API placeholder name overwrite optimistic real name
+            const optimisticNameIsReal = optimistic.name && !PLACEHOLDER_NAMES.includes(optimistic.name);
+            const apiNameIsPlaceholder = !apiChat.name || PLACEHOLDER_NAMES.includes(apiChat.name);
+            const finalName = (optimisticNameIsReal && apiNameIsPlaceholder)
+              ? optimistic.name
+              : apiChat.name;
+
+            return {
+              ...apiChat,
+              name: finalName,
+              telegram_supergroup_id: preservedSupergroupId,
+            };
           });
 
           // Keep optimistic entries that aren't in API response yet
@@ -224,6 +237,9 @@ export function useChatList(options: UseChatListOptions = {}) {
           try {
             const fullChat = await chatApi.getChatById(chatId);
             if (fullChat && !abortController.signal.aborted) {
+              // Placeholder names that should NOT overwrite real names
+              const PLACEHOLDER_NAMES = ['Чат компании', 'Chat Company', 'General', 'Новый чат', 'New chat', ''];
+
               queryClient.setQueryData(
                 chatKeys.list({ includeArchived, limit }),
                 (oldData: ChatListItem[] | undefined) => {
@@ -237,8 +253,16 @@ export function useChatList(options: UseChatListOptions = {}) {
                     const preservedSupergroupId = fullChat.telegram_supergroup_id ||
                       (c as OptimisticChatListItem).telegram_supergroup_id;
 
+                    // STABILIZATION: Don't let API placeholder name overwrite real name
+                    const currentNameIsReal = c.name && !PLACEHOLDER_NAMES.includes(c.name);
+                    const apiNameIsPlaceholder = !fullChat.name || PLACEHOLDER_NAMES.includes(fullChat.name);
+                    const finalName = (currentNameIsReal && apiNameIsPlaceholder)
+                      ? c.name
+                      : fullChat.name;
+
                     return {
                       ...fullChat,
+                      name: finalName,
                       telegram_supergroup_id: preservedSupergroupId,
                       _isOptimistic: false,
                     };
@@ -275,24 +299,44 @@ export function useChatList(options: UseChatListOptions = {}) {
       const updatedChat = event.detail;
       const chatId = updatedChat.chat_id || updatedChat.id;
 
-      logger.debug('WSE: Chat updated', { chatId });
+      logger.debug('WSE: Chat updated', { chatId, newName: updatedChat.name });
+
+      // Placeholder names that should NOT overwrite real names
+      const PLACEHOLDER_NAMES = ['Чат компании', 'Chat Company', 'General', 'Новый чат', 'New chat', ''];
 
       queryClient.setQueryData(
         chatKeys.list({ includeArchived, limit }),
         (oldData: ChatListItem[] | undefined) => {
           if (!oldData) return oldData;
 
-          return oldData.map((chat) =>
-            chat.id === chatId
-              ? {
-                  ...chat,
-                  name: updatedChat.name ?? chat.name,
-                  last_message_at: updatedChat.last_message_at ?? chat.last_message_at,
-                  last_message_content: updatedChat.last_message_content ?? chat.last_message_content,
-                  unread_count: updatedChat.unread_count ?? chat.unread_count,
-                }
-              : chat
-          );
+          return oldData.map((chat) => {
+            if (chat.id !== chatId) return chat;
+
+            // STABILIZATION: Don't let placeholder names overwrite real names
+            // Once a chat has a "real" name, keep it unless a new "real" name comes
+            const currentNameIsReal = chat.name && !PLACEHOLDER_NAMES.includes(chat.name);
+            const newNameIsPlaceholder = !updatedChat.name || PLACEHOLDER_NAMES.includes(updatedChat.name);
+
+            const finalName = (currentNameIsReal && newNameIsPlaceholder)
+              ? chat.name  // Keep current real name
+              : (updatedChat.name ?? chat.name);  // Use new name
+
+            if (currentNameIsReal && newNameIsPlaceholder) {
+              logger.debug('WSE: Ignoring placeholder name update', {
+                chatId,
+                currentName: chat.name,
+                rejectedName: updatedChat.name
+              });
+            }
+
+            return {
+              ...chat,
+              name: finalName,
+              last_message_at: updatedChat.last_message_at ?? chat.last_message_at,
+              last_message_content: updatedChat.last_message_content ?? chat.last_message_content,
+              unread_count: updatedChat.unread_count ?? chat.unread_count,
+            };
+          });
         }
       );
 
@@ -337,12 +381,12 @@ export function useChatList(options: UseChatListOptions = {}) {
       const deletedChat = event.detail;
       const chatId = deletedChat.chat_id || deletedChat.id;
 
-      logger.debug('WSE: Chat deleted', { chatId });
+      logger.debug('WSE: Chat deleted, clearing all caches', { chatId });
 
       // Cancel any pending retries for this chat
       cancelPendingRetry(chatId);
 
-      // Remove from cache
+      // Remove from list cache
       queryClient.setQueryData(
         chatKeys.list({ includeArchived, limit }),
         (oldData: ChatListItem[] | undefined) => {
@@ -351,10 +395,18 @@ export function useChatList(options: UseChatListOptions = {}) {
         }
       );
 
-      // Also remove detail cache
+      // Remove all related React Query caches
       queryClient.removeQueries({ queryKey: chatKeys.detail(chatId) });
+      queryClient.removeQueries({ queryKey: chatKeys.messages(chatId) });
+      queryClient.removeQueries({ queryKey: chatKeys.participants(chatId) });
+
+      // CRITICAL: Clear Zustand persistent cache for this chat's messages
+      // This prevents deleted chat messages from appearing on page refresh
+      const { clearChatCache } = useMessagesStore.getState();
+      clearChatCache(chatId);
 
       syncZustandCache();
+      logger.info('WSE: Chat deleted, all caches cleared', { chatId });
     };
 
     // OPTIMISTIC UPDATE: Update last_message when message is created
@@ -426,15 +478,40 @@ export function useChatList(options: UseChatListOptions = {}) {
       const data = event.detail;
       const companyId = data.company_id;
 
-      logger.debug('WSE: Group deletion completed, removing all chats for company', { companyId });
+      logger.info('WSE: Group deletion completed, clearing all caches for company', { companyId });
 
       // Cancel any pending retries for chats being deleted
-      pendingRetriesRef.current.forEach((controller, chatId) => {
+      pendingRetriesRef.current.forEach((controller) => {
         controller.abort();
-        pendingRetriesRef.current.delete(chatId);
+      });
+      pendingRetriesRef.current.clear();
+
+      // Get current chats to identify which ones to clean up
+      const currentChats = queryClient.getQueryData<ChatListItem[]>(
+        chatKeys.list({ includeArchived, limit })
+      );
+
+      // Find all chat IDs belonging to this company
+      const chatsToDelete = currentChats?.filter(chat => chat.company_id === companyId) || [];
+
+      // CRITICAL: Clear ALL related caches for each deleted chat
+      const { clearChatCache, clearAllCache } = useMessagesStore.getState();
+
+      chatsToDelete.forEach(chat => {
+        const chatId = chat.id;
+
+        // Remove React Query caches
+        queryClient.removeQueries({ queryKey: chatKeys.detail(chatId) });
+        queryClient.removeQueries({ queryKey: chatKeys.messages(chatId) });
+        queryClient.removeQueries({ queryKey: chatKeys.participants(chatId) });
+
+        // Clear Zustand persistent messages cache
+        clearChatCache(chatId);
+
+        logger.debug('WSE: Cleared caches for deleted chat', { chatId, companyId });
       });
 
-      // Remove all chats belonging to this company
+      // Remove all chats belonging to this company from list
       queryClient.setQueryData(
         chatKeys.list({ includeArchived, limit }),
         (oldData: ChatListItem[] | undefined) => {
@@ -444,6 +521,10 @@ export function useChatList(options: UseChatListOptions = {}) {
       );
 
       syncZustandCache();
+      logger.info('WSE: Group deletion cleanup complete', {
+        companyId,
+        chatsDeleted: chatsToDelete.length
+      });
     };
 
     // CRITICAL: Handle company deletion - remove all chats for the deleted company
@@ -457,7 +538,7 @@ export function useChatList(options: UseChatListOptions = {}) {
         return;
       }
 
-      logger.info('WSE: Company deleted, removing all chats for company', { companyId });
+      logger.info('WSE: Company deleted, clearing all caches for company', { companyId });
 
       // Cancel any pending retries for chats being deleted
       pendingRetriesRef.current.forEach((controller) => {
@@ -465,22 +546,45 @@ export function useChatList(options: UseChatListOptions = {}) {
       });
       pendingRetriesRef.current.clear();
 
-      // Remove all chats belonging to this company
+      // Get current chats to identify which ones to clean up
+      const currentChats = queryClient.getQueryData<ChatListItem[]>(
+        chatKeys.list({ includeArchived, limit })
+      );
+
+      // Find all chat IDs belonging to this company
+      const chatsToDelete = currentChats?.filter(chat => chat.company_id === companyId) || [];
+
+      // CRITICAL: Clear ALL related caches for each deleted chat
+      const { clearChatCache } = useMessagesStore.getState();
+
+      chatsToDelete.forEach(chat => {
+        const chatId = chat.id;
+
+        // Remove React Query caches
+        queryClient.removeQueries({ queryKey: chatKeys.detail(chatId) });
+        queryClient.removeQueries({ queryKey: chatKeys.messages(chatId) });
+        queryClient.removeQueries({ queryKey: chatKeys.participants(chatId) });
+
+        // Clear Zustand persistent messages cache
+        clearChatCache(chatId);
+
+        logger.debug('WSE: Cleared caches for deleted chat', { chatId, companyId });
+      });
+
+      // Remove all chats belonging to this company from list
       queryClient.setQueryData(
         chatKeys.list({ includeArchived, limit }),
         (oldData: ChatListItem[] | undefined) => {
           if (!oldData) return oldData;
-          const filtered = oldData.filter((chat) => chat.company_id !== companyId);
-          logger.debug('WSE: Removed chats for company', {
-            companyId,
-            removedCount: oldData.length - filtered.length,
-            remainingCount: filtered.length
-          });
-          return filtered;
+          return oldData.filter((chat) => chat.company_id !== companyId);
         }
       );
 
       syncZustandCache();
+      logger.info('WSE: Company deletion cleanup complete', {
+        companyId,
+        chatsDeleted: chatsToDelete.length
+      });
     };
 
     // CRITICAL: Handle group creation saga completion - add the chat that was created

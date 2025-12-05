@@ -133,6 +133,8 @@ try:
         EditBannedRequest,
         ToggleForumRequest,
         GetParticipantsRequest,
+        LeaveChannelRequest,
+        DeleteChannelRequest,
     )
     from telethon.tl.types import ChannelParticipantsSearch
     from telethon.tl.functions.messages import (
@@ -306,6 +308,7 @@ class ReadEventInfo:
     chat_id: int  # Telegram chat ID (stored format, without -100 prefix)
     max_id: int  # Messages up to this ID were read
     is_outbox: bool  # True if others read your messages, False if you read theirs
+    topic_id: Optional[int] = None  # Forum topic ID (for supergroups with topics)
 
 
 class TelegramMTProtoClient:
@@ -320,9 +323,9 @@ class TelegramMTProtoClient:
     - Setting group photos
     - Managing group permissions
 
-    IMPORTANT: Incoming messages are received via polling, not push events.
-    This is because Telethon's event system doesn't work reliably when the
-    same session is used on multiple devices (phone, desktop, etc.).
+    IMPORTANT: Incoming messages are received via Telethon's event-driven system.
+    The client registers @client.on(events.NewMessage) handlers and uses
+    run_until_disconnected() pattern for real-time message delivery.
     """
 
     def __init__(self, config: TelegramConfig):
@@ -333,9 +336,6 @@ class TelegramMTProtoClient:
         self._message_callback: Optional[Callable] = None
         self._read_callback: Optional[Callable] = None  # Callback for message read events
         self._update_task: Optional[asyncio.Task] = None
-        self._polling_task: Optional[asyncio.Task] = None
-        self._monitored_chats: Dict[int, int] = {}  # telegram_chat_id -> last_message_id
-        self._polling_interval: float = 5.0  # Poll every 5 seconds for faster message detection
 
         # Entity cache for reducing API calls (Telethon best practice)
         self._entity_cache: Dict[int, Tuple[Any, float]] = {}  # id -> (entity, timestamp)
@@ -362,20 +362,27 @@ class TelegramMTProtoClient:
 
         try:
             # Create client with StringSession if available
+            # Best practice: Enable Telethon's built-in auto-reconnect as defense-in-depth
             session_string = getattr(self.config, 'session_string', None)
             if session_string:
                 log.debug("Using existing session string for MTProto")
                 self._client = TelegramClient(
                     StringSession(session_string),
                     self.config.api_id,
-                    self.config.api_hash.get_secret_value()
+                    self.config.api_hash.get_secret_value(),
+                    auto_reconnect=True,
+                    connection_retries=5,
+                    retry_delay=3,
                 )
             else:
                 log.debug("Creating new session for MTProto")
                 self._client = TelegramClient(
                     self.config.session_name,
                     self.config.api_id,
-                    self.config.api_hash.get_secret_value()
+                    self.config.api_hash.get_secret_value(),
+                    auto_reconnect=True,
+                    connection_retries=5,
+                    retry_delay=3,
                 )
 
             # Set flood_sleep_threshold (Telethon best practice)
@@ -407,8 +414,10 @@ class TelegramMTProtoClient:
             # Reset reconnection counter on successful connect
             self._reconnect_attempts = 0
 
-            # Register incoming message handler
-            @self._client.on(events.NewMessage(incoming=True))
+            # Register message handler for ALL messages (incoming AND outgoing)
+            # We need outgoing=True to capture messages sent by MTProto user from Telegram app
+            # Bot messages are filtered out in _handle_new_message
+            @self._client.on(events.NewMessage())
             async def handle_new_message(event):
                 await self._handle_new_message(event)
 
@@ -422,6 +431,23 @@ class TelegramMTProtoClient:
 
             log.info("MTProto MessageRead handler registered")
             print("[MTPROTO] MessageRead handler registered")
+
+            # Register raw handler for forum topic read receipts
+            # events.MessageRead doesn't handle forum topics properly
+            from telethon import events as tl_events
+            from telethon.tl.types import (
+                UpdateReadChannelDiscussionOutbox,
+                UpdateReadChannelDiscussionInbox,
+                UpdateReadHistoryOutbox,
+                UpdateReadHistoryInbox,
+            )
+
+            @self._client.on(tl_events.Raw)
+            async def handle_raw_update(update):
+                await self._handle_raw_read_update(update)
+
+            log.info("MTProto raw read handler registered (forum topics)")
+            print("[MTPROTO] Raw read handler registered for forum topics")
 
             # Start the update loop in a background task
             # This is required for Telethon to actually receive new messages
@@ -449,54 +475,86 @@ class TelegramMTProtoClient:
         """
         Run Telethon's update loop in the background.
 
-        The key insight from Telethon's source code is that to receive updates,
-        we must call GetStateRequest() to notify Telegram we want updates.
-        This is what _run_until_disconnected() does internally.
+        Uses run_until_disconnected() which:
+        1. Keeps the asyncio event loop running
+        2. Maintains persistent TCP connection to Telegram
+        3. Receives updates in real-time via MTProto
+        4. Dispatches events to registered handlers immediately
 
-        We implement our own version that:
-        1. Requests updates from Telegram via GetStateRequest
-        2. Waits for disconnection (which keeps the background tasks alive)
-        3. Does NOT disconnect on cancellation (unlike run_until_disconnected)
+        Best practices applied:
+        - catch_up() fetches missed updates on startup (handles gaps per Telegram API docs)
+        - run_until_disconnected() maintains persistent connection
+        - Telethon auto_reconnect handles connection drops
+        - No polling needed - pure event-driven architecture
         """
         try:
-            log.info("MTProto update loop starting...")
-            print("[MTPROTO] Update loop starting - requesting update state...")
+            log.info("MTProto update loop starting (event-driven mode)...")
+            print("[MTPROTO] Starting event-driven update loop...")
 
-            # Import the function to request updates
-            from telethon.tl import functions
+            # catch_up() fetches any messages missed while disconnected
+            # This handles update gaps per Telegram MTProto API documentation
+            # May fail on first run if no prior state exists - that's OK
+            try:
+                await self._client.catch_up()
+                log.info("MTProto catch_up completed - missed updates processed")
+                print("[MTPROTO] Catch-up done - listening for real-time updates!")
+            except Exception as catch_up_err:
+                # First run or no prior state - continue without catch_up
+                log.debug(f"MTProto catch_up skipped (first run or no state): {catch_up_err}")
+                print("[MTPROTO] No prior state - starting fresh, listening for updates!")
 
-            # This is CRITICAL: Tell Telegram we want to receive updates
-            # Without this call, Telegram won't send us any updates!
-            await self._client(functions.updates.GetStateRequest())
-            log.info("MTProto GetStateRequest sent - Telegram will now send updates")
-            print("[MTPROTO] GetStateRequest sent - ready to receive updates!")
-
-            # Now wait for disconnection - this keeps our event handlers active
-            # The actual update processing happens in Telethon's background tasks
-            await self._client.disconnected
+            # run_until_disconnected() is the core of event-driven updates:
+            # - Sends GetStateRequest to register for updates with Telegram
+            # - Keeps background tasks running (send, receive, process)
+            # - Dispatches incoming updates to our @client.on() handlers immediately
+            # - Auto-reconnects on connection drop (via auto_reconnect=True)
+            await self._client.run_until_disconnected()
 
             log.info("MTProto update loop ended (client disconnected)")
         except asyncio.CancelledError:
-            log.info("MTProto update loop cancelled (server shutdown)")
-            # Don't disconnect here - the server may restart the task
+            log.info("MTProto update loop cancelled (clean shutdown)")
+            raise  # Re-raise for proper task cancellation
         except Exception as e:
             log.error(f"MTProto update loop error: {e}", exc_info=True)
-            print(f"[MTPROTO] Update loop error: {e}")
+            # Trigger reconnection if configured
+            if self._connected and getattr(self.config, 'auto_reconnect', True):
+                log.info("MTProto update loop crashed - triggering reconnection...")
+                asyncio.create_task(self._attempt_reconnect())
 
     async def disconnect(self) -> None:
-        """Disconnect from Telegram"""
-        if self._client and self._connected:
-            self._last_disconnect_time = time.time()
+        """
+        Disconnect from Telegram with proper task lifecycle management.
+
+        Best practice: Cancel background update task before disconnecting
+        to ensure clean shutdown without orphaned coroutines.
+        """
+        if not self._client:
+            return
+
+        self._connected = False
+        self._last_disconnect_time = time.time()
+
+        # Cancel update loop task first (best practice for clean shutdown)
+        if self._update_task and not self._update_task.done():
+            self._update_task.cancel()
+            try:
+                await self._update_task
+            except asyncio.CancelledError:
+                log.debug("MTProto update loop task cancelled")
+
+        # Now disconnect the client
+        if self._client.is_connected():
             await self._client.disconnect()
-            self._connected = False
-            log.info("MTProto disconnected")
+
+        log.info("MTProto disconnected (clean shutdown)")
 
     def _is_message_processed(self, chat_id: int, message_id: int) -> bool:
         """
         Check if a message has already been processed (deduplication).
 
-        This prevents duplicate processing when both event-driven and polling
-        receive the same message.
+        Prevents duplicate processing in edge cases:
+        - catch_up() may redeliver messages that arrived just before disconnect
+        - Reconnection scenarios where Telegram resends recent updates
 
         Returns:
             True if message was already processed, False otherwise
@@ -614,35 +672,6 @@ class TelegramMTProtoClient:
         self._read_callback = callback
         log.info("MTProto read callback registered")
 
-    def add_monitored_chat(self, telegram_chat_id: int, last_message_id: int = 0) -> None:
-        """
-        Add a Telegram chat to the polling monitor.
-
-        Args:
-            telegram_chat_id: Telegram chat ID (positive, without -100 prefix)
-            last_message_id: Last known message ID (to avoid re-processing old messages)
-        """
-        self._monitored_chats[telegram_chat_id] = last_message_id
-        log.info(f"Added chat {telegram_chat_id} to polling monitor (last_msg_id={last_message_id})")
-
-    def remove_monitored_chat(self, telegram_chat_id: int) -> None:
-        """Remove a Telegram chat from the polling monitor."""
-        if telegram_chat_id in self._monitored_chats:
-            del self._monitored_chats[telegram_chat_id]
-            log.info(f"Removed chat {telegram_chat_id} from polling monitor")
-
-    async def start_polling(self) -> None:
-        """Start the message polling task."""
-        if self._polling_task is None or self._polling_task.done():
-            # Entity cache is populated in connect() as background task
-            # Don't await here - avoids blocking startup with FloodWait (29s+ delays)
-            if not self._entity_cache_populated:
-                asyncio.create_task(self._populate_entity_cache())
-
-            self._polling_task = asyncio.create_task(self._run_polling_loop())
-            log.info("MTProto polling task started")
-            print(f"[MTPROTO] Polling task started - will check for new messages every {int(self._polling_interval)} seconds")
-
     async def _populate_entity_cache(self) -> None:
         """
         Populate the entity cache by iterating through dialogs.
@@ -738,229 +767,6 @@ class TelegramMTProtoClient:
             log.debug(f"Failed to get entity {entity_id}: {e}")
             return None
 
-    async def _run_polling_loop(self) -> None:
-        """
-        Poll monitored chats for new messages.
-
-        This is a fallback mechanism for receiving messages when Telethon's
-        event-based system doesn't work (e.g., due to session conflicts).
-        """
-        log.info("MTProto polling loop starting...")
-        print("[MTPROTO] Polling loop started")
-
-        while self._connected:
-            try:
-                monitored_count = len(self._monitored_chats)
-
-                if monitored_count == 0:
-                    pass  # No chats to monitor
-                else:
-                    for chat_id, last_msg_id in list(self._monitored_chats.items()):
-                        await self._poll_chat(chat_id, last_msg_id)
-            except Exception as e:
-                log.error(f"Error in polling loop: {e}", exc_info=True)
-
-            await asyncio.sleep(self._polling_interval)
-
-        log.info("MTProto polling loop ended (client disconnected)")
-
-    async def _poll_chat(self, chat_id: int, last_msg_id: int) -> None:
-        """Poll a single chat for new messages."""
-        if not self._connected or not self._client:
-            return
-
-        entity: Any = None  # Initialize to avoid "referenced before assignment"
-
-        try:
-            # Convert to Telegram peer ID format
-            peer_id = TelegramMTProtoClient._to_telegram_peer_id(chat_id)
-
-            # Try to get entity - may fail if not in cache
-            try:
-                entity = await self._client.get_entity(peer_id)
-            except ValueError as val_err:
-                # Entity not found in cache - try to resolve via dialogs
-                if "Could not find the input entity" in str(val_err):
-                    log.warning(f"Entity {peer_id} not in cache, trying to resolve via dialogs...")
-
-                    # Iterate dialogs to populate entity cache
-                    found = False
-                    async for dialog in self._client.iter_dialogs():
-                        if dialog.entity and hasattr(dialog.entity, 'id'):
-                            entity_id = dialog.entity.id
-                            # Check if this is our target (compare raw ID)
-                            if entity_id == chat_id or entity_id == abs(peer_id) or int(f"-100{entity_id}") == peer_id:
-                                entity = dialog.entity
-                                found = True
-                                log.info(f"Found entity {chat_id} via dialogs: {getattr(entity, 'title', 'N/A')}")
-                                break
-
-                    if not found:
-                        # Still can't find - remove from monitoring to stop spam
-                        log.error(f"Cannot resolve entity {chat_id} - removing from polling. "
-                                  f"Ensure the MTProto account is a member of this chat.")
-                        self.remove_monitored_chat(chat_id)
-                        return
-                else:
-                    raise
-
-            # Fetch messages newer than last_msg_id
-            new_messages = []
-            async for msg in self._client.iter_messages(entity, min_id=last_msg_id, limit=50):
-                # Skip service/action messages (topic created, user joined, etc.)
-                if hasattr(msg, 'action') and msg.action:
-                    log.debug(f"Skipping service message: action={type(msg.action).__name__}")
-                    continue
-
-                # Skip empty messages (no text AND no media)
-                has_text = bool(msg.text or msg.message)
-                has_media = bool(msg.media)
-                if not has_text and not has_media:
-                    log.debug(f"Skipping empty message: id={msg.id}")
-                    continue
-
-                # Skip bot messages - use cached sender info to avoid extra API calls
-                # Note: We DON'T filter out=True because the MTProto session owner
-                # may send from their phone and we want those messages in WellWon
-                if msg.sender_id:
-                    sender = getattr(msg, '_sender', None)
-                    if sender is None:
-                        # Only fetch sender if not cached
-                        try:
-                            sender = await msg.get_sender()
-                        except (ValueError, AttributeError, RuntimeError):
-                            sender = None
-                    if sender and getattr(sender, 'bot', False):
-                        continue
-                else:
-                    sender = None
-                new_messages.append((msg, sender))
-
-            if not new_messages:
-                return
-
-            # Process in chronological order (oldest first)
-            new_messages.reverse()
-
-            log.info(f"[POLLING] Found {len(new_messages)} new messages in chat {chat_id}")
-            print(f"[MTPROTO] [POLLING] Found {len(new_messages)} new messages in chat {chat_id}")
-
-            for msg, sender in new_messages:
-                await self._process_polled_message(msg, sender, chat_id)
-                # Update last_msg_id
-                if msg.id > self._monitored_chats.get(chat_id, 0):
-                    self._monitored_chats[chat_id] = msg.id
-
-        except FloodWaitError as e:
-            log.warning(f"[POLLING] Flood wait for chat {chat_id}: {e.seconds}s - will wait")
-            await asyncio.sleep(e.seconds + 1)
-        except (ChannelPrivateError, ChannelInvalidError) as e:
-            # Channel was deleted, we were kicked, or don't have access anymore
-            log.warning(f"Channel {chat_id} is no longer accessible, removing from polling: {e}")
-            self.remove_monitored_chat(chat_id)
-        except Exception as e:
-            # Check for common access-related errors in the message
-            error_msg = str(e).lower()
-            if "private" in error_msg or "banned" in error_msg or "permission" in error_msg:
-                log.warning(f"Channel {chat_id} access denied, removing from polling: {e}")
-                self.remove_monitored_chat(chat_id)
-            else:
-                log.error(f"Error polling chat {chat_id}: {e}", exc_info=True)
-
-    async def _process_polled_message(self, msg, sender, chat_id: int) -> None:
-        """Process a message obtained via polling."""
-        try:
-            # Deduplication check - skip if already processed by event-driven handler
-            if self._is_message_processed(chat_id, msg.id):
-                log.debug(f"[POLLING] Skipping duplicate message {msg.id} in chat {chat_id} (already processed)")
-                return
-
-            # Get sender info early to check for bot
-            sender_id = sender.id if sender else None
-            sender_username = getattr(sender, 'username', None)
-            sender_first_name = getattr(sender, 'first_name', None)
-            sender_last_name = getattr(sender, 'last_name', None)
-            sender_is_bot = getattr(sender, 'bot', False) if sender else False
-
-            # Skip messages from bots (avoid echo from our own bot messages)
-            if sender_is_bot:
-                log.info(f"[POLLING] Skipping message from bot: {sender_username or 'unknown'}")
-                return
-
-            # Extract topic_id for forum messages
-            topic_id = None
-            if hasattr(msg, 'reply_to') and msg.reply_to:
-                reply_to = msg.reply_to
-                is_forum_topic = getattr(reply_to, 'forum_topic', False)
-                if is_forum_topic:
-                    topic_id = getattr(reply_to, 'reply_to_top_id', None) or getattr(reply_to, 'reply_to_msg_id', None)
-
-            # Get message text
-            text = msg.text or msg.message
-
-            # Get file info if present
-            file_id = None
-            file_name = None
-            file_size = None
-            file_type = None
-            voice_duration = None
-
-            if msg.media:
-                if hasattr(msg.media, 'photo'):
-                    file_type = 'photo'
-                elif hasattr(msg.media, 'document'):
-                    doc = msg.media.document
-                    file_size = doc.size if hasattr(doc, 'size') else None
-                    for attr in getattr(doc, 'attributes', []):
-                        if hasattr(attr, 'file_name'):
-                            file_name = attr.file_name
-                        if hasattr(attr, 'voice') and attr.voice:
-                            file_type = 'voice'
-                            voice_duration = getattr(attr, 'duration', None)
-                        elif hasattr(attr, 'video') and attr.video:
-                            file_type = 'video'
-                    if not file_type:
-                        file_type = 'document'
-
-            # Use full Telegram chat ID with -100 prefix for supergroups
-            full_chat_id = TelegramMTProtoClient._to_telegram_peer_id(chat_id)
-
-            incoming_msg = IncomingMessage(
-                message_id=msg.id,
-                chat_id=full_chat_id,
-                topic_id=topic_id,
-                sender_id=sender_id,
-                sender_username=sender_username,
-                sender_first_name=sender_first_name,
-                sender_last_name=sender_last_name,
-                sender_is_bot=sender_is_bot,
-                text=text,
-                date=msg.date,
-                file_id=file_id,
-                file_name=file_name,
-                file_size=file_size,
-                file_type=file_type,
-                voice_duration=voice_duration,
-            )
-
-            log.info(
-                f"[POLLING] Processing message: chat_id={full_chat_id}, topic_id={topic_id}, "
-                f"from={sender_username or sender_id}, text={text[:50] if text else 'N/A'}..."
-            )
-            print(f"[MTPROTO] [POLLING] Message from {sender_username or sender_id}: {text[:30] if text else '[no text]'}...")
-
-            # Mark as processed BEFORE forwarding (prevents event-driven from processing same message)
-            self._mark_message_processed(chat_id, msg.id)
-
-            # Forward to callback if registered
-            if self._message_callback is not None:
-                await self._message_callback(incoming_msg)
-            else:
-                log.warning("[POLLING] No message callback registered, incoming message ignored")
-
-        except (AttributeError, TypeError, ValueError) as proc_err:
-            log.error(f"[POLLING] Error processing message: {proc_err}", exc_info=True)
-
     async def _handle_new_message(self, event) -> None:
         """
         Handle incoming message from Telegram via event-driven mode.
@@ -974,16 +780,18 @@ class TelegramMTProtoClient:
             message = event.message
             chat_id = event.chat_id
 
-            # Deduplication check - skip if already processed by polling
+            # Deduplication check - skip if already processed (edge case with catch_up)
             if self._is_message_processed(chat_id, message.id):
-                log.info(f"[EVENT] Skipping duplicate message {message.id} in chat {chat_id} (already processed)")
-                print(f"[MTPROTO] [EVENT] Skipping duplicate message {message.id}")
+                log.debug(f"Skipping duplicate message {message.id} in chat {chat_id}")
                 return
 
             print(f"[MTPROTO] [EVENT] Message: id={message.id}, out={message.out}, chat_id={chat_id}")
 
             # Note: We DON'T filter out=True because the MTProto session owner
             # may send from their phone and we want those messages in WellWon
+            if message.out:
+                log.info(f"[EVENT] Processing OUTGOING message {message.id} from MTProto user (sent from Telegram app)")
+                print(f"[MTPROTO] [EVENT] Processing OUTGOING message from Telegram app")
 
             # Get sender info early to check for bot
             sender = await event.get_sender()
@@ -1042,9 +850,15 @@ class TelegramMTProtoClient:
             if message.media:
                 if hasattr(message.media, 'photo'):
                     file_type = 'photo'
+                    # For photos, we need to download via MTProto - can't get Bot API file_id
+                    # Store the message object reference for later download
+                    file_id = f"mtproto:photo:{message.id}:{chat_id}"
                 elif hasattr(message.media, 'document'):
                     doc = message.media.document
                     file_size = doc.size if hasattr(doc, 'size') else None
+                    # Store document reference for MTProto download
+                    # Format: mtproto:type:message_id:chat_id
+                    file_id = f"mtproto:doc:{message.id}:{chat_id}"
                     # Check attributes for type
                     for attr in getattr(doc, 'attributes', []):
                         if hasattr(attr, 'file_name'):
@@ -1052,12 +866,21 @@ class TelegramMTProtoClient:
                         if hasattr(attr, 'voice') and attr.voice:
                             file_type = 'voice'
                             voice_duration = getattr(attr, 'duration', None)
+                            file_id = f"mtproto:voice:{message.id}:{chat_id}"
                         elif hasattr(attr, 'video') and attr.video:
-                            file_type = 'video'
+                            # Check if it's a round video (video note / кружочек)
+                            if hasattr(attr, 'round_message') and attr.round_message:
+                                file_type = 'video_note'
+                                voice_duration = getattr(attr, 'duration', None)
+                                file_id = f"mtproto:video_note:{message.id}:{chat_id}"
+                            else:
+                                file_type = 'video'
+                                file_id = f"mtproto:video:{message.id}:{chat_id}"
                     if not file_type:
                         file_type = 'document'
                 elif hasattr(message.media, 'voice'):
                     file_type = 'voice'
+                    file_id = f"mtproto:voice:{message.id}:{chat_id}"
 
             incoming_msg = IncomingMessage(
                 message_id=message.id,
@@ -1083,16 +906,8 @@ class TelegramMTProtoClient:
             )
             print(f"[MTPROTO] [EVENT] Processing message from {sender_username or sender_id}: {text[:30] if text else '[no text]'}...")
 
-            # Mark as processed BEFORE forwarding (prevents polling from processing same message)
+            # Mark as processed for deduplication
             self._mark_message_processed(chat_id, message.id)
-
-            # Also update monitored_chats to keep polling in sync
-            stored_chat_id = self._from_telegram_peer_id(chat_id)
-            if stored_chat_id in self._monitored_chats:
-                current_last = self._monitored_chats[stored_chat_id]
-                if message.id > current_last:
-                    self._monitored_chats[stored_chat_id] = message.id
-                    log.debug(f"[EVENT] Updated monitored chat {stored_chat_id} last_msg_id: {current_last} -> {message.id}")
 
             # Forward to callback if registered
             if self._message_callback is not None:
@@ -1142,6 +957,91 @@ class TelegramMTProtoClient:
 
         except Exception as e:
             log.error(f"[READ-DEBUG] Error handling MessageRead event: {e}", exc_info=True)
+
+    async def _handle_raw_read_update(self, update) -> None:
+        """
+        Handle raw Telegram updates for read receipts.
+
+        This handles forum topic read receipts which events.MessageRead doesn't support.
+        Telegram sends different update types for forums:
+        - UpdateReadChannelDiscussionOutbox: Others read your messages in topic
+        - UpdateReadChannelDiscussionInbox: You read messages in topic
+        - UpdateReadHistoryOutbox: Others read your messages (regular chats)
+        - UpdateReadHistoryInbox: You read messages (regular chats)
+        """
+        from telethon.tl.types import (
+            UpdateReadChannelDiscussionOutbox,
+            UpdateReadChannelDiscussionInbox,
+            UpdateReadHistoryOutbox,
+            UpdateReadHistoryInbox,
+        )
+
+        try:
+            update_type = type(update).__name__
+
+            # Forum topic read receipts - others read your messages
+            if isinstance(update, UpdateReadChannelDiscussionOutbox):
+                # channel_id, top_msg_id (topic root), read_max_id
+                channel_id = update.channel_id
+                topic_id = update.top_msg_id  # Forum topic ID
+                max_id = update.read_max_id
+
+                log.info(
+                    f"[READ-DEBUG] Raw UpdateReadChannelDiscussionOutbox: "
+                    f"channel={channel_id}, topic={topic_id}, max_id={max_id}"
+                )
+
+                if self._read_callback is not None:
+                    read_info = ReadEventInfo(
+                        chat_id=channel_id,  # Already without -100 prefix
+                        max_id=max_id,
+                        is_outbox=True,  # Others read YOUR messages
+                        topic_id=topic_id,
+                    )
+                    await self._read_callback(read_info)
+                    log.info(f"[READ-DEBUG] Forum outbox read callback completed for channel {channel_id} topic {topic_id}")
+
+            # Forum topic read receipts - you read messages (sync to WellWon)
+            elif isinstance(update, UpdateReadChannelDiscussionInbox):
+                channel_id = update.channel_id
+                topic_id = update.top_msg_id
+                max_id = update.read_max_id
+
+                log.info(
+                    f"[READ-DEBUG] Raw UpdateReadChannelDiscussionInbox: "
+                    f"channel={channel_id}, topic={topic_id}, max_id={max_id}"
+                )
+
+                if self._read_callback is not None:
+                    read_info = ReadEventInfo(
+                        chat_id=channel_id,
+                        max_id=max_id,
+                        is_outbox=False,  # YOU read messages
+                        topic_id=topic_id,
+                    )
+                    await self._read_callback(read_info)
+                    log.info(f"[READ-DEBUG] Forum inbox read callback completed for channel {channel_id} topic {topic_id}")
+
+            # Regular outbox read - others read your messages (backup for events.MessageRead)
+            elif isinstance(update, UpdateReadHistoryOutbox):
+                peer = update.peer
+                max_id = update.max_id
+
+                # Get peer ID based on type
+                peer_id = getattr(peer, 'channel_id', None) or getattr(peer, 'chat_id', None) or getattr(peer, 'user_id', None)
+                if peer_id is None:
+                    return
+
+                log.info(
+                    f"[READ-DEBUG] Raw UpdateReadHistoryOutbox: "
+                    f"peer={peer_id}, max_id={max_id}"
+                )
+
+                # Note: Don't process here to avoid duplicate with events.MessageRead
+                # Only log for debugging
+
+        except Exception as e:
+            log.debug(f"[READ-DEBUG] Error in raw read update handler: {e}")
 
     @staticmethod
     def _from_telegram_peer_id(peer_id: int) -> int:
@@ -1217,16 +1117,8 @@ class TelegramMTProtoClient:
             return None
 
         try:
-            # Check if group with this title already exists
-            existing = await self._find_group_by_title(title)
-            if existing:
-                log.info(f"Group '{title}' already exists, returning existing")
-                return GroupInfo(
-                    group_id=existing.id,
-                    title=existing.title,
-                    access_hash=getattr(existing, 'access_hash', None)
-                )
-
+            # ALWAYS create a new group - don't reuse existing ones
+            # Each company should have its own unique Telegram group
             result = await self._client(CreateChannelRequest(
                 title=title,
                 about=description,
@@ -1245,17 +1137,6 @@ class TelegramMTProtoClient:
 
         except Exception as e:
             log.error(f"Failed to create supergroup: {e}", exc_info=True)
-            return None
-
-    async def _find_group_by_title(self, title: str) -> Any:
-        """Find existing group by title"""
-        try:
-            async for dialog in self._client.iter_dialogs():
-                entity = dialog.entity
-                if getattr(entity, 'megagroup', False) and getattr(entity, 'title', '') == title:
-                    return entity
-            return None
-        except (ValueError, AttributeError, ConnectionError, OSError):
             return None
 
     async def update_group_title(self, group_id: int, new_title: str) -> bool:
@@ -1284,6 +1165,44 @@ class TelegramMTProtoClient:
             return True
         except Exception as e:
             log.error(f"Failed to update group description: {e}", exc_info=True)
+            return False
+
+    async def leave_group(self, group_id: int) -> bool:
+        """
+        Leave a Telegram supergroup.
+
+        Note: Telegram doesn't allow deleting supergroups directly.
+        The best we can do is leave the group. If the account is the owner,
+        we try to delete it first.
+
+        Args:
+            group_id: The Telegram group ID (without -100 prefix)
+
+        Returns:
+            True if successfully left/deleted, False otherwise
+        """
+        if not await self._ensure_connected():
+            return False
+
+        try:
+            peer_id = TelegramMTProtoClient._to_telegram_peer_id(group_id)
+            group = await self._client.get_entity(peer_id)
+
+            # Try to delete the channel first (only works if we're the owner)
+            try:
+                await self._client(DeleteChannelRequest(channel=group))
+                log.info(f"Group {group_id} deleted successfully")
+                return True
+            except Exception as delete_err:
+                log.debug(f"Cannot delete group {group_id} (not owner?): {delete_err}")
+
+            # Fall back to leaving the group
+            await self._client(LeaveChannelRequest(channel=group))
+            log.info(f"Left group {group_id} successfully")
+            return True
+
+        except Exception as e:
+            log.error(f"Failed to leave group {group_id}: {e}", exc_info=True)
             return False
 
     async def set_group_photo(self, group_id: int, photo_url: str) -> bool:

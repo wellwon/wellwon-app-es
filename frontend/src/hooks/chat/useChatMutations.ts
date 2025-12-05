@@ -6,8 +6,8 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as chatApi from '@/api/chat';
-import type { Message, SendMessageRequest } from '@/api/chat';
-import { chatKeys, addOptimisticMessage, removeMessageFromCache } from './useChatMessages';
+import type { Message, SendMessageRequest, SendMessageResponse } from '@/api/chat';
+import { chatKeys, addOptimisticMessage, removeMessageFromCache, reconcileMessageId } from './useChatMessages';
 import { logger } from '@/utils/logger';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -25,8 +25,9 @@ interface SendMessageParams {
   fileSize?: number;
   fileType?: string;
   voiceDuration?: number;
-  // Generated ONCE before mutation to prevent duplicates
-  _messageId?: string;
+  // Client temp ID for optimistic UI (Industry Standard - Discord/Slack pattern)
+  // Format: "temp_<uuid>" - easy to identify as temporary
+  _clientTempId?: string;
 }
 
 interface EditMessageParams {
@@ -49,12 +50,12 @@ export function useSendMessage() {
   const { user } = useAuth();
 
   const mutation = useMutation({
-    mutationFn: async (params: SendMessageParams) => {
-      // Use the pre-generated messageId from params (set by wrapper below)
-      const messageId = params._messageId!;
+    mutationFn: async (params: SendMessageParams): Promise<SendMessageResponse & { chatId: string; clientTempId: string }> => {
+      // Use the pre-generated client temp ID from params (set by wrapper below)
+      const clientTempId = params._clientTempId!;
 
       const request: SendMessageRequest = {
-        message_id: messageId,
+        client_temp_id: clientTempId,
         content: params.content,
         message_type: params.messageType || 'text',
         reply_to_id: params.replyToId,
@@ -65,9 +66,10 @@ export function useSendMessage() {
         voice_duration: params.voiceDuration,
       };
 
-      await chatApi.sendMessage(params.chatId, request);
+      const response = await chatApi.sendMessage(params.chatId, request);
 
-      return { messageId, chatId: params.chatId };
+      // Return server's Snowflake ID + client temp ID for reconciliation
+      return { ...response, chatId: params.chatId, clientTempId };
     },
 
     onMutate: async (params) => {
@@ -77,10 +79,11 @@ export function useSendMessage() {
       // Snapshot previous value
       const previousMessages = queryClient.getQueryData(chatKeys.messages(params.chatId));
 
-      // Use the SAME pre-generated messageId from params (prevents duplicates!)
-      const messageId = params._messageId!;
+      // Use client temp ID for optimistic message (will be reconciled with Snowflake on success)
+      const clientTempId = params._clientTempId!;
       const optimisticMessage: Message = {
-        id: messageId,
+        id: clientTempId,  // Temp ID (starts with "temp_")
+        _stableKey: clientTempId,  // Stable key for React - persists through reconciliation (Discord/Slack pattern)
         chat_id: params.chatId,
         sender_id: user?.id || null,
         content: params.content,
@@ -106,10 +109,10 @@ export function useSendMessage() {
       // Optimistically add message to cache
       addOptimisticMessage(queryClient, params.chatId, optimisticMessage);
 
-      logger.debug('Optimistic message added', { messageId, chatId: params.chatId });
+      logger.debug('Optimistic message added', { clientTempId, chatId: params.chatId });
 
       // Return context for rollback
-      return { previousMessages, optimisticMessageId: messageId };
+      return { previousMessages, clientTempId };
     },
 
     onError: (error, params, context) => {
@@ -124,12 +127,19 @@ export function useSendMessage() {
       }
     },
 
-    onSuccess: (data, params) => {
-      logger.debug('Message sent successfully', { messageId: data.messageId, chatId: params.chatId });
+    onSuccess: (data, params, context) => {
+      // Reconcile: replace temp ID with server's Snowflake ID
+      // This ensures React Query cache has the permanent ID for future operations
+      if (context?.clientTempId && data.id) {
+        reconcileMessageId(queryClient, params.chatId, context.clientTempId, data.id);
+        logger.debug('Message ID reconciled', {
+          clientTempId: context.clientTempId,
+          snowflakeId: data.id,
+          chatId: params.chatId,
+        });
+      }
 
       // DON'T invalidate chat lists - WSE handles real-time updates via handleMessageCreated
-      // Invalidating here causes refetch which can lose optimistic chats that aren't in API yet
-      // queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
     },
 
     // Don't refetch on settle - WSE will update the cache
@@ -138,17 +148,17 @@ export function useSendMessage() {
     },
   });
 
-  // Wrapper that generates messageId ONCE before mutation
-  // This ensures both onMutate and mutationFn use the SAME ID (prevents duplicates)
+  // Wrapper that generates client temp ID ONCE before mutation
+  // Format: "temp_<uuid>" - easy to identify as temporary
   return {
     ...mutation,
-    mutate: (params: Omit<SendMessageParams, '_messageId'>) => {
-      const messageId = crypto.randomUUID();
-      mutation.mutate({ ...params, _messageId: messageId });
+    mutate: (params: Omit<SendMessageParams, '_clientTempId'>) => {
+      const clientTempId = `temp_${crypto.randomUUID()}`;
+      mutation.mutate({ ...params, _clientTempId: clientTempId });
     },
-    mutateAsync: async (params: Omit<SendMessageParams, '_messageId'>) => {
-      const messageId = crypto.randomUUID();
-      return mutation.mutateAsync({ ...params, _messageId: messageId });
+    mutateAsync: async (params: Omit<SendMessageParams, '_clientTempId'>) => {
+      const clientTempId = `temp_${crypto.randomUUID()}`;
+      return mutation.mutateAsync({ ...params, _clientTempId: clientTempId });
     },
   };
 }
@@ -255,14 +265,49 @@ export function useDeleteMessage() {
 }
 
 // -----------------------------------------------------------------------------
-// useMarkAsRead - Mutation (no optimistic update needed)
+// useMarkAsRead - Mutation with throttling and deduplication to prevent flood
 // -----------------------------------------------------------------------------
+
+// Module-level tracking to prevent flood (persists across hook instances)
+const lastMarkedRead: Map<string, { messageId: string; timestamp: number }> = new Map();
+const MARK_AS_READ_THROTTLE_MS = 5000; // 5 seconds minimum between calls per chat
 
 export function useMarkAsRead() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (params: { chatId: string; messageId: string }) => {
+      const now = Date.now();
+      const key = params.chatId;
+      const lastMark = lastMarkedRead.get(key);
+
+      // Skip if same message was marked recently (within throttle window)
+      if (lastMark) {
+        const timeSinceLastMark = now - lastMark.timestamp;
+
+        // If same message, always skip
+        if (lastMark.messageId === params.messageId) {
+          logger.debug('MarkAsRead skipped: same message already marked', {
+            chatId: params.chatId,
+            messageId: params.messageId,
+          });
+          return params; // Return early, don't call API
+        }
+
+        // If different message but within throttle window, skip
+        if (timeSinceLastMark < MARK_AS_READ_THROTTLE_MS) {
+          logger.debug('MarkAsRead skipped: throttled', {
+            chatId: params.chatId,
+            messageId: params.messageId,
+            timeSinceLastMark,
+          });
+          return params; // Return early, don't call API
+        }
+      }
+
+      // Update tracking BEFORE API call
+      lastMarkedRead.set(key, { messageId: params.messageId, timestamp: now });
+
       await chatApi.markAsRead(params.chatId, { last_read_message_id: params.messageId });
       return params;
     },

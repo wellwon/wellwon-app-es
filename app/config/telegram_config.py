@@ -84,6 +84,11 @@ class TelegramConfig(BaseConfig):
         description="Phone number for MTProto admin operations"
     )
 
+    mtproto_wellwon_user_id: Optional[str] = Field(
+        default=None,
+        description="WellWon user UUID for MTProto account (for sender_id mapping)"
+    )
+
     # =========================================================================
     # Bots Configuration
     # =========================================================================

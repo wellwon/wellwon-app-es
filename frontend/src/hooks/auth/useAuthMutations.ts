@@ -87,6 +87,21 @@ export function useLogout() {
       // Clear all other queries (user data is now invalid)
       queryClient.clear();
 
+      // Clear persisted messages cache from Zustand
+      // This ensures fresh data on next login (no stale messages)
+      const messagesStore = (window as any).__MESSAGES_STORE__;
+      if (messagesStore?.getState?.()?.clearAllCache) {
+        messagesStore.getState().clearAllCache();
+        logger.info('Cleared messages cache on logout');
+      }
+
+      // Also clear from localStorage directly (fallback)
+      try {
+        localStorage.removeItem('wellwon-messages');
+      } catch (e) {
+        // Ignore localStorage errors
+      }
+
       logger.info('Logout successful');
     },
   });

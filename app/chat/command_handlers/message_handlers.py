@@ -5,9 +5,8 @@
 
 from __future__ import annotations
 
-import uuid
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Tuple
 
 from app.chat.commands import (
     SendMessageCommand,
@@ -23,6 +22,7 @@ from app.chat.aggregate import ChatAggregate
 from app.chat.events import TypingStarted, TypingStopped, MessageFileUrlUpdated
 from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
+from app.infra.persistence.scylladb import generate_snowflake_id
 
 if TYPE_CHECKING:
     from app.infra.cqrs.handler_dependencies import HandlerDependencies
@@ -49,15 +49,29 @@ class SendMessageHandler(BaseCommandHandler):
         )
         self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
 
-    async def handle(self, command: SendMessageCommand) -> uuid.UUID:
-        log.info(f"Sending message to chat {command.chat_id} from {command.sender_id}, source={command.source}")
+    async def handle(self, command: SendMessageCommand) -> Tuple[int, Optional[str]]:
+        """
+        Handle SendMessageCommand.
+
+        Returns:
+            Tuple of (snowflake_id, client_temp_id) for response reconciliation.
+            - snowflake_id: Server-generated permanent ID (int64)
+            - client_temp_id: Echo back client's temp ID for optimistic UI reconciliation
+        """
+        # Generate server-side Snowflake ID (Discord/Twitter pattern)
+        snowflake_id = generate_snowflake_id()
+
+        log.info(
+            f"Sending message to chat {command.chat_id} from {command.sender_id}, "
+            f"snowflake_id={snowflake_id}, source={command.source}"
+        )
 
         # Load aggregate from Event Store
         chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
-        # Send message in WellWon
+        # Send message in WellWon with server-generated Snowflake ID
         chat_aggregate.send_message(
-            message_id=command.message_id,
+            message_id=snowflake_id,  # Server-generated Snowflake (int64)
             sender_id=command.sender_id,
             content=command.content,
             message_type=command.message_type,
@@ -69,6 +83,7 @@ class SendMessageHandler(BaseCommandHandler):
             voice_duration=command.voice_duration,
             source=command.source,
             telegram_message_id=command.telegram_message_id,
+            client_temp_id=command.client_temp_id,  # For frontend reconciliation
         )
 
         await self.publish_events(
@@ -79,47 +94,50 @@ class SendMessageHandler(BaseCommandHandler):
 
         # Bidirectional sync: Send to Telegram if message is from WellWon (web or api), not from Telegram
         if command.source in ("web", "api") and self.telegram_adapter:
-            await self._sync_to_telegram(command, chat_aggregate)
+            await self._sync_to_telegram(command, chat_aggregate, snowflake_id)
 
-        log.info(f"Message sent: {command.message_id} to chat {command.chat_id}")
-        return command.message_id
+        log.info(f"Message sent: snowflake_id={snowflake_id} to chat {command.chat_id}")
+        # Return both IDs for frontend reconciliation
+        return (snowflake_id, command.client_temp_id)
 
-    async def _sync_to_telegram(self, command: SendMessageCommand, chat_aggregate: ChatAggregate) -> None:
+    async def _sync_to_telegram(self, command: SendMessageCommand, chat_aggregate: ChatAggregate, snowflake_id: int) -> None:
         """Sync message to Telegram if chat is linked (using aggregate state, not query)"""
         try:
             # Get Telegram IDs from aggregate state (set by TelegramChatLinked event)
-            telegram_chat_id = chat_aggregate.state.telegram_chat_id
+            telegram_chat_id_raw = chat_aggregate.state.telegram_chat_id
             telegram_topic_id = chat_aggregate.state.telegram_topic_id
 
-            if not telegram_chat_id:
+            if not telegram_chat_id_raw:
                 log.debug(f"Chat {command.chat_id} not linked to Telegram, skipping sync")
                 return
 
-            # Format chat_id for Telegram (supergroups need -100 prefix)
+            # Format chat_id for Telegram API (supergroups need -100 prefix)
             # telegram_chat_id in DB is stored without prefix (e.g., 1234567890)
             # Telegram API needs format -1001234567890
-            if telegram_chat_id > 0:
-                telegram_chat_id = int(f"-100{telegram_chat_id}")
+            # IMPORTANT: Keep the RAW ID for telegram_message_mapping (read receipts use raw ID)
+            telegram_chat_id_for_api = telegram_chat_id_raw
+            if telegram_chat_id_raw > 0:
+                telegram_chat_id_for_api = int(f"-100{telegram_chat_id_raw}")
 
-            log.info(f"Syncing message to Telegram: chat_id={telegram_chat_id}, topic_id={telegram_topic_id}")
+            log.info(f"Syncing message to Telegram: chat_id={telegram_chat_id_for_api}, topic_id={telegram_topic_id}")
 
-            # Send based on message type
+            # Send based on message type (use API-formatted chat_id)
             if command.message_type == "text":
                 result = await self.telegram_adapter.send_message(
-                    chat_id=telegram_chat_id,
+                    chat_id=telegram_chat_id_for_api,
                     text=command.content,
                     topic_id=telegram_topic_id,
                 )
             elif command.message_type == "voice" and command.file_url:
                 result = await self.telegram_adapter.send_voice(
-                    chat_id=telegram_chat_id,
+                    chat_id=telegram_chat_id_for_api,
                     voice_url=command.file_url,
                     duration=command.voice_duration,
                     topic_id=telegram_topic_id,
                 )
             elif command.file_url:
                 result = await self.telegram_adapter.send_file(
-                    chat_id=telegram_chat_id,
+                    chat_id=telegram_chat_id_for_api,
                     file_url=command.file_url,
                     file_name=command.file_name,
                     caption=command.content if command.content else None,
@@ -133,26 +151,29 @@ class SendMessageHandler(BaseCommandHandler):
                 log.info(f"Message synced to Telegram: telegram_message_id={result.message_id}")
 
                 # Emit MessageSyncedToTelegram event for real-time delivery status
+                # IMPORTANT: Use telegram_chat_id_raw (without -100 prefix) for mapping
+                # This matches what Telegram sends in read receipts (ReadHistoryOutbox)
                 from app.chat.events import MessageSyncedToTelegram
                 sync_event = MessageSyncedToTelegram(
-                    message_id=command.message_id,
+                    message_id=snowflake_id,  # Use server-generated Snowflake ID
                     chat_id=command.chat_id,
                     telegram_message_id=result.message_id,
-                    telegram_chat_id=telegram_chat_id,
+                    telegram_chat_id=telegram_chat_id_raw,  # RAW ID for mapping lookup
                 )
 
                 # Publish directly to transport (no aggregate needed for this event)
+                # IMPORTANT: Use mode='json' to serialize UUIDs as strings for Kafka
                 await self.event_bus.publish(
                     "transport.chat-events",
-                    sync_event.model_dump()
+                    sync_event.model_dump(mode='json')
                 )
-                log.debug(f"Published MessageSyncedToTelegram event for message {command.message_id}")
+                log.debug(f"Published MessageSyncedToTelegram event for message {snowflake_id}")
             else:
                 log.warning(f"Failed to sync message to Telegram: {result.error if result else 'unknown error'}")
 
         except Exception as e:
             # Don't fail the command if Telegram sync fails
-            log.error(f"Error syncing message to Telegram: {e}", exc_info=True)
+            log.error(f"Error syncing message to Telegram: {e}")
 
 
 @command_handler(EditMessageCommand)

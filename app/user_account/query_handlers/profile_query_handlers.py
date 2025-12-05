@@ -19,7 +19,9 @@ from app.user_account.queries import (
     GetUserByEmailQuery,
     CheckUserExistsQuery,
     GetUserResourcesQuery,
+    GetUserByExternalIdQuery,
     UserProfile,
+    ExternalIdentityResult,
 )
 from app.user_account.enums import UserType, DEFAULT_USER_TYPE
 from app.common.exceptions.exceptions import ResourceNotFoundError
@@ -170,6 +172,39 @@ class CheckUserExistsQueryHandler(BaseQueryHandler[CheckUserExistsQuery, dict[st
             'exists_by_username': exists_by_username,
             'exists_by_email': exists_by_email
         }
+
+
+@readonly_query(GetUserByExternalIdQuery)
+class GetUserByExternalIdQueryHandler(BaseQueryHandler[GetUserByExternalIdQuery, Optional[ExternalIdentityResult]]):
+    """
+    Handler for finding WellWon user by external provider ID.
+
+    Supports:
+    - 'telegram' provider via telegram_user_id column in user_accounts
+    - Future providers via user_external_identities table
+    """
+
+    def __init__(self, deps: 'HandlerDependencies'):
+        super().__init__()
+        self.user_repo = deps.user_read_repo
+
+    async def handle(self, query: GetUserByExternalIdQuery) -> Optional[ExternalIdentityResult]:
+        """Find user by external provider ID (Telegram, Google, etc.)"""
+        user_id = await self.user_repo.get_user_by_external_id(
+            provider=query.provider,
+            external_id=query.external_id
+        )
+
+        if not user_id:
+            return None
+
+        return ExternalIdentityResult(
+            user_id=user_id,
+            provider=query.provider,
+            external_id=query.external_id,
+            external_username=None,  # Could be enriched from user_accounts.telegram_username
+            linked_at=datetime.now(timezone.utc)  # Approximation
+        )
 
 
 @readonly_query(GetUserResourcesQuery)

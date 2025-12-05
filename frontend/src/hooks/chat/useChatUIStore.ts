@@ -135,7 +135,9 @@ export const useChatUIStore = create<ChatUIState>()(
 
         // Active chat
         setActiveChatId: (chatId) => {
+          console.log('[ZUSTAND] setActiveChatId called:', chatId, 'prev:', get().activeChatId);
           set({ activeChatId: chatId, replyingTo: null, editingMessageId: null });
+          console.log('[ZUSTAND] activeChatId after set:', get().activeChatId);
         },
 
         // Reply

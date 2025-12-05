@@ -9,12 +9,17 @@ import { persist } from 'zustand/middleware';
 
 interface MessagePage {
   messages: any[];
-  nextOffset: number | null;
+  // Cursor-based pagination (2025 pattern)
+  oldestMessageId: string | null;
+  hasMore: boolean;
+  // Legacy field for backwards compatibility
+  nextOffset?: number | null;
 }
 
 interface ChatMessagesCache {
   pages: MessagePage[];
-  pageParams: number[];
+  // Cursor-based: string | null (message IDs), legacy: number[]
+  pageParams: (string | number | null)[];
   updatedAt: number;
 }
 
@@ -26,7 +31,7 @@ interface MessagesStoreState {
   activeChatId: string | null;
 
   // Actions
-  setChatMessages: (chatId: string, pages: MessagePage[], pageParams: number[]) => void;
+  setChatMessages: (chatId: string, pages: MessagePage[], pageParams: (string | number | null)[]) => void;
   getChatMessages: (chatId: string) => ChatMessagesCache | null;
   setActiveChatId: (chatId: string | null) => void;
   clearChatCache: (chatId: string) => void;
@@ -96,7 +101,7 @@ export const useMessagesStore = create<MessagesStoreState>()(
       },
 
       clearAllCache: () => {
-        set({ messagesCache: {} });
+        set({ messagesCache: {}, activeChatId: null });
       },
     }),
     {
@@ -108,3 +113,8 @@ export const useMessagesStore = create<MessagesStoreState>()(
     }
   )
 );
+
+// Expose store globally for logout to access
+if (typeof window !== 'undefined') {
+  (window as any).__MESSAGES_STORE__ = useMessagesStore;
+}

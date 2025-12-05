@@ -88,6 +88,21 @@ export function useCompany(companyId: string | null) {
     },
   });
 
+  // CRITICAL: Dispatch companyDeleted event when 404 is received
+  // This clears the selectedCompany from localStorage if it was the deleted company
+  useEffect(() => {
+    if (query.isError && companyId) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const status = (query.error as any)?.response?.status;
+      if (status === 404) {
+        logger.info('useCompany: 404 detected, dispatching companyDeleted event', { companyId });
+        window.dispatchEvent(new CustomEvent('companyDeleted', {
+          detail: { company_id: companyId, id: companyId }
+        }));
+      }
+    }
+  }, [query.isError, query.error, companyId]);
+
   return {
     company: query.data ?? null,
     isLoading: query.isLoading,

@@ -18,6 +18,7 @@ from app.chat.commands import (
 from app.chat.aggregate import ChatAggregate
 from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
+from app.infra.persistence.scylladb import generate_snowflake_id
 
 if TYPE_CHECKING:
     from app.infra.cqrs.handler_dependencies import HandlerDependencies
@@ -108,7 +109,7 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
         )
         self._query_bus = deps.query_bus  # For deduplication queries
 
-    async def handle(self, command: ProcessTelegramMessageCommand) -> uuid.UUID:
+    async def handle(self, command: ProcessTelegramMessageCommand) -> int:
         log.debug(f"Processing Telegram message {command.telegram_message_id} for chat {command.chat_id}")
 
         # DEDUPLICATION: Check if message with this telegram_message_id already exists
@@ -135,6 +136,9 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
                 # Don't fail processing if dedup check fails - just log and continue
                 log.warning(f"[DEDUP] Deduplication check failed: {e}")
 
+        # Generate server-side Snowflake ID (same pattern as SendMessageHandler)
+        snowflake_id = generate_snowflake_id()
+
         # Load aggregate from event store (proper Event Sourcing)
         chat_aggregate = await self.load_aggregate(command.chat_id, "Chat", ChatAggregate)
 
@@ -146,7 +150,7 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
         if command.sender_id:
             # Mapped WellWon user - use regular message flow (requires participant)
             chat_aggregate.send_message(
-                message_id=command.message_id,
+                message_id=snowflake_id,
                 sender_id=command.sender_id,
                 content=command.content,
                 message_type=command.message_type,
@@ -166,7 +170,7 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
             # External Telegram user - use receive_external_message (no participant check)
             # This is for new clients contacting via general topic
             chat_aggregate.receive_external_message(
-                message_id=command.message_id,
+                message_id=snowflake_id,
                 content=command.content,
                 message_type=command.message_type,
                 source="telegram",
@@ -189,8 +193,8 @@ class ProcessTelegramMessageHandler(BaseCommandHandler):
             command=command
         )
 
-        log.info(f"Telegram message processed: {command.message_id}")
-        return command.message_id
+        log.info(f"Telegram message processed: snowflake_id={snowflake_id}")
+        return snowflake_id
 
 
 @command_handler(LinkChatToTelegramCommand)

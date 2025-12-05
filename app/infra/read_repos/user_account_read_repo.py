@@ -838,6 +838,69 @@ class UserAccountReadRepo:
             log.error(f"Failed to link user {user_id} to Telegram: {e}")
             return False
 
+    @staticmethod
+    async def get_user_by_telegram_id(telegram_user_id: int) -> Optional[UUID]:
+        """
+        Find WellWon user ID by Telegram user ID.
+
+        Args:
+            telegram_user_id: Telegram user ID (bigint)
+
+        Returns:
+            WellWon user UUID if found, None otherwise
+        """
+        sql = """
+            SELECT id FROM user_accounts
+            WHERE telegram_user_id = $1 AND is_active = TRUE
+        """
+
+        try:
+            row = await pg_fetchrow(sql, telegram_user_id)
+            if row:
+                log.debug(f"Found WellWon user {row['id']} for Telegram user {telegram_user_id}")
+                return row['id']
+            return None
+        except Exception as e:
+            log.error(f"Failed to lookup user by Telegram ID {telegram_user_id}: {e}")
+            return None
+
+    @staticmethod
+    async def get_user_by_external_id(provider: str, external_id: str) -> Optional[UUID]:
+        """
+        Find WellWon user ID by external provider ID.
+        Supports 'telegram' provider via telegram_user_id column.
+
+        Args:
+            provider: Provider name ('telegram', 'google', etc.)
+            external_id: External user ID
+
+        Returns:
+            WellWon user UUID if found, None otherwise
+        """
+        if provider == 'telegram':
+            try:
+                telegram_id = int(external_id)
+                return await UserAccountReadRepo.get_user_by_telegram_id(telegram_id)
+            except ValueError:
+                log.warning(f"Invalid Telegram user ID format: {external_id}")
+                return None
+
+        # For future providers, check user_external_identities table
+        sql = """
+            SELECT user_id FROM user_external_identities
+            WHERE provider = $1 AND external_id = $2
+        """
+
+        try:
+            row = await pg_fetchrow(sql, provider, external_id)
+            if row:
+                return row['user_id']
+            return None
+        except Exception as e:
+            # Table might not exist yet
+            log.debug(f"External identity lookup failed: {e}")
+            return None
+
 
 # =============================================================================
 # Singleton instance for backward compatibility

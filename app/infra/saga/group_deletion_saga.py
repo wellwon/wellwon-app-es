@@ -169,6 +169,10 @@ class GroupDeletionSaga(BaseSaga):
         Delete Telegram supergroup via DeleteTelegramSupergroupCommand.
 
         TRUE SAGA: telegram_group_id comes from ENRICHED event context.
+
+        This step:
+        1. Calls TelegramAdapter to actually leave/delete the group from Telegram
+        2. Sends DeleteTelegramSupergroupCommand to update the database
         """
         # Get telegram_group_id from ENRICHED event context (NOT from query!)
         telegram_group_id = context.get('telegram_group_id')
@@ -187,8 +191,25 @@ class GroupDeletionSaga(BaseSaga):
         # Get command_bus from context (TRUE SAGA: only CommandBus allowed)
         command_bus = context['command_bus']
 
-        log.info(f"Saga {self.saga_id}: Deleting Telegram supergroup {telegram_group_id} via command")
+        log.info(f"Saga {self.saga_id}: Deleting Telegram supergroup {telegram_group_id}")
 
+        # Step 2a: Actually leave/delete the group from Telegram
+        telegram_left = False
+        try:
+            from app.api.dependencies.adapter_deps import get_telegram_adapter
+            adapter = await get_telegram_adapter()
+            if adapter:
+                telegram_left = await adapter.leave_group(telegram_group_id)
+                if telegram_left:
+                    log.info(f"Saga {self.saga_id}: Left/deleted Telegram group {telegram_group_id}")
+                else:
+                    log.warning(f"Saga {self.saga_id}: Failed to leave Telegram group {telegram_group_id}")
+            else:
+                log.warning(f"Saga {self.saga_id}: TelegramAdapter not available")
+        except Exception as e:
+            log.warning(f"Saga {self.saga_id}: Error leaving Telegram group: {e}")
+
+        # Step 2b: Update database via command
         try:
             from app.company.commands import DeleteTelegramSupergroupCommand
 
@@ -201,10 +222,11 @@ class GroupDeletionSaga(BaseSaga):
             await command_bus.send(command)
 
             self._telegram_deleted = True
-            log.info(f"Saga {self.saga_id}: Telegram supergroup {telegram_group_id} deletion requested")
+            log.info(f"Saga {self.saga_id}: Telegram supergroup {telegram_group_id} record deleted")
 
             return {
-                'telegram_deleted': True
+                'telegram_deleted': True,
+                'telegram_left': telegram_left
             }
 
         except Exception as e:
@@ -212,6 +234,7 @@ class GroupDeletionSaga(BaseSaga):
             # Don't fail saga for Telegram errors - data is more important
             return {
                 'telegram_deleted': False,
+                'telegram_left': telegram_left,
                 'telegram_error': str(e)
             }
 

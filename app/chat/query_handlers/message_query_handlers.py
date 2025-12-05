@@ -72,6 +72,8 @@ class GetChatMessagesQueryHandler(BaseQueryHandler[GetChatMessagesQuery, List[Me
 
     async def handle(self, query: GetChatMessagesQuery) -> List[MessageDetail]:
         """Fetch messages from ScyllaDB with pagination."""
+        log.info(f"[MSG-QUERY] GetChatMessagesQuery: chat_id={query.chat_id}, limit={query.limit}, before_id={query.before_id}, after_id={query.after_id}")
+
         messages = await self.message_scylla_repo.get_messages(
             channel_id=query.chat_id,
             limit=query.limit,
@@ -79,10 +81,13 @@ class GetChatMessagesQueryHandler(BaseQueryHandler[GetChatMessagesQuery, List[Me
             after_id=query.after_id,    # Snowflake ID
         )
 
+        log.info(f"[MSG-QUERY] ScyllaDB returned {len(messages)} messages for chat_id={query.chat_id}")
+
         return [
             MessageDetail(
-                id=None,  # PostgreSQL UUID not used
-                message_id=m.get('message_id'),  # Snowflake ID
+                # Server-generated Snowflake ID is THE permanent message ID
+                # Frontend uses this directly after reconciling temp IDs
+                id=m.get('message_id'),  # Snowflake ID (int64)
                 chat_id=m.get('channel_id'),
                 sender_id=m.get('sender_id'),
                 content=m.get('content'),
@@ -105,6 +110,7 @@ class GetChatMessagesQueryHandler(BaseQueryHandler[GetChatMessagesQuery, List[Me
                 telegram_forward_data=parse_json_field(m.get('telegram_forward_data')),
                 telegram_topic_id=m.get('telegram_topic_id'),
                 sync_direction=m.get('sync_direction'),
+                telegram_read_at=m.get('telegram_read_at'),  # Blue checkmarks persistence
             )
             for m in messages
         ]
@@ -133,8 +139,7 @@ class GetMessageByIdQueryHandler(BaseQueryHandler[GetMessageByIdQuery, Optional[
             return None
 
         return MessageDetail(
-            id=None,
-            message_id=message.get('message_id'),
+            id=message.get('message_id'),  # Snowflake ID (int64)
             chat_id=message.get('channel_id'),
             sender_id=message.get('sender_id'),
             content=message.get('content'),
@@ -156,6 +161,7 @@ class GetMessageByIdQueryHandler(BaseQueryHandler[GetMessageByIdQuery, Optional[
             telegram_forward_data=parse_json_field(message.get('telegram_forward_data')),
             telegram_topic_id=message.get('telegram_topic_id'),
             sync_direction=message.get('sync_direction'),
+            telegram_read_at=message.get('telegram_read_at'),  # Blue checkmarks persistence
         )
 
 
@@ -228,8 +234,7 @@ class SearchMessagesQueryHandler(BaseQueryHandler[SearchMessagesQuery, List[Mess
 
         return [
             MessageDetail(
-                id=None,
-                message_id=m.get('message_id'),
+                id=m.get('message_id'),  # Snowflake ID (int64)
                 chat_id=m.get('channel_id'),
                 sender_id=m.get('sender_id'),
                 content=m.get('content'),
@@ -243,6 +248,7 @@ class SearchMessagesQueryHandler(BaseQueryHandler[SearchMessagesQuery, List[Mess
                 telegram_forward_data=parse_json_field(m.get('telegram_forward_data')),
                 telegram_topic_id=m.get('telegram_topic_id'),
                 sync_direction=m.get('sync_direction'),
+                telegram_read_at=m.get('telegram_read_at'),  # Blue checkmarks persistence
             )
             for m in filtered
         ]

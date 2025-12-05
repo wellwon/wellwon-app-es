@@ -2,14 +2,16 @@
 -- File: database/scylla/wellwon_scylla.cql
 -- Description: Main ScyllaDB schema for WellWon messaging system
 -- =============================================================================
--- Version: 2.0.0
+-- Version: 3.0.0
 -- ScyllaDB Version: 6.2+
--- Last Updated: 2025-11-30
+-- Last Updated: 2025-12-05
 --
--- Architecture: Discord-style message storage
+-- Architecture: Discord/Slack-style message storage (Industry Standard)
+-- - Server-generated Snowflake IDs (timestamp + worker_id + sequence)
 -- - Partition by (channel_id, bucket) prevents unbounded partition growth
--- - Bucket = 10-day time window calculated from Snowflake ID
--- - Snowflake IDs for time-ordered, globally unique message IDs
+-- - Bucket = 10-day time window calculated from Snowflake timestamp
+-- - Snowflake IDs are THE permanent message ID (no UUID needed)
+-- - Client uses temp IDs for optimistic UI, reconciles with Snowflake
 -- - TWCS compaction for efficient time-series data management
 --
 -- TABLETS DISABLED: ScyllaDB 6.x enables tablets by default, but tablets
@@ -50,16 +52,20 @@ USE wellwon_scylla;
 -- =============================================================================
 -- TABLE: messages
 -- =============================================================================
--- Primary message storage with Discord-style partitioning
--- Partition: (channel_id, bucket) - prevents unbounded partition growth
--- Clustering: message_id DESC - Snowflake ID for time ordering
+-- Primary message storage with Discord/Slack-style partitioning (Industry Standard)
+-- - Server generates Snowflake ID (timestamp + worker_id + sequence)
+-- - Snowflake ID is THE permanent message ID (no UUID mapping needed)
+-- - Partition: (channel_id, bucket) - prevents unbounded partition growth
+-- - Clustering: message_id DESC - Snowflake ID provides time ordering
 
 CREATE TABLE IF NOT EXISTS messages (
     -- Partition key
     channel_id              uuid,
     bucket                  int,            -- 10-day window from Snowflake timestamp
 
-    -- Clustering key (Snowflake ID - time-ordered, globally unique)
+    -- Clustering key: Server-generated Snowflake ID (int64)
+    -- Format: timestamp_ms (42 bits) | worker_id (10 bits) | sequence (12 bits)
+    -- Provides: Time ordering, global uniqueness, ~4M IDs/sec per worker
     message_id              bigint,
 
     -- Sender (NULL for unmapped Telegram users)
@@ -69,7 +75,7 @@ CREATE TABLE IF NOT EXISTS messages (
     content                 text,
     message_type            text,           -- text, file, voice, image, system
 
-    -- Reply/Threading
+    -- Reply/Threading (Snowflake ID of parent message)
     reply_to_id             bigint,
 
     -- File attachments

@@ -145,14 +145,20 @@ class ParticipantLeft(BaseEvent):
 
 @domain_event(category="domain")
 class MessageSent(BaseEvent):
-    """Event emitted when a message is sent"""
+    """
+    Event emitted when a message is sent.
+
+    ID Strategy (Discord/Slack pattern):
+    - message_id: Server-generated Snowflake ID (int64) - permanent, time-ordered
+    - client_temp_id: Optional client temp ID for optimistic UI reconciliation
+    """
     event_type: Literal["MessageSent"] = "MessageSent"
-    message_id: uuid.UUID
+    message_id: int  # Server-generated Snowflake ID (int64)
     chat_id: uuid.UUID
     sender_id: Optional[uuid.UUID] = None  # None for external Telegram users
     content: str
     message_type: str = "text"  # text, file, voice, image, system
-    reply_to_id: Optional[uuid.UUID] = None
+    reply_to_id: Optional[int] = None  # Snowflake ID of replied message
     file_url: Optional[str] = None
     file_name: Optional[str] = None
     file_size: Optional[int] = None
@@ -169,6 +175,8 @@ class MessageSent(BaseEvent):
     telegram_user_data: Optional[Dict[str, Any]] = None  # {first_name, last_name, username, is_bot}
     telegram_forward_data: Optional[Dict[str, Any]] = None  # Forward info if forwarded
     telegram_topic_id: Optional[int] = None  # Forum topic ID
+    # Client temp ID for frontend reconciliation (NOT stored in DB)
+    client_temp_id: Optional[str] = None
 
 
 @domain_event(category="domain")
@@ -235,11 +243,13 @@ class MessageSyncedToTelegram(BaseEvent):
     - Blue double checkmark: Message read on Telegram (MessagesReadOnTelegram)
     """
     event_type: Literal["MessageSyncedToTelegram"] = "MessageSyncedToTelegram"
-    message_id: uuid.UUID
+    message_id: int  # Snowflake ID (int64)
     chat_id: uuid.UUID
     telegram_message_id: int  # Telegram's message ID
     telegram_chat_id: int  # Telegram chat/supergroup ID
     synced_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # Participant IDs for real-time routing (avoids read model query in DomainPublisher)
+    participant_ids: List[uuid.UUID] = Field(default_factory=list)
 
 
 @domain_event(category="domain")
@@ -255,6 +265,8 @@ class MessagesReadOnTelegram(BaseEvent):
     last_read_message_id: Optional[int] = None  # Snowflake ID (bigint), None if message not found
     last_read_telegram_message_id: int  # Telegram's max_id
     telegram_read_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # Participant IDs for real-time routing (avoids read model query in DomainPublisher)
+    participant_ids: List[uuid.UUID] = Field(default_factory=list)
 
 
 @domain_event(category="domain")

@@ -35,7 +35,7 @@ except ImportError:
 if TYPE_CHECKING:
     from app.infra.cqrs.command_bus import CommandBus
     from app.infra.cqrs.query_bus import QueryBus
-    from app.infra.event_bus.redpanda_event_bus import RedpandaEventBus
+    from app.infra.event_bus.event_bus import EventBus
     from app.infra.telegram.mtproto_client import ReadEventInfo
 
 log = get_logger("wellwon.telegram.incoming")
@@ -95,7 +95,7 @@ class TelegramIncomingHandler:
         self,
         command_bus: 'CommandBus',
         query_bus: 'QueryBus',
-        event_bus: Optional['RedpandaEventBus'] = None,
+        event_bus: Optional['EventBus'] = None,
         redis_client: Optional[Any] = None,
         dedup_ttl: int = 300,  # 5 minutes
     ):
@@ -246,6 +246,15 @@ class TelegramIncomingHandler:
             file_name = video.get("file_name")
             mime_type = video.get("mime_type")
             text = msg.get("caption")
+        elif msg.get("video_note"):
+            # Circular video message (кружочек)
+            message_type = "video_note"
+            video_note = msg["video_note"]
+            file_id = video_note.get("file_id")
+            file_unique_id = video_note.get("file_unique_id")
+            file_size = video_note.get("file_size")
+            voice_duration = video_note.get("duration")  # Duration in seconds
+            mime_type = "video/mp4"
         elif msg.get("sticker"):
             message_type = "sticker"
             sticker = msg["sticker"]
@@ -645,7 +654,8 @@ class TelegramIncomingHandler:
             "photo": "image",      # Telegram photo -> domain image
             "document": "file",    # Telegram document -> domain file
             "voice": "voice",      # Same
-            "video": "file",       # Telegram video -> domain file
+            "video": "video",      # Telegram video -> domain video
+            "video_note": "video_note",  # Telegram video note (кружочек) -> domain video_note
             "audio": "file",       # Telegram audio -> domain file
             "sticker": "image",    # Telegram sticker -> domain image
         }
@@ -665,14 +675,15 @@ class TelegramIncomingHandler:
         2. is_outbox=False: YOU read messages on Telegram -> Sync your read status to WellWon
 
         Args:
-            read_event: Read event info from Telegram (chat_id, max_id, is_outbox)
+            read_event: Read event info from Telegram (chat_id, max_id, is_outbox, topic_id)
 
         Returns:
             True if handled successfully
         """
+        topic_id = getattr(read_event, 'topic_id', None)
         log.info(
             f"[READ-DEBUG] handle_read_event called: chat_id={read_event.chat_id}, "
-            f"max_id={read_event.max_id}, is_outbox={read_event.is_outbox}"
+            f"max_id={read_event.max_id}, is_outbox={read_event.is_outbox}, topic_id={topic_id}"
         )
         try:
             if read_event.is_outbox:
@@ -701,14 +712,18 @@ class TelegramIncomingHandler:
             log.warning("[READ-DEBUG] Event bus not available - cannot publish MessagesReadOnTelegram")
             return False
 
+        topic_id = getattr(read_event, 'topic_id', None)
         log.info(
             f"[READ-DEBUG] Telegram read receipt: others read messages up to {read_event.max_id} "
-            f"in Telegram chat {read_event.chat_id}"
+            f"in Telegram chat {read_event.chat_id}, topic={topic_id}"
         )
 
         try:
-            # 1. Lookup WellWon chat by Telegram chat_id
-            chat_id = await self._lookup_chat_by_telegram_id(read_event.chat_id)
+            # 1. Lookup WellWon chat by Telegram chat_id (and topic_id if forum)
+            if topic_id:
+                chat_id = await self._lookup_chat_by_telegram_id_and_topic(read_event.chat_id, topic_id)
+            else:
+                chat_id = await self._lookup_chat_by_telegram_id(read_event.chat_id)
 
             if not chat_id:
                 log.warning(f"[READ-DEBUG] No WellWon chat found for Telegram chat {read_event.chat_id}")
@@ -744,7 +759,8 @@ class TelegramIncomingHandler:
                 "aggregate_id": str(chat_id),
                 "aggregate_type": "Chat",
                 "chat_id": str(chat_id),
-                "last_read_message_id": str(wellwon_message_id) if wellwon_message_id else None,
+                # Keep as int (Snowflake ID) - projector expects int for ScyllaDB update
+                "last_read_message_id": wellwon_message_id,
                 "last_read_telegram_message_id": read_event.max_id,
                 "telegram_read_at": telegram_read_at.isoformat(),
                 "timestamp": telegram_read_at.isoformat(),
@@ -771,8 +787,13 @@ class TelegramIncomingHandler:
         Syncs your read status to WellWon.
         """
         try:
-            # 1. Lookup WellWon chat by Telegram chat_id
-            chat_id = await self._lookup_chat_by_telegram_id(read_event.chat_id)
+            topic_id = getattr(read_event, 'topic_id', None)
+
+            # 1. Lookup WellWon chat by Telegram chat_id (and topic_id if forum)
+            if topic_id:
+                chat_id = await self._lookup_chat_by_telegram_id_and_topic(read_event.chat_id, topic_id)
+            else:
+                chat_id = await self._lookup_chat_by_telegram_id(read_event.chat_id)
 
             if not chat_id:
                 log.debug(f"No WellWon chat found for Telegram chat {read_event.chat_id}")
@@ -837,6 +858,24 @@ class TelegramIncomingHandler:
             # Fallback to external ID lookup
             return await self._lookup_chat(telegram_chat_id, None)
 
+    async def _lookup_chat_by_telegram_id_and_topic(self, telegram_chat_id: int, topic_id: int) -> Optional[UUID]:
+        """Lookup WellWon chat by Telegram chat ID and topic ID (for forum topics)."""
+        try:
+            from app.chat.queries import GetChatByTelegramIdQuery
+
+            result = await self._query_bus.query(
+                GetChatByTelegramIdQuery(
+                    telegram_chat_id=telegram_chat_id,
+                    telegram_topic_id=topic_id
+                )
+            )
+            return result.id if result else None
+
+        except Exception as e:
+            log.debug(f"Chat lookup by telegram_id and topic_id failed: {e}")
+            # Fallback to external ID lookup
+            return await self._lookup_chat(telegram_chat_id, topic_id)
+
     async def _find_message_by_telegram_id(
         self,
         chat_id: UUID,
@@ -847,6 +886,11 @@ class TelegramIncomingHandler:
         try:
             from app.chat.queries import GetMessageByTelegramIdQuery
 
+            log.debug(
+                f"[READ-DEBUG] Looking up message: telegram_chat_id={telegram_chat_id}, "
+                f"telegram_message_id={telegram_message_id}, wellwon_chat_id={chat_id}"
+            )
+
             result = await self._query_bus.query(
                 GetMessageByTelegramIdQuery(
                     chat_id=chat_id,
@@ -854,11 +898,17 @@ class TelegramIncomingHandler:
                     telegram_message_id=telegram_message_id
                 )
             )
+
+            if result:
+                log.debug(f"[READ-DEBUG] Found mapping: snowflake_id={result.snowflake_id}")
+            else:
+                log.debug(f"[READ-DEBUG] No mapping found for telegram_message_id={telegram_message_id}")
+
             # Return snowflake_id (int) for use with MarkMessagesAsReadCommand
             return result.snowflake_id if result else None
 
         except Exception as e:
-            log.debug(f"Message lookup by telegram_id failed: {e}")
+            log.warning(f"[READ-DEBUG] Message lookup by telegram_id failed: {e}")
             return None
 
     async def _get_mtproto_user_id(self) -> Optional[UUID]:

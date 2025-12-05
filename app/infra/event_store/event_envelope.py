@@ -199,17 +199,27 @@ class EventEnvelope:
         # For different event types, aggregate_id might be in different fields
         aggregate_id = (
                 data.get('aggregate_id') or
+                data.get('chat_id') or  # Chat domain events
                 data.get('user_id') or  # User domain events
                 data.get('account_id') or  # Account events
                 data.get('virtual_account_id') or  # Virtual broker events
                 str(uuid.uuid4())
         )
 
-        # Ensure UUIDs are properly formatted
+        # Ensure UUIDs are properly formatted - handle str, UUID objects, and ints
         if isinstance(event_id, str):
             event_id = uuid.UUID(event_id)
+        elif isinstance(event_id, int):
+            # Fallback: generate new UUID if int was passed (shouldn't happen)
+            event_id = uuid.uuid4()
+        # If already uuid.UUID, use as-is
+
         if isinstance(aggregate_id, str):
             aggregate_id = uuid.UUID(aggregate_id)
+        elif isinstance(aggregate_id, int):
+            # Fallback: generate new UUID if int was passed (shouldn't happen)
+            aggregate_id = uuid.uuid4()
+        # If already uuid.UUID, use as-is
 
         # Handle timestamp
         timestamp = None

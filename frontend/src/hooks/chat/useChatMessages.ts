@@ -81,43 +81,156 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
   const setChatMessages = useMessagesStore((s) => s.setChatMessages);
 
   // Get cached data for this chat
-  const cachedData = chatId ? getChatMessages(chatId) : null;
+  const rawCachedData = chatId ? getChatMessages(chatId) : null;
+  const clearChatCache = useMessagesStore((s) => s.clearChatCache);
+
+  // IMPORTANT: Only use cache if it actually has messages, not just empty page structure
+  // Also migrate legacy cache format (nextOffset → oldestMessageId)
+  const cachedData = useMemo(() => {
+    if (!rawCachedData?.pages?.length) return null;
+
+    // Count total messages across all pages
+    let totalMessages = 0;
+    for (const page of rawCachedData.pages) {
+      totalMessages += page.messages?.length || 0;
+    }
+
+    // If cache is essentially empty (no actual messages), don't use it
+    if (totalMessages === 0) {
+      console.log('[CACHE] Cache has pages but no messages - ignoring cache');
+      return null;
+    }
+
+    // Migrate legacy cache format: ensure each page has oldestMessageId and hasMore
+    const migratedPages = rawCachedData.pages.map((page: any) => {
+      // If already has new format, use as-is
+      if (page.oldestMessageId !== undefined && page.hasMore !== undefined) {
+        return page;
+      }
+
+      // Migrate: derive oldestMessageId from last message in page
+      const messages = page.messages || [];
+      const oldestMessage = messages[messages.length - 1];
+      const oldestMessageId = oldestMessage?.id || null;
+
+      // Default hasMore to true for cached pages (will be corrected on fresh fetch)
+      const hasMore = page.hasMore ?? (messages.length >= 10);
+
+      return {
+        ...page,
+        oldestMessageId,
+        hasMore,
+      };
+    });
+
+    return {
+      ...rawCachedData,
+      pages: migratedPages,
+    };
+  }, [rawCachedData]);
+
+  // Clean up corrupted cache (empty page structures)
+  useEffect(() => {
+    if (chatId && rawCachedData?.pages?.length && !cachedData) {
+      console.log('[CACHE] Cleaning up corrupted cache for chat:', chatId);
+      clearChatCache(chatId);
+    }
+  }, [chatId, rawCachedData, cachedData, clearChatCache]);
+
+  // Debug: log cache state
+  useEffect(() => {
+    if (chatId) {
+      const msgCount = cachedData?.pages?.reduce((acc, p) => acc + (p.messages?.length || 0), 0) || 0;
+      console.log('[CACHE] Chat:', chatId, 'Cached pages:', cachedData?.pages?.length || 0, 'Messages:', msgCount);
+    }
+  }, [chatId, cachedData?.pages?.length]);
 
   // Track if we're prefetching to avoid duplicate calls
   const isPrefetchingRef = useRef(false);
 
-  // Infinite query for paginated messages
+  // Debug: log query state
+  useEffect(() => {
+    console.log('[QUERY-DEBUG] ============================');
+    console.log('[QUERY-DEBUG] chatId:', chatId);
+    console.log('[QUERY-DEBUG] enabled prop:', enabled);
+    console.log('[QUERY-DEBUG] Query will be enabled:', enabled && !!chatId);
+    if (enabled && chatId) {
+      console.log('[QUERY-DEBUG] ✓ Query SHOULD fire and fetch from backend!');
+    } else {
+      console.log('[QUERY-DEBUG] ✗ Query DISABLED - chatId or enabled is falsy');
+    }
+  }, [enabled, chatId]);
+
+  // -----------------------------------------------------------------------------
+  // Infinite Query with CURSOR-BASED pagination (Industry Standard)
+  // - Uses before_id to load OLDER messages (scroll up)
+  // - More reliable than offset (no issues when new messages shift positions)
+  // - Discord/Telegram pattern
+  // -----------------------------------------------------------------------------
   const query = useInfiniteQuery({
     queryKey: chatId ? chatKeys.messages(chatId) : ['disabled'],
-    queryFn: async ({ pageParam = 0 }) => {
-      if (!chatId) return { messages: [], nextOffset: null };
+    queryFn: async ({ pageParam }) => {
+      console.log('[QUERY-FN] >>>>>> queryFn CALLED! chatId:', chatId, 'cursor:', pageParam);
 
+      if (!chatId) {
+        console.log('[QUERY-FN] No chatId, returning empty');
+        return { messages: [], oldestMessageId: null, hasMore: false };
+      }
+
+      console.log('[QUERY-FN] Fetching messages from BACKEND for chat:', chatId, 'cursor:', pageParam, 'limit:', MESSAGES_PER_PAGE);
+
+      // pageParam is the cursor (oldest message ID from previous page)
+      // null = first page (newest messages)
       const messages = await chatApi.getMessages(chatId, {
         limit: MESSAGES_PER_PAGE,
-        offset: pageParam,
+        before_id: pageParam || undefined, // Load messages BEFORE this ID (older)
       });
 
+      console.log('[QUERY] Got', messages.length, 'messages from API');
+      const normalizedMessages = messages.map(normalizeMessage);
+
+      // Get the oldest message ID for next page cursor
+      const oldestMessage = normalizedMessages[normalizedMessages.length - 1];
+      const oldestMessageId = oldestMessage?.id || null;
+
       return {
-        messages: messages.map(normalizeMessage),
-        nextOffset: messages.length === MESSAGES_PER_PAGE ? pageParam + MESSAGES_PER_PAGE : null,
+        messages: normalizedMessages,
+        // Cursor for loading older messages (scroll up)
+        oldestMessageId,
+        // Has more if we got a full page
+        hasMore: messages.length === MESSAGES_PER_PAGE,
       };
     },
-    getNextPageParam: (lastPage) => lastPage.nextOffset,
-    initialPageParam: 0,
+
+    // Cursor-based pagination: return oldest message ID or undefined to stop
+    // IMPORTANT: Default hasMore to true for cached pages that might not have this field
+    // This ensures pagination works when loading from localStorage cache
+    getNextPageParam: (lastPage) => {
+      // If hasMore is explicitly false, stop pagination
+      if (lastPage.hasMore === false) return undefined;
+      // If no oldestMessageId, stop pagination
+      if (!lastPage.oldestMessageId) return undefined;
+      // Otherwise assume more pages (Discord/Telegram pattern)
+      return lastPage.oldestMessageId;
+    },
+
+    // First page has no cursor (get newest messages)
+    initialPageParam: null as string | null,
     enabled: enabled && !!chatId,
 
-    // TkDodo: staleTime: Infinity when WSE handles all updates
-    staleTime: Infinity,
-
-    // TkDodo: initialData from Zustand cache for instant render
-    // IMPORTANT: Only use if cache has actual pages, otherwise let React Query fetch
-    initialData: cachedData?.pages?.length ? {
+    // TkDodo pattern: Show cached data instantly, fetch fresh in background
+    // placeholderData shows Zustand cache while fetching (instant page refresh)
+    placeholderData: cachedData ? {
       pages: cachedData.pages,
       pageParams: cachedData.pageParams,
     } : undefined,
-    initialDataUpdatedAt: cachedData?.pages?.length ? cachedData.updatedAt : undefined,
 
-    // Messages sorted newest first from API, we reverse for display
+    // Fresh fetch in background - ensures consistency with ScyllaDB
+    staleTime: 0, // Data is immediately stale - fetch fresh in background
+    gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes for navigation
+    refetchOnMount: true, // Fetch fresh data but show placeholder while loading
+
+    // Transform data for display
     select: (data) => {
       // Deduplicate using Map for O(1) lookup, preserving order
       const messageMap = new Map<string, Message>();
@@ -129,19 +242,37 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
           }
         }
       }
-      // Convert to array and reverse for chronological order
+
+      // API returns newest first per page, pages are oldest to newest
+      // We need chronological order: oldest first, newest last
       const messages = Array.from(messageMap.values()).reverse();
 
       return {
         pages: data.pages,
         pageParams: data.pageParams,
         messages,
+        hasMore: data.pages[data.pages.length - 1]?.hasMore ?? false,
       };
     },
 
-    // Keep only recent pages in memory for performance
-    maxPages: 5,
+    // Limit cache to prevent memory bloat (TanStack Query v5)
+    maxPages: 10,
   });
+
+  // Debug: log query state after definition
+  useEffect(() => {
+    console.log('[QUERY-STATE] isLoading:', query.isLoading, 'isFetching:', query.isFetching, 'isError:', query.isError);
+    console.log('[QUERY-STATE] data pages:', query.data?.pages?.length || 0, 'messages:', query.data?.messages?.length || 0);
+    console.log('[QUERY-STATE] hasNextPage:', query.hasNextPage, 'isFetchingNextPage:', query.isFetchingNextPage);
+    // Debug: check last page structure
+    if (query.data?.pages?.length) {
+      const lastPage = query.data.pages[query.data.pages.length - 1];
+      console.log('[QUERY-STATE] Last page hasMore:', lastPage?.hasMore, 'oldestMessageId:', lastPage?.oldestMessageId);
+    }
+    if (query.isError) {
+      console.error('[QUERY-STATE] ERROR:', query.error);
+    }
+  }, [query.isLoading, query.isFetching, query.isError, query.data?.pages?.length, query.data?.messages?.length, query.error, query.hasNextPage, query.isFetchingNextPage]);
 
   // Sync React Query cache to Zustand for persistence
   useEffect(() => {
@@ -149,7 +280,7 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
       setChatMessages(
         chatId,
         query.data.pages,
-        query.data.pageParams as number[]
+        query.data.pageParams as (string | number | null)[]
       );
     }
   }, [chatId, query.data?.pages, query.data?.pageParams, setChatMessages]);
@@ -164,24 +295,65 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
 
       const newMessage = normalizeMessage(messageData);
 
-      logger.debug('WSE: Adding message to React Query cache', {
+      logger.debug('WSE: Processing message_created', {
         messageId: newMessage.id,
         chatId,
       });
 
       // Add message to cache using setQueryData (TkDodo pattern)
+      // Simple logic: only add if message doesn't exist (by snowflake_id)
+      // Optimistic messages have temp_xxx IDs, server messages have snowflake IDs
+      // HTTP response handles reconciliation (temp_xxx → snowflake)
       queryClient.setQueryData(
         chatKeys.messages(chatId),
         (oldData: any) => {
           if (!oldData) return oldData;
 
-          // O(n) duplicate check - still iterates but avoids flatMap allocation
+          // Check if message already exists by ID (snowflake_id)
           if (hasMessage(oldData.pages, newMessage.id)) {
             logger.debug('WSE: Message already exists, skipping', { messageId: newMessage.id });
             return oldData;
           }
 
-          // Add to first page (newest messages)
+          // Check if there's an optimistic message with temp ID that needs reconciliation
+          // Look for temp_xxx IDs that should be replaced with this snowflake
+          const clientTempId = messageData.client_temp_id;
+          if (clientTempId) {
+            let found = false;
+            const newPages = oldData.pages.map((page: any) => ({
+              ...page,
+              messages: page.messages.map((m: Message) => {
+                if (String(m.id) === clientTempId) {
+                  found = true;
+                  // Preserve _stableKey to prevent React remount/re-animation
+                  return { ...newMessage, _stableKey: m._stableKey || clientTempId };
+                }
+                return m;
+              }),
+            }));
+            if (found) {
+              logger.debug('WSE: Reconciled optimistic message', { tempId: clientTempId, snowflakeId: newMessage.id });
+              return { ...oldData, pages: newPages };
+            }
+            // client_temp_id provided but temp not found - HTTP already reconciled, skip
+            logger.debug('WSE: client_temp_id provided but temp not found, skipping', { clientTempId });
+            return oldData;
+          }
+
+          // No client_temp_id - check if this is our optimistic message by looking for temp_ prefix
+          // If any temp_ message exists with same sender, it's likely ours - wait for HTTP reconcile
+          const hasPendingOptimistic = oldData.pages.some((page: any) =>
+            page.messages.some((m: Message) =>
+              String(m.id).startsWith('temp_') && m.sender_id === newMessage.sender_id
+            )
+          );
+          if (hasPendingOptimistic) {
+            logger.debug('WSE: Has pending optimistic from same sender, skipping', { messageId: newMessage.id });
+            return oldData;
+          }
+
+          // Truly new message from other user - add to cache
+          logger.debug('WSE: Adding new message', { messageId: newMessage.id });
           const newPages = [...oldData.pages];
           if (newPages.length > 0) {
             newPages[0] = {
@@ -242,12 +414,13 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
     // Handle message synced to Telegram - delivery confirmation (double gray checkmark)
     const handleMessageSyncedToTelegram = (event: CustomEvent) => {
       const data = event.detail;
-      if (data.chat_id !== chatId) return;
+      // Compare as strings (chatId is string, data.chat_id may be UUID)
+      if (String(data.chat_id) !== String(chatId)) return;
 
-      const messageId = data.id || data.message_id;
+      const messageId = String(data.id || data.message_id);
       const telegramMessageId = data.telegram_message_id;
 
-      logger.debug('WSE: Message synced to Telegram (delivered)', {
+      logger.info('WSE: Message synced to Telegram (delivered) - double gray checkmarks', {
         chatId,
         messageId,
         telegramMessageId,
@@ -258,10 +431,13 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
         (oldData: any) => {
           if (!oldData) return oldData;
 
+          let updated = false;
           const newPages = oldData.pages.map((page: any) => ({
             ...page,
             messages: page.messages.map((m: Message) => {
-              if (m.id === messageId) {
+              // Compare as strings (m.id is string, messageId is stringified Snowflake)
+              if (String(m.id) === messageId) {
+                updated = true;
                 return {
                   ...m,
                   telegram_message_id: telegramMessageId,
@@ -270,6 +446,12 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
               return m;
             }),
           }));
+
+          if (updated) {
+            logger.info(`Updated message ${messageId} with telegram_message_id=${telegramMessageId}`);
+          } else {
+            logger.warn(`Message ${messageId} not found in cache for telegram sync update`);
+          }
 
           return { ...oldData, pages: newPages };
         }
@@ -451,6 +633,169 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
     };
   }, [chatId, queryClient]);
 
+  // -----------------------------------------------------------------------------
+  // Catch-up mechanism: fetch new messages on mount, tab return, or WSE reconnect
+  // TkDodo best practice: "Always refetch after reconnect to ensure consistency"
+  // Discord/Telegram pattern: sync missed messages when coming back online
+  //
+  // IMPORTANT: For infinite queries, we DON'T use query.refetch() because:
+  // 1. It refetches ALL cached pages (slow, wasteful)
+  // 2. Offset-based pagination breaks when new messages shift offsets
+  //
+  // Instead, we fetch ONLY the first page (newest messages) and merge with cache.
+  // The `select` function deduplicates by message ID automatically.
+  // -----------------------------------------------------------------------------
+
+  // Track if initial catch-up was done for this chat
+  const initialCatchUpDoneRef = useRef<string | null>(null);
+
+  // Fetch newest messages and merge with existing cache (cursor-based)
+  const fetchNewestMessages = useCallback(async () => {
+    if (!chatId) return;
+
+    try {
+      console.log('[CATCH-UP] Fetching newest messages for chat:', chatId);
+      logger.info('[CATCH-UP] Fetching newest messages', { chatId });
+
+      // Fetch newest messages (no cursor = get latest)
+      const messages = await chatApi.getMessages(chatId, {
+        limit: MESSAGES_PER_PAGE,
+      });
+
+      console.log('[CATCH-UP] API returned messages:', messages.length);
+      const normalizedMessages = messages.map(normalizeMessage);
+
+      // Get oldest message ID for cursor
+      const oldestMessage = normalizedMessages[normalizedMessages.length - 1];
+      const oldestMessageId = oldestMessage?.id || null;
+
+      // Merge with existing cache - add new messages to first page
+      queryClient.setQueryData(
+        chatKeys.messages(chatId),
+        (oldData: any) => {
+          console.log('[CATCH-UP] Existing cache pages:', oldData?.pages?.length || 0);
+
+          if (!oldData?.pages?.length) {
+            // No existing data, create fresh structure (cursor-based)
+            console.log('[CATCH-UP] No cache, creating fresh with', normalizedMessages.length, 'messages');
+            return {
+              pages: [{
+                messages: normalizedMessages,
+                oldestMessageId,
+                hasMore: messages.length === MESSAGES_PER_PAGE,
+              }],
+              pageParams: [null], // First page has null cursor
+            };
+          }
+
+          // Build set of existing message IDs for O(1) lookup
+          const existingIds = buildMessageIdSet(oldData.pages);
+          console.log('[CATCH-UP] Existing message IDs count:', existingIds.size);
+
+          // Find new messages that aren't in cache
+          const newMessages = normalizedMessages.filter(
+            (msg) => !existingIds.has(String(msg.id))
+          );
+
+          if (newMessages.length === 0) {
+            console.log('[CATCH-UP] No new messages found (all already in cache)');
+            logger.debug('[CATCH-UP] No new messages found');
+            return oldData;
+          }
+
+          console.log('[CATCH-UP] Found', newMessages.length, 'new messages to add');
+          logger.info('[CATCH-UP] Found new messages', { count: newMessages.length });
+
+          // Add new messages to front of first page (newest messages)
+          const newPages = [...oldData.pages];
+          newPages[0] = {
+            ...newPages[0],
+            messages: [...newMessages, ...newPages[0].messages],
+          };
+
+          return { ...oldData, pages: newPages };
+        }
+      );
+    } catch (error) {
+      console.error('[CATCH-UP] Failed to fetch:', error);
+      logger.error('[CATCH-UP] Failed to fetch newest messages', { error, chatId });
+    }
+  }, [chatId, queryClient]);
+
+  // Initial mount catch-up: fetch new messages ONLY if we have cached data
+  // If no cached data, let React Query do its natural initial fetch
+  // This prevents conflicts between setQueryData and initial query fetch
+  useEffect(() => {
+    if (!chatId) return;
+
+    // Skip if we already did catch-up for this chat
+    if (initialCatchUpDoneRef.current === chatId) return;
+
+    // IMPORTANT: Only run catch-up if there's cached data
+    // If no cache (fresh login), let React Query fetch naturally
+    if (!cachedData?.pages?.length) {
+      console.log('[CATCH-UP] No cached data, letting React Query fetch naturally');
+      initialCatchUpDoneRef.current = chatId;
+      return;
+    }
+
+    initialCatchUpDoneRef.current = chatId;
+
+    // Has cached data - fetch newest to merge any missed messages
+    console.log('[CATCH-UP] Has cached data, fetching newest messages');
+    const timeoutId = setTimeout(() => {
+      fetchNewestMessages();
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [chatId, cachedData?.pages?.length, fetchNewestMessages]);
+
+  // Reset catch-up flag when chat changes
+  useEffect(() => {
+    if (chatId !== initialCatchUpDoneRef.current) {
+      initialCatchUpDoneRef.current = null;
+    }
+  }, [chatId]);
+
+  useEffect(() => {
+    if (!chatId) return;
+
+    let lastVisibleTime = Date.now();
+    const REFETCH_THRESHOLD_MS = 10000; // 10 seconds - refetch if away longer
+
+    // Visibility change handler - fetch new messages when returning to tab
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const awayTime = Date.now() - lastVisibleTime;
+
+        // Only fetch if user was away for more than threshold
+        if (awayTime > REFETCH_THRESHOLD_MS) {
+          logger.info('[CATCH-UP] Tab became visible after being away', {
+            chatId,
+            awayTimeMs: awayTime,
+          });
+          fetchNewestMessages();
+        }
+      } else {
+        lastVisibleTime = Date.now();
+      }
+    };
+
+    // WSE reconnection handler - fetch new messages when WebSocket reconnects
+    const handleWSEReconnected = () => {
+      logger.info('[CATCH-UP] WSE reconnected, fetching new messages', { chatId });
+      setTimeout(() => fetchNewestMessages(), 500);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('wse:reconnected', handleWSEReconnected);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('wse:reconnected', handleWSEReconnected);
+    };
+  }, [chatId, fetchNewestMessages]);
+
   // Seamless prefetch - load next page before user reaches top
   const prefetchNextPage = useCallback(() => {
     if (
@@ -538,6 +883,47 @@ export function removeMessageFromCache(
       const newPages = oldData.pages.map((page: any) => ({
         ...page,
         messages: page.messages.filter((m: Message) => m.id !== messageId),
+      }));
+
+      return { ...oldData, pages: newPages };
+    }
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Utility: Reconcile temp ID with server's Snowflake ID (Industry Standard)
+// -----------------------------------------------------------------------------
+
+/**
+ * Replaces a temporary client ID with the server-generated Snowflake ID.
+ * This is called after the server confirms the message was saved.
+ *
+ * Pattern: Discord/Slack optimistic UI reconciliation
+ * 1. Client sends message with temp ID ("temp_<uuid>")
+ * 2. Server generates Snowflake ID, echoes back temp ID
+ * 3. Client replaces temp ID with Snowflake in cache
+ *
+ * IMPORTANT: Preserves _stableKey to prevent React remount/re-animation
+ * The _stableKey is set to the original tempId and never changes.
+ */
+export function reconcileMessageId(
+  queryClient: ReturnType<typeof useQueryClient>,
+  chatId: string,
+  tempId: string,
+  snowflakeId: string
+) {
+  queryClient.setQueryData(
+    chatKeys.messages(chatId),
+    (oldData: any) => {
+      if (!oldData) return oldData;
+
+      const newPages = oldData.pages.map((page: any) => ({
+        ...page,
+        messages: page.messages.map((m: Message) =>
+          m.id === tempId
+            ? { ...m, id: snowflakeId, _stableKey: m._stableKey || tempId }
+            : m
+        ),
       }));
 
       return { ...oldData, pages: newPages };

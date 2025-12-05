@@ -702,9 +702,16 @@ export function useWSE(
   }, []);
 
   const handleStateChange = useCallback((state: ConnectionState) => {
+    const previousState = store.connectionState;
     store.setConnectionState(state);
 
     if (state === ConnectionState.CONNECTED) {
+      // Check if this is a reconnection (was previously disconnected/reconnecting)
+      const isReconnection = previousState === ConnectionState.DISCONNECTED ||
+                             previousState === ConnectionState.RECONNECTING ||
+                             previousState === ConnectionState.ERROR ||
+                             reconnectAttemptsRef.current > 0;
+
       reconnectAttemptsRef.current = 0;
       store.resetCircuitBreaker();
 
@@ -713,6 +720,13 @@ export function useWSE(
           processOfflineQueue();
         }
       });
+
+      // Emit reconnection event for catch-up mechanism
+      // This triggers refetch in useChatMessages to sync missed messages
+      if (isReconnection) {
+        logger.info('[WSE] Reconnected after outage, dispatching wse:reconnected event');
+        window.dispatchEvent(new CustomEvent('wse:reconnected'));
+      }
     } else if (state === ConnectionState.ERROR) {
       startCircuitBreakerCheck();
     }

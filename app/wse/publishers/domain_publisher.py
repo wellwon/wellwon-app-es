@@ -452,8 +452,9 @@ class WSEDomainPublisher:
 
             # Also publish user-specific events for chat membership changes
             # This ensures users get notified when added/removed from chats
+            # NOTE: ChatCreated uses created_by, not user_id - handled separately below
             user_id = event.get("user_id")
-            if user_id and event_type in ("ChatCreated", "ParticipantAdded", "ParticipantRemoved", "ChatArchived"):
+            if user_id and event_type in ("ParticipantAdded", "ParticipantRemoved", "ChatArchived"):
                 user_topic = f"user:{user_id}:events"
                 await self._pubsub_bus.publish(
                     topic=user_topic,
@@ -461,15 +462,16 @@ class WSEDomainPublisher:
                 )
                 log.debug(f"Also forwarded {event_type} to user topic {user_topic}")
 
-            # For chat creation by a user, also notify that user
+            # For chat creation, notify the creator (use created_by, NOT user_id)
+            # This prevents duplicate events when both fields happen to be set
             created_by = event.get("created_by")
-            if created_by and event_type == "ChatCreated" and created_by != user_id:
+            if created_by and event_type == "ChatCreated":
                 creator_topic = f"user:{created_by}:events"
                 await self._pubsub_bus.publish(
                     topic=creator_topic,
                     event=wse_event,
                 )
-                log.debug(f"Also forwarded {event_type} to creator topic {creator_topic}")
+                log.debug(f"Forwarded {event_type} to creator topic {creator_topic}")
 
             # For Telegram linking, notify the user who linked so their UI updates
             # This is critical for saga - chat is created first, then linked to Telegram
@@ -709,18 +711,28 @@ class WSEDomainPublisher:
         if participant_ids:
             participant_ids = [str(pid) for pid in participant_ids]
 
+        # Helper to convert large integers (snowflake IDs) to strings for JavaScript
+        # JavaScript Number.MAX_SAFE_INTEGER = 2^53 - 1, but our snowflakes are int64
+        def safe_int_to_str(val):
+            if val is None:
+                return None
+            if isinstance(val, int) and val > 9007199254740991:  # MAX_SAFE_INTEGER
+                return str(val)
+            return val
+
         return {
             "chat_id": event.get("aggregate_id") or event.get("chat_id"),
             "name": event.get("name"),
             "chat_type": event.get("chat_type"),
             "is_active": event.get("is_active", True),
-            # Message fields
-            "message_id": event.get("message_id"),
+            # Message fields - convert snowflake IDs to strings for JavaScript safety
+            "message_id": safe_int_to_str(event.get("message_id")),
+            "client_temp_id": event.get("client_temp_id"),  # For optimistic UI reconciliation
             "content": event.get("content"),
             "message_type": event.get("message_type"),
             "sender_id": sender_id,
             "sender_name": sender_name,
-            "reply_to_id": event.get("reply_to_id"),
+            "reply_to_id": safe_int_to_str(event.get("reply_to_id")),
             "file_url": event.get("file_url"),
             "file_name": event.get("file_name"),
             "file_size": event.get("file_size"),
@@ -737,7 +749,7 @@ class WSEDomainPublisher:
             # Read status (MessagesMarkedAsRead event fields)
             "read_message_ids": event.get("message_ids"),
             "read_by": event.get("read_by"),
-            "last_read_message_id": event.get("last_read_message_id"),
+            "last_read_message_id": safe_int_to_str(event.get("last_read_message_id")),
             "read_at": event.get("read_at"),
             "read_count": event.get("read_count"),
             # Telegram integration (full support)

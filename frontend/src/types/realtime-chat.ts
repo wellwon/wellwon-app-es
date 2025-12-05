@@ -44,8 +44,11 @@ export interface Message {
   id: string;
   chat_id: string;
   sender_id: string | null;  // null for external Telegram users
+  // Internal: stable key for React to prevent remount during optimistic reconciliation
+  // Set to tempId during optimistic add, preserved when id changes to snowflake
+  _stableKey?: string;
   content: string | null;
-  message_type: 'text' | 'file' | 'voice' | 'image' | 'system' | 'interactive';
+  message_type: 'text' | 'file' | 'voice' | 'video' | 'video_note' | 'image' | 'system' | 'interactive';
   reply_to_id: string | null;
   file_url: string | null;
   file_name: string | null;

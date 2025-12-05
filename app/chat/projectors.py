@@ -258,43 +258,45 @@ class ChatProjector:
     # Message Projections (ScyllaDB PRIMARY)
     # =========================================================================
 
-    # ASYNC: Optimistic UI shows message immediately, Worker confirms
-    @async_projection("MessageSent")
+    # SYNC: Write to ScyllaDB immediately for message persistence
+    # Changed from async to sync - EventProcessor worker was unreliable
+    @sync_projection("MessageSent", timeout=3.0)
     @monitor_projection
     async def on_message_sent(self, envelope: EventEnvelope) -> None:
         """
         Project MessageSent - ScyllaDB PRIMARY.
 
-        ASYNC: Frontend uses optimistic UI, WSE confirms delivery.
+        SYNC: Write to ScyllaDB immediately (critical for message persistence).
+        Frontend uses optimistic UI, this ensures backend persistence.
 
         Flow:
             1. Write message content to ScyllaDB (primary storage)
             2. Update PostgreSQL chat.last_message_* (metadata preview)
         """
+        log.info(f"[SYNC-PROJECTION] on_message_sent CALLED - event_id={envelope.event_id}")
+
         event_data = envelope.event_data
         chat_id = uuid.UUID(event_data['chat_id'])
         sender_id = uuid.UUID(event_data['sender_id']) if event_data.get('sender_id') else None
         source = event_data.get('source', 'web')
 
-        # IDEMPOTENCY: Convert event's message_id UUID to deterministic Snowflake ID
-        # This ensures both API server and Worker produce the same message_id
-        message_uuid = uuid.UUID(event_data['message_id'])
-        # Use first 8 bytes of UUID as int64, ensure positive
-        deterministic_snowflake = int.from_bytes(message_uuid.bytes[:8], byteorder='big') & 0x7FFFFFFFFFFFFFFF
+        # Server-generated Snowflake ID is already in the event (industry standard)
+        # No conversion needed - handler generated proper Snowflake
+        snowflake_id = event_data['message_id']  # int64 Snowflake
 
-        log.info(f"Projecting MessageSent to ScyllaDB: chat_id={chat_id}, snowflake={deterministic_snowflake}")
+        log.info(f"[SYNC-PROJECTION] Writing to ScyllaDB: chat_id={chat_id}, snowflake={snowflake_id}, source={source}")
 
         # -----------------------------------------------------------------
         # 1. ScyllaDB - PRIMARY message storage (IDEMPOTENT)
         # -----------------------------------------------------------------
         message = MessageData(
             channel_id=chat_id,
-            message_id=deterministic_snowflake,  # Use deterministic ID for idempotency
+            message_id=snowflake_id,  # Server-generated Snowflake (int64)
             sender_id=sender_id,
             content=event_data['content'],
             message_type=MessageType(event_data.get('message_type', 'text')),
             source=MessageSource(source),
-            reply_to_id=event_data.get('reply_to_snowflake_id'),
+            reply_to_id=event_data.get('reply_to_id'),  # Snowflake ID
             file_url=event_data.get('file_url'),
             file_name=event_data.get('file_name'),
             file_size=event_data.get('file_size'),
@@ -308,6 +310,7 @@ class ChatProjector:
             telegram_topic_id=event_data.get('telegram_topic_id'),
             sync_direction=SyncDirection.TELEGRAM_TO_WEB if source == 'telegram' else None,
             created_at=envelope.stored_at,
+            # No wellwon_uuid needed - Snowflake ID is the permanent ID
         )
 
         snowflake_id = await self.message_scylla_repo.insert_message(message)
@@ -429,13 +432,11 @@ class ChatProjector:
         - Blue double checkmark: Message read on Telegram (MessagesMarkedAsRead)
         """
         event_data = envelope.event_data
-        chat_id = uuid.UUID(event_data['chat_id'])
-        message_uuid = uuid.UUID(event_data['message_id'])
+        chat_id = uuid.UUID(event_data['chat_id']) if isinstance(event_data['chat_id'], str) else event_data['chat_id']
+        # message_id is now a snowflake (int64), not UUID
+        snowflake_id = event_data['message_id']
         telegram_message_id = event_data['telegram_message_id']
         telegram_chat_id = event_data['telegram_chat_id']
-
-        # Compute deterministic snowflake from message_id (same logic as MessageSent)
-        snowflake_id = int.from_bytes(message_uuid.bytes[:8], byteorder='big') & 0x7FFFFFFFFFFFFFFF
 
         log.info(
             f"Projecting MessageSyncedToTelegram: chat_id={chat_id}, "
@@ -461,25 +462,39 @@ class ChatProjector:
         to trigger blue checkmarks on frontend.
         """
         event_data = envelope.event_data
-        chat_id = uuid.UUID(event_data['chat_id'])
-        last_read_message_id = uuid.UUID(event_data['last_read_message_id'])
+        chat_id = uuid.UUID(event_data['chat_id']) if isinstance(event_data['chat_id'], str) else event_data['chat_id']
+        # last_read_message_id is now a snowflake (int64) or None
+        last_read_message_id = event_data.get('last_read_message_id')
         telegram_read_at = event_data.get('telegram_read_at')
+        last_read_telegram_message_id = event_data.get('last_read_telegram_message_id')
 
         log.info(
-            f"Projecting MessagesReadOnTelegram: chat={chat_id}, "
+            f"[BLUE-CHECK] Projecting MessagesReadOnTelegram: chat={chat_id}, "
             f"last_read_message_id={last_read_message_id}, "
+            f"last_read_telegram_message_id={last_read_telegram_message_id}, "
             f"telegram_read_at={telegram_read_at}"
         )
 
+        # Skip if no message ID (couldn't find the message in ScyllaDB)
+        if last_read_message_id is None:
+            log.warning(
+                f"[BLUE-CHECK] Skipping ScyllaDB update - no last_read_message_id found. "
+                f"Telegram message {last_read_telegram_message_id} not mapped to WellWon message. "
+                f"Check telegram_message_mapping table."
+            )
+            return
+
         # Update ScyllaDB - set telegram_read_at on messages up to last_read_message_id
         try:
+            log.info(f"[BLUE-CHECK] Updating ScyllaDB telegram_read_at for messages up to {last_read_message_id}")
             await self.message_scylla_repo.update_telegram_read_status(
                 channel_id=chat_id,
                 last_read_message_id=last_read_message_id,
                 telegram_read_at=telegram_read_at,
             )
+            log.info(f"[BLUE-CHECK] Successfully updated telegram_read_at in ScyllaDB")
         except Exception as e:
-            log.warning(f"Failed to update telegram_read_at in ScyllaDB: {e}")
+            log.warning(f"[BLUE-CHECK] Failed to update telegram_read_at in ScyllaDB: {e}")
 
     # =========================================================================
     # Company Link Projections (no read model changes needed)

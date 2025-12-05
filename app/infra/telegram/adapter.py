@@ -386,6 +386,60 @@ class TelegramAdapter:
             log.error(f"MTProto download failed: {e}", exc_info=True)
             return None
 
+    async def download_file_mtproto_by_message(self, chat_id: int, message_id: int) -> Optional[bytes]:
+        """
+        Download file from Telegram via MTProto using chat_id and message_id.
+
+        This is a simpler interface for downloading when you have the message identifiers.
+
+        Args:
+            chat_id: Telegram chat ID (may include -100 prefix or not)
+            message_id: Telegram message ID
+
+        Returns:
+            File content as bytes, or None on error
+        """
+        if not self._mtproto_client:
+            log.warning("MTProto client not available for file download")
+            return None
+
+        try:
+            import io
+
+            client = self._mtproto_client._client
+            if not client:
+                log.error("MTProto client connection not available")
+                return None
+
+            # Normalize chat_id for Telethon (needs -100 prefix for supergroups)
+            peer_id = self._mtproto_client._to_telegram_peer_id(chat_id)
+
+            log.info(f"[FILE] MTProto download: chat={chat_id} -> peer={peer_id}, msg={message_id}")
+
+            # Get the message
+            messages = await client.get_messages(peer_id, ids=message_id)
+            if not messages:
+                log.error(f"Could not find message {message_id} in chat {peer_id}")
+                return None
+
+            message = messages if not isinstance(messages, list) else messages[0]
+
+            if not message or not message.media:
+                log.error(f"Message {message_id} has no media")
+                return None
+
+            # Download media to buffer
+            buffer = io.BytesIO()
+            await client.download_media(message, file=buffer)
+
+            file_bytes = buffer.getvalue()
+            log.info(f"[FILE] MTProto downloaded {len(file_bytes)} bytes from message {message_id}")
+            return file_bytes
+
+        except Exception as e:
+            log.error(f"MTProto download by message failed: {e}", exc_info=True)
+            return None
+
     # =========================================================================
     # READ STATUS (MTProto)
     # =========================================================================
@@ -615,6 +669,25 @@ class TelegramAdapter:
             return None
 
         return await self._mtproto_client.get_group_info(group_id)
+
+    async def leave_group(self, group_id: int) -> bool:
+        """
+        Leave/delete a Telegram supergroup.
+
+        Attempts to delete the group if we're the owner,
+        otherwise just leaves the group.
+
+        Args:
+            group_id: Telegram group ID
+
+        Returns:
+            True if successful
+        """
+        if not self._mtproto_client:
+            log.error("MTProto client not available for leave_group")
+            return False
+
+        return await self._mtproto_client.leave_group(group_id)
 
     async def update_group(
         self,

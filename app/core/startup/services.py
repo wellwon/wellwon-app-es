@@ -188,8 +188,69 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
                         message_type = "voice"
                     elif msg.file_type == "photo":
                         message_type = "image"
+                    elif msg.file_type == "video":
+                        message_type = "video"
+                    elif msg.file_type == "video_note":
+                        message_type = "video_note"
                     elif msg.file_type:
                         message_type = "file"
+
+                    # Get file URL for media messages (voice, photo, etc.)
+                    file_url = None
+                    if msg.file_id:
+                        try:
+                            if msg.file_id.startswith("mtproto:"):
+                                # MTProto file - download via MTProto and upload to MinIO
+                                # Parse: mtproto:type:message_id:chat_id
+                                parts = msg.file_id.split(":")
+                                if len(parts) >= 4:
+                                    mtproto_type = parts[1]
+                                    tg_message_id = int(parts[2])
+                                    tg_chat_id = int(parts[3])
+
+                                    logger.info(f"[FILE] Downloading {mtproto_type} via MTProto: msg_id={tg_message_id}, chat_id={tg_chat_id}")
+
+                                    # Download file bytes via MTProto
+                                    file_bytes = await telegram_adapter.download_file_mtproto_by_message(
+                                        chat_id=tg_chat_id,
+                                        message_id=tg_message_id
+                                    )
+
+                                    if file_bytes:
+                                        # Upload to MinIO for permanent storage
+                                        from app.infra.storage.minio_provider import get_storage_provider
+                                        storage = get_storage_provider()
+
+                                        # Determine content type
+                                        content_type = "audio/ogg" if mtproto_type == "voice" else "application/octet-stream"
+                                        if mtproto_type == "photo":
+                                            content_type = "image/jpeg"
+                                        elif mtproto_type == "video":
+                                            content_type = "video/mp4"
+
+                                        result = await storage.upload_file(
+                                            bucket="chat-files",
+                                            file_content=file_bytes,
+                                            content_type=content_type,
+                                            original_filename=msg.file_name or f"{mtproto_type}_{tg_message_id}",
+                                        )
+
+                                        if result.success:
+                                            file_url = result.public_url
+                                            logger.info(f"[FILE] Uploaded to MinIO: {file_url[:50]}...")
+                                        else:
+                                            logger.warning(f"[FILE] MinIO upload failed: {result.error}")
+                                    else:
+                                        logger.warning(f"[FILE] MTProto download returned no bytes")
+                            else:
+                                # Regular Bot API file_id - get temporary CDN URL
+                                file_url = await telegram_adapter.get_file_url(msg.file_id)
+                                if file_url:
+                                    logger.info(f"[FILE] Got temp URL for {msg.file_type}: {file_url[:50]}...")
+                                else:
+                                    logger.warning(f"[FILE] Could not get URL for file_id={msg.file_id}")
+                        except Exception as file_err:
+                            logger.warning(f"[FILE] Error getting file URL: {file_err}", exc_info=True)
 
                     # Dispatch ProcessTelegramMessageCommand with retry on concurrency conflicts
                     max_retries = 3
@@ -204,7 +265,7 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
                                 sender_id=None,  # External Telegram user
                                 content=msg.text or "",
                                 message_type=message_type,
-                                file_url=None,  # TODO: Download file if needed
+                                file_url=file_url,  # Temp Telegram CDN URL for immediate playback
                                 file_name=msg.file_name,
                                 file_size=msg.file_size,
                                 file_type=msg.file_type,
@@ -249,8 +310,8 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
             telegram_adapter.set_read_status_handler(incoming_handler.handle_read_event)
             logger.info("MTProto read status handler registered (via TelegramIncomingHandler)")
 
-            # NOTE: Polling setup is deferred to after CQRS handlers are registered
-            # See start_telegram_polling() which is called from lifespan.py Phase 10
+            # NOTE: Event listener setup is deferred to after CQRS handlers are registered
+            # See start_telegram_event_listener() which is called from lifespan.py Phase 11
 
     except ImportError as import_error:
         logger.warning(f"Telegram event listener setup failed: {import_error}")
@@ -261,52 +322,14 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
         app.state.telegram_event_listener = None
 
 
-async def _setup_telegram_polling(app: FastAPI, telegram_adapter) -> None:
+async def _setup_telegram_event_listener(app: FastAPI, telegram_adapter) -> None:
     """
-    Setup Telegram polling by loading all linked chats and starting the polling task.
+    Setup Telegram Event Listener for bidirectional message sync.
 
-    This is necessary because Telethon's event-based system doesn't work reliably
-    when the same session is used on multiple devices (phone, desktop, etc.).
-    Polling ensures we always receive messages regardless of session conflicts.
+    Messages are received via Telethon's event-driven system (no polling).
+    The MTProto client uses run_until_disconnected() to receive real-time updates.
     """
-    try:
-        # Get the MTProto client from the adapter
-        mtproto_client = telegram_adapter._mtproto_client
-        if not mtproto_client:
-            logger.warning("MTProto client not available, polling disabled")
-            return
-
-        # Query all chats that have a linked Telegram supergroup via CQRS
-        from app.chat.queries import GetLinkedTelegramChatsQuery
-
-        linked_chats = await app.state.query_bus.query(GetLinkedTelegramChatsQuery())
-        logger.info(f"Found {len(linked_chats)} linked Telegram chats in database")
-
-        # Only add linked chats from database - no hardcoded defaults
-        if not linked_chats:
-            logger.info("No linked Telegram chats found in database")
-        else:
-            # Add all linked chats to the polling monitor
-            for chat in linked_chats:
-                if chat.telegram_supergroup_id:
-                    mtproto_client.add_monitored_chat(
-                        chat.telegram_supergroup_id,
-                        last_message_id=chat.last_telegram_message_id
-                    )
-                    logger.info(
-                        f"Added chat '{chat.name}' (supergroup={chat.telegram_supergroup_id}, "
-                        f"topic={chat.telegram_topic_id}) to polling monitor"
-                    )
-            logger.info(f"Added {len(linked_chats)} linked chats to polling monitor")
-
-        # Start the polling task
-        await mtproto_client.start_polling()
-        logger.info("Telegram message polling started")
-
-    except Exception as e:
-        logger.error(f"Failed to setup Telegram polling: {e}", exc_info=True)
-
-    # Initialize Event Listener for incoming events
+    # Initialize Event Listener for outgoing WellWon -> Telegram events
     try:
         from app.infra.telegram.listener import create_telegram_event_listener
 
@@ -470,19 +493,18 @@ async def initialize_projection_rebuilder(app: FastAPI) -> None:
         logger.error(f"Failed to create ProjectionRebuilderService: {rebuilder_error}", exc_info=True)
         logger.warning("Continuing without projection rebuild functionality")
 
-async def start_telegram_polling(app: FastAPI) -> None:
+async def start_telegram_event_listener(app: FastAPI) -> None:
     """
-    Start Telegram polling after CQRS handlers are registered.
+    Start Telegram Event Listener for bidirectional sync.
 
-    This must be called AFTER initialize_cqrs_and_handlers() because
-    _setup_telegram_polling uses GetLinkedTelegramChatsQuery which requires
-    the query handler to be registered.
+    Incoming messages are received via Telethon's event-driven system.
+    This just sets up the listener for WellWon -> Telegram sync.
     """
     if not hasattr(app.state, 'telegram_adapter') or not app.state.telegram_adapter:
-        logger.debug("Telegram adapter not available, skipping polling setup")
+        logger.debug("Telegram adapter not available, skipping event listener setup")
         return
 
-    await _setup_telegram_polling(app, app.state.telegram_adapter)
+    await _setup_telegram_event_listener(app, app.state.telegram_adapter)
 
 
 # =============================================================================

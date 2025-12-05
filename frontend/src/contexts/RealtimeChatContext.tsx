@@ -114,11 +114,15 @@ export const RealtimeChatProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, [refetchChats]);
 
   const selectChat = useCallback(async (chatId: string, updateUrl = true) => {
+    console.log('[SELECT-CHAT] selectChat called with:', chatId, 'current activeChatId:', activeChatId);
+
     if (activeChatId === chatId) {
+      console.log('[SELECT-CHAT] Same chat, scrolling to bottom');
       window.dispatchEvent(new CustomEvent('chat:scrollToBottom', { detail: { force: true } }));
       return;
     }
 
+    console.log('[SELECT-CHAT] Setting activeChatId to:', chatId);
     setActiveChatId(chatId);
     setReplyingTo(null);
 
@@ -147,12 +151,26 @@ export const RealtimeChatProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setIsCreatingChat(true);
 
     try {
+      // CRITICAL: Validate company_id when creating chat in supergroup context
+      // If a supergroup is selected but no company_id, warn and log
+      const supergroupId = chatScope.type === 'supergroup' ? chatScope.supergroupId : undefined;
+      const companyId = chatScope.companyId || undefined;
+
+      if (supergroupId && !companyId) {
+        logger.warn('Creating chat with supergroup but no company_id! This indicates scope sync issue', {
+          supergroupId,
+          chatScopeType: chatScope.type,
+          chatScopeCompanyId: chatScope.companyId,
+          component: 'RealtimeChatContext.createChat'
+        });
+      }
+
       const newChat = await chatApi.createChat({
         name,
         chat_type: chatType,
-        company_id: chatScope.companyId || undefined,
+        company_id: companyId,
         participant_ids: participantIds,
-        telegram_supergroup_id: chatScope.type === 'supergroup' ? chatScope.supergroupId : undefined,
+        telegram_supergroup_id: supergroupId,
       });
 
       // OPTIMISTIC UI: Dispatch chatCreated event immediately for instant UI update
@@ -164,8 +182,8 @@ export const RealtimeChatProvider: React.FC<{ children: React.ReactNode }> = ({ 
           name: name,
           chat_name: name,
           chat_type: chatType,
-          company_id: chatScope.companyId || null,
-          telegram_supergroup_id: chatScope.type === 'supergroup' ? chatScope.supergroupId : null,
+          company_id: companyId || null,
+          telegram_supergroup_id: supergroupId || null,
           created_at: new Date().toISOString(),
         }
       }));

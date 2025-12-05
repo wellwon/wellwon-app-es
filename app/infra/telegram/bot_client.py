@@ -111,6 +111,25 @@ class TelegramBotClient:
         await self._global_limiter.wait_and_acquire()
         await self._get_chat_limiter(chat_id).wait_and_acquire()
 
+    async def _download_file(self, url: str) -> Optional[bytes]:
+        """Download file from URL (for non-public URLs like MinIO localhost).
+
+        Args:
+            url: File URL to download
+
+        Returns:
+            File bytes or None if download failed
+        """
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                return response.content
+        except Exception as e:
+            log.error(f"Failed to download file from {url[:50]}...: {e}")
+            return None
+
     async def initialize(self) -> bool:
         """Initialize the bot client"""
         if not PTB_AVAILABLE:
@@ -427,7 +446,12 @@ class TelegramBotClient:
         topic_id: Optional[int] = None,
     ) -> SendMessageResult:
         """
-        Send a file (document, photo, etc.) from URL.
+        Send a file (document, photo, video, etc.) from URL.
+
+        Automatically detects file type from extension:
+        - Photos: jpg, jpeg, png, gif, webp
+        - Videos: mp4, mov, avi, mkv, webm
+        - Others: sent as documents
 
         Returns SendMessageResult with file_id for caching.
         """
@@ -445,20 +469,47 @@ class TelegramBotClient:
             file_ext = file_url.lower().split(".")[-1] if "." in file_url else ""
             file_id = None
 
+            # Check if URL is localhost/internal - Telegram can't access these
+            # Download file first and send as bytes
+            is_local_url = any(host in file_url for host in ["localhost", "127.0.0.1", "0.0.0.0", "minio:"])
+            file_input = file_url  # Default: send URL directly
+
+            if is_local_url:
+                log.info(f"Local URL detected, downloading file first: {file_url}")
+                import httpx
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    response = await client.get(file_url)
+                    response.raise_for_status()
+                    file_bytes = response.content
+                    # Use InputFile with bytes and filename
+                    actual_filename = file_name or file_url.split("/")[-1]
+                    file_input = InputFile(file_bytes, filename=actual_filename)
+                    log.info(f"Downloaded {len(file_bytes)} bytes, sending as InputFile")
+
             if file_ext in ("jpg", "jpeg", "png", "gif", "webp"):
                 msg = await self._bot.send_photo(
                     chat_id=normalized_chat_id,
-                    photo=file_url,
+                    photo=file_input,
                     caption=caption,
                     message_thread_id=topic_id,
                 )
                 # Extract file_id from response (largest photo)
                 if msg.photo:
                     file_id = msg.photo[-1].file_id
+            elif file_ext in ("mp4", "mov", "avi", "mkv", "webm"):
+                msg = await self._bot.send_video(
+                    chat_id=normalized_chat_id,
+                    video=file_input,
+                    caption=caption,
+                    message_thread_id=topic_id,
+                )
+                # Extract file_id from response
+                if msg.video:
+                    file_id = msg.video.file_id
             else:
                 msg = await self._bot.send_document(
                     chat_id=normalized_chat_id,
-                    document=file_url,
+                    document=file_input,
                     caption=caption,
                     message_thread_id=topic_id,
                     filename=file_name,
@@ -551,7 +602,11 @@ class TelegramBotClient:
         caption: Optional[str] = None,
         topic_id: Optional[int] = None,
     ) -> SendMessageResult:
-        """Send a voice message"""
+        """Send a voice message.
+
+        If voice_url is not a public HTTPS URL (e.g., MinIO localhost),
+        downloads the file first and sends it as InputFile.
+        """
         if not self._initialized:
             return SendMessageResult(success=False, error="Bot not initialized")
 
@@ -562,18 +617,91 @@ class TelegramBotClient:
         await self._acquire_rate_limit(normalized_chat_id)
 
         try:
+            # Check if URL is publicly accessible by Telegram
+            # Telegram needs public HTTPS URL, not localhost/internal URLs
+            is_public_url = (
+                voice_url.startswith("https://") and
+                "localhost" not in voice_url and
+                "127.0.0.1" not in voice_url and
+                "minio:" not in voice_url  # Docker internal hostname
+            )
+
+            if is_public_url:
+                # Public URL - Telegram can download directly
+                voice_input = voice_url
+            else:
+                # Non-public URL - download and send as InputFile
+                log.debug(f"Voice URL not public, downloading: {voice_url[:50]}...")
+                voice_bytes = await self._download_file(voice_url)
+                if not voice_bytes:
+                    return SendMessageResult(success=False, error="Failed to download voice file")
+                voice_input = InputFile(voice_bytes, filename="voice.ogg")
+
             msg = await self._bot.send_voice(
                 chat_id=normalized_chat_id,
-                voice=voice_url,
+                voice=voice_input,
                 duration=duration,
                 caption=caption,
                 message_thread_id=topic_id,
             )
 
-            return SendMessageResult(success=True, message_id=msg.message_id)
+            file_id = msg.voice.file_id if msg.voice else None
+            return SendMessageResult(success=True, message_id=msg.message_id, file_id=file_id)
 
         except Exception as e:
-            log.error(f"Failed to send voice: {e}", exc_info=True)
+            log.error(f"Failed to send voice: {e}")
+            return SendMessageResult(success=False, error=str(e))
+
+    async def send_video(
+        self,
+        chat_id: int,
+        video_url: str,
+        duration: Optional[int] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        caption: Optional[str] = None,
+        topic_id: Optional[int] = None,
+    ) -> SendMessageResult:
+        """
+        Send a video message from URL.
+
+        Args:
+            chat_id: Telegram chat ID
+            video_url: URL to the video file
+            duration: Video duration in seconds
+            width: Video width
+            height: Video height
+            caption: Optional caption
+            topic_id: Forum topic ID
+
+        Returns:
+            SendMessageResult with success status and file_id
+        """
+        if not self._initialized:
+            return SendMessageResult(success=False, error="Bot not initialized")
+
+        # Normalize chat_id to Bot API format
+        normalized_chat_id = self._normalize_chat_id(chat_id)
+
+        # Wait for rate limit
+        await self._acquire_rate_limit(normalized_chat_id)
+
+        try:
+            msg = await self._bot.send_video(
+                chat_id=normalized_chat_id,
+                video=video_url,
+                duration=duration,
+                width=width,
+                height=height,
+                caption=caption,
+                message_thread_id=topic_id,
+            )
+
+            file_id = msg.video.file_id if msg.video else None
+            return SendMessageResult(success=True, message_id=msg.message_id, file_id=file_id)
+
+        except Exception as e:
+            log.error(f"Failed to send video: {e}", exc_info=True)
             return SendMessageResult(success=False, error=str(e))
 
     # =========================================================================

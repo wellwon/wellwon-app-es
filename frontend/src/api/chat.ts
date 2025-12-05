@@ -107,10 +107,10 @@ export interface UpdateChatRequest {
 }
 
 export interface SendMessageRequest {
-  message_id?: string;  // Client-generated UUID for idempotency
+  client_temp_id?: string;  // Client temp ID for optimistic UI reconciliation
   content: string;
   message_type?: string;
-  reply_to_id?: string;
+  reply_to_id?: string;  // Snowflake ID (string)
   file_url?: string;
   file_name?: string;
   file_size?: number;
@@ -141,6 +141,13 @@ export interface CommandResponse {
   id: string;
   status: string;
   message?: string;
+}
+
+// Send message response (Industry Standard - Discord/Slack pattern)
+export interface SendMessageResponse {
+  id: string;  // Server-generated Snowflake ID
+  client_id?: string;  // Echo client temp ID for reconciliation
+  status: string;
 }
 
 // -----------------------------------------------------------------------------
@@ -256,8 +263,8 @@ export async function getMessages(
 export async function sendMessage(
   chatId: string,
   request: SendMessageRequest
-): Promise<CommandResponse> {
-  const { data } = await API.post<CommandResponse>(`/chats/${chatId}/messages`, request);
+): Promise<SendMessageResponse> {
+  const { data } = await API.post<SendMessageResponse>(`/chats/${chatId}/messages`, request);
   return data;
 }
 

@@ -72,7 +72,9 @@ const MessageGroup = memo<{
       <DateSeparator date={new Date(date)} />
       {messages.map(message => (
         <MessageBubbleMemo
-          key={message.id}
+          // Use _stableKey for React key to prevent remount/re-animation during reconciliation
+          // Discord/Slack pattern: stable key persists from temp_xxx -> snowflake transition
+          key={message._stableKey || message.id}
           message={message}
           isOwn={message.sender_id === currentUser?.id}
           isSending={sendingMessages.has(message.id)}
@@ -145,7 +147,6 @@ export const OptimizedMessageList = memo<OptimizedMessageListProps>(({
 
     isLoadingRef.current = true;
     lastLoadTimeRef.current = now;
-
     onLoadMore();
 
     // Reset loading flag after a delay
@@ -156,7 +157,8 @@ export const OptimizedMessageList = memo<OptimizedMessageListProps>(({
 
   // Seamless Intersection Observer - triggers BEFORE user sees the top
   useEffect(() => {
-    if (!hasMoreMessages || messages.length < 10) return;
+    // Lower threshold to 3 - even small chats can have history
+    if (!hasMoreMessages || messages.length < 3) return;
 
     const viewport = scrollAreaRef?.current?.querySelector(
       '[data-radix-scroll-area-viewport]'
@@ -221,7 +223,7 @@ export const OptimizedMessageList = memo<OptimizedMessageListProps>(({
   return (
     <div className={`space-y-4 ${className || ''}`}>
       {/* Invisible sentinel for seamless prefetch - NO visible loading indicator */}
-      {hasMoreMessages && messages.length >= 10 && (
+      {hasMoreMessages && messages.length >= 3 && (
         <div
           ref={sentinelRef}
           className="h-1 w-full pointer-events-none"
