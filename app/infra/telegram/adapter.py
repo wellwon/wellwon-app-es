@@ -141,6 +141,24 @@ class TelegramAdapter:
         else:
             log.warning("Cannot set read handler - MTProto client not available")
 
+    def set_chat_filter(self, filter_callback: callable) -> None:
+        """
+        Set callback to filter messages/events by linked chats.
+
+        This prevents logging and processing of messages from Telegram groups
+        that are not linked to WellWon. Only messages from linked chats will
+        be processed and logged.
+
+        Args:
+            filter_callback: Callable(chat_id, topic_id) -> bool
+                Returns True if chat should be processed, False to skip silently.
+        """
+        if self._mtproto_client:
+            self._mtproto_client.set_chat_filter(filter_callback)
+            log.info("Chat filter registered with MTProto client")
+        else:
+            log.warning("Cannot set chat filter - MTProto client not available")
+
     # =========================================================================
     # MESSAGING (Bot API)
     # =========================================================================

@@ -361,6 +361,10 @@ class TelegramMTProtoClient:
         self._processed_reads: Dict[Tuple[int, int], float] = {}
         self._processed_reads_ttl = 10.0  # 10 seconds TTL (short, just for dedup)
 
+        # Chat filter callback - filters messages/reads to only linked chats
+        # Returns True if chat is linked to WellWon, False to skip
+        self._is_chat_linked: Optional[Callable[[int, Optional[int]], bool]] = None
+
     async def connect(self) -> bool:
         """Connect to Telegram MTProto servers"""
         if not TELETHON_AVAILABLE:
@@ -696,6 +700,22 @@ class TelegramMTProtoClient:
         self._read_callback = callback
         log.info("MTProto read callback registered")
 
+    def set_chat_filter(self, filter_callback: Callable[[int, Optional[int]], bool]) -> None:
+        """
+        Set callback to filter messages/events by linked chats.
+
+        This prevents logging and processing of messages from Telegram groups
+        that are not linked to WellWon.
+
+        Args:
+            filter_callback: Callable(chat_id, topic_id) -> bool
+                Returns True if chat should be processed, False to skip silently.
+                chat_id is the normalized Telegram chat ID (without -100 prefix).
+                topic_id is the forum topic ID (None for non-forum chats).
+        """
+        self._is_chat_linked = filter_callback
+        log.info("MTProto chat filter registered - only linked chats will be processed")
+
     async def _populate_entity_cache(self) -> None:
         """
         Populate the entity cache by iterating through dialogs.
@@ -798,11 +818,34 @@ class TelegramMTProtoClient:
         This is called by Telethon for every incoming message.
         We parse it and forward to the registered callback.
         """
-        print(f"[MTPROTO] [EVENT] _handle_new_message called! event={type(event)}")
-        log.info(f"[EVENT] MTProto event handler triggered for event: {type(event)}")
         try:
             message = event.message
             chat_id = event.chat_id
+
+            # EARLY FILTER: Normalize chat ID and check if this chat is linked to WellWon
+            # This prevents logging/processing messages from user's OTHER Telegram groups
+            chat_id_str = str(chat_id)
+            if chat_id_str.startswith("-100") and len(chat_id_str) > 4:
+                normalized_chat_id = int(chat_id_str[4:])
+            else:
+                normalized_chat_id = abs(chat_id)
+
+            # Get topic_id early for filter check (minimal parsing)
+            topic_id = None
+            if hasattr(message, 'reply_to') and message.reply_to:
+                reply_to = message.reply_to
+                if getattr(reply_to, 'forum_topic', False):
+                    topic_id = getattr(reply_to, 'reply_to_top_id', None) or getattr(reply_to, 'reply_to_msg_id', None)
+
+            # Check filter BEFORE any logging
+            if self._is_chat_linked is not None:
+                if not self._is_chat_linked(normalized_chat_id, topic_id):
+                    # Chat not linked to WellWon - skip silently (no logging)
+                    return
+
+            # Now safe to log (message is from a linked chat)
+            print(f"[MTPROTO] [EVENT] _handle_new_message called! event={type(event)}")
+            log.info(f"[EVENT] MTProto event handler triggered for event: {type(event)}")
 
             # Deduplication check - skip if already processed (edge case with catch_up)
             if self._is_message_processed(chat_id, message.id):
@@ -978,6 +1021,12 @@ class TelegramMTProtoClient:
             # Convert chat_id to stored format (remove -100 prefix if present)
             stored_chat_id = self._from_telegram_peer_id(chat_id)
 
+            # EARLY FILTER: Check if this chat is linked to WellWon
+            if self._is_chat_linked is not None:
+                if not self._is_chat_linked(stored_chat_id, None):
+                    # Chat not linked - skip silently
+                    return
+
             # Deduplication - raw handler may have already processed this
             if self._is_read_already_processed(stored_chat_id, max_id):
                 log.info(f"[READ-DEBUG] MessageRead already processed by raw handler, skipping")
@@ -1037,6 +1086,11 @@ class TelegramMTProtoClient:
                 topic_id = update.top_msg_id  # Forum topic ID
                 max_id = update.read_max_id
 
+                # EARLY FILTER: Check if this chat+topic is linked
+                if self._is_chat_linked is not None:
+                    if not self._is_chat_linked(channel_id, topic_id):
+                        return  # Not linked - skip silently
+
                 log.info(
                     f"[READ-DEBUG] Raw UpdateReadChannelDiscussionOutbox: "
                     f"channel={channel_id}, topic={topic_id}, max_id={max_id}"
@@ -1057,6 +1111,11 @@ class TelegramMTProtoClient:
                 channel_id = update.channel_id
                 topic_id = update.top_msg_id
                 max_id = update.read_max_id
+
+                # EARLY FILTER: Check if this chat+topic is linked
+                if self._is_chat_linked is not None:
+                    if not self._is_chat_linked(channel_id, topic_id):
+                        return  # Not linked - skip silently
 
                 log.info(
                     f"[READ-DEBUG] Raw UpdateReadChannelDiscussionInbox: "
@@ -1088,6 +1147,11 @@ class TelegramMTProtoClient:
                 # Convert to stored format
                 stored_peer_id = self._from_telegram_peer_id(peer_id)
 
+                # EARLY FILTER: Check if this chat is linked
+                if self._is_chat_linked is not None:
+                    if not self._is_chat_linked(stored_peer_id, None):
+                        return  # Not linked - skip silently
+
                 log.info(
                     f"[READ-DEBUG] Raw UpdateReadHistoryOutbox: "
                     f"peer={peer_id}, stored_peer={stored_peer_id}, max_id={max_id}"
@@ -1116,6 +1180,11 @@ class TelegramMTProtoClient:
             elif isinstance(update, UpdateReadChannelOutbox):
                 channel_id = update.channel_id
                 max_id = update.max_id
+
+                # EARLY FILTER: Check if this chat is linked
+                if self._is_chat_linked is not None:
+                    if not self._is_chat_linked(channel_id, None):
+                        return  # Not linked - skip silently
 
                 log.info(
                     f"[READ-DEBUG] Raw UpdateReadChannelOutbox: "
