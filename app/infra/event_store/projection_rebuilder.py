@@ -13,8 +13,9 @@ from typing import Optional, List, Dict, Any, Set
 from datetime import datetime, timezone
 from enum import Enum
 from dataclasses import dataclass, field
-import uuid
+from uuid import UUID
 
+from app.utils.uuid_utils import generate_uuid, generate_event_id
 from app.infra.event_store.kurrentdb_event_store import KurrentDBEventStore
 from app.infra.event_store.event_envelope import EventEnvelope
 from app.infra.event_bus.event_bus import EventBus
@@ -151,7 +152,7 @@ class ProjectionRebuilder:
     async def _acquire_rebuild_lock(self, projection_name: str, ttl_seconds: int = 3600) -> bool:
         """Acquire a distributed lock for rebuilding a projection"""
         lock_key = f"{self._redis_prefix}lock:{projection_name}"
-        lock_value = f"{uuid.uuid4()}:{datetime.now(timezone.utc).isoformat()}"
+        lock_value = f"{generate_uuid()}:{datetime.now(timezone.utc).isoformat()}"
 
         try:
             acquired = await redis_client.set(
@@ -258,7 +259,7 @@ class ProjectionRebuilder:
                     "batch_size": config.batch_size,
                     "dependencies": config.dependencies
                 },
-                "rebuild_id": str(uuid.uuid4())  # Unique rebuild identifier
+                "rebuild_id": str(generate_uuid())  # Unique rebuild identifier
             }
         )
 
@@ -291,7 +292,7 @@ class ProjectionRebuilder:
         """FIXED: Task that performs the actual rebuild with proper transport routing"""
         last_checkpoint_time = datetime.now(timezone.utc)
         events_since_checkpoint = 0
-        rebuild_id = progress.metadata.get("rebuild_id", str(uuid.uuid4()))
+        rebuild_id = progress.metadata.get("rebuild_id", str(generate_uuid()))
 
         # FIXED: Initialize duplicate tracking
         if config.filter_duplicates:
@@ -498,7 +499,7 @@ class ProjectionRebuilder:
         rebuild events are published for monitoring and observability.
         """
         rebuild_event = {
-            "event_id": str(uuid.uuid4()),
+            "event_id": str(generate_uuid()),
             "event_type": event_type,
             "projection_name": progress.projection_name,
             "rebuild_id": progress.metadata.get("rebuild_id"),

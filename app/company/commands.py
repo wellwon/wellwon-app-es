@@ -7,11 +7,12 @@ from __future__ import annotations
 
 from typing import Optional, List
 from pydantic import Field, field_validator
-import uuid
+from uuid import UUID
 from decimal import Decimal
 
 from app.infra.cqrs.command_bus import Command
 from app.company.enums import CompanyType, UserCompanyRelationship
+from app.utils.uuid_utils import generate_uuid
 
 
 # =============================================================================
@@ -20,10 +21,10 @@ from app.company.enums import CompanyType, UserCompanyRelationship
 
 class CreateCompanyCommand(Command):
     """Create a new company"""
-    company_id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    company_id: UUID = Field(default_factory=generate_uuid)
     name: str = Field(..., min_length=1, max_length=255)
     company_type: str = Field(default="company", description="company, project, or individual")
-    created_by: uuid.UUID
+    created_by: UUID
 
     # Legal info (Russian business)
     vat: Optional[str] = Field(None, max_length=20, description="INN")
@@ -57,7 +58,7 @@ class CreateCompanyCommand(Command):
     # If True, CompanyCreationSaga will create company chat (default: True)
     create_chat: bool = Field(default=True, description="Create company chat via saga")
     # If provided, saga will link this existing chat to the company
-    link_chat_id: Optional[uuid.UUID] = Field(None, description="Existing chat ID to link to company")
+    link_chat_id: Optional[UUID] = Field(None, description="Existing chat ID to link to company")
 
     @field_validator('company_type')
     @classmethod
@@ -70,8 +71,8 @@ class CreateCompanyCommand(Command):
 
 class UpdateCompanyCommand(Command):
     """Update company details"""
-    company_id: uuid.UUID
-    updated_by: uuid.UUID
+    company_id: UUID
+    updated_by: UUID
 
     # Only include changed fields
     name: Optional[str] = Field(None, max_length=255)
@@ -106,21 +107,21 @@ class UpdateCompanyCommand(Command):
 
 class ArchiveCompanyCommand(Command):
     """Archive (soft delete) a company"""
-    company_id: uuid.UUID
-    archived_by: uuid.UUID
+    company_id: UUID
+    archived_by: UUID
     reason: Optional[str] = Field(None, max_length=500)
 
 
 class RestoreCompanyCommand(Command):
     """Restore an archived company"""
-    company_id: uuid.UUID
-    restored_by: uuid.UUID
+    company_id: UUID
+    restored_by: UUID
 
 
 class DeleteCompanyCommand(Command):
     """Permanently delete a company (hard delete)"""
-    company_id: uuid.UUID
-    deleted_by: uuid.UUID
+    company_id: UUID
+    deleted_by: UUID
     force: bool = Field(default=False, description="Bypass permission checks (for saga-initiated deletions)")
 
 
@@ -133,8 +134,8 @@ class RequestCompanyDeletionCommand(Command):
 
     preserve_company: If True, keep company record for future re-linking.
     """
-    company_id: uuid.UUID
-    deleted_by: uuid.UUID
+    company_id: UUID
+    deleted_by: UUID
     cascade: bool = Field(default=True, description="Cascade delete chats and messages")
     preserve_company: bool = Field(default=False, description="Keep company for re-linking to new Telegram group")
 
@@ -145,10 +146,10 @@ class RequestCompanyDeletionCommand(Command):
 
 class AddUserToCompanyCommand(Command):
     """Add a user to a company"""
-    company_id: uuid.UUID
-    user_id: uuid.UUID
+    company_id: UUID
+    user_id: UUID
     relationship_type: str = Field(default="participant", description="owner, participant, declarant, accountant, manager")
-    added_by: uuid.UUID
+    added_by: UUID
 
     @field_validator('relationship_type')
     @classmethod
@@ -161,18 +162,18 @@ class AddUserToCompanyCommand(Command):
 
 class RemoveUserFromCompanyCommand(Command):
     """Remove a user from a company"""
-    company_id: uuid.UUID
-    user_id: uuid.UUID
-    removed_by: uuid.UUID
+    company_id: UUID
+    user_id: UUID
+    removed_by: UUID
     reason: Optional[str] = Field(None, max_length=500)
 
 
 class ChangeUserCompanyRoleCommand(Command):
     """Change a user's role in company"""
-    company_id: uuid.UUID
-    user_id: uuid.UUID
+    company_id: UUID
+    user_id: UUID
     new_relationship_type: str
-    changed_by: uuid.UUID
+    changed_by: UUID
 
     @field_validator('new_relationship_type')
     @classmethod
@@ -189,33 +190,33 @@ class ChangeUserCompanyRoleCommand(Command):
 
 class CreateTelegramSupergroupCommand(Command):
     """Create a Telegram supergroup for company"""
-    company_id: uuid.UUID
+    company_id: UUID
     telegram_group_id: int
     title: str = Field(..., max_length=255)
     username: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = Field(None, max_length=1000)
     invite_link: Optional[str] = Field(None, max_length=500)
     is_forum: bool = True
-    created_by: uuid.UUID
+    created_by: UUID
 
 
 class LinkTelegramSupergroupCommand(Command):
     """Link an existing Telegram supergroup to company"""
-    company_id: uuid.UUID
+    company_id: UUID
     telegram_group_id: int
-    linked_by: uuid.UUID
+    linked_by: UUID
 
 
 class UnlinkTelegramSupergroupCommand(Command):
     """Unlink a Telegram supergroup from company"""
-    company_id: uuid.UUID
+    company_id: UUID
     telegram_group_id: int
-    unlinked_by: uuid.UUID
+    unlinked_by: UUID
 
 
 class UpdateTelegramSupergroupCommand(Command):
     """Update Telegram supergroup info"""
-    company_id: uuid.UUID
+    company_id: UUID
     telegram_group_id: int
     title: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = Field(None, max_length=1000)
@@ -229,9 +230,9 @@ class DeleteTelegramSupergroupCommand(Command):
     company_id should be enriched by the caller (router) if known.
     """
     telegram_group_id: int
-    deleted_by: uuid.UUID
+    deleted_by: UUID
     reason: Optional[str] = Field(None, max_length=500)
-    company_id: Optional[uuid.UUID] = None  # Enriched by router if known
+    company_id: Optional[UUID] = None  # Enriched by router if known
 
 
 # =============================================================================
@@ -240,8 +241,8 @@ class DeleteTelegramSupergroupCommand(Command):
 
 class UpdateCompanyBalanceCommand(Command):
     """Update company balance"""
-    company_id: uuid.UUID
+    company_id: UUID
     change_amount: Decimal
     reason: str = Field(..., min_length=1, max_length=500)
     reference_id: Optional[str] = Field(None, max_length=100, description="Order ID, transaction ID, etc.")
-    updated_by: uuid.UUID
+    updated_by: UUID

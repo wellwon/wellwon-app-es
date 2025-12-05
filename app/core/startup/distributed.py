@@ -341,6 +341,13 @@ async def register_sync_projections_phase(app: FastAPI) -> None:
         f"domains: {stats['domains']}"
     )
 
+    # Verify MessageSent is registered as sync
+    from app.infra.cqrs.projector_decorators import has_sync_handler
+    if has_sync_handler("MessageSent"):
+        logger.info("[STARTUP] MessageSent sync projection REGISTERED - messages will persist to ScyllaDB")
+    else:
+        logger.error("[STARTUP] WARNING: MessageSent sync projection NOT REGISTERED - messages will NOT persist!")
+
     # Log async projections info
     from app.infra.cqrs.projector_decorators import get_all_async_events
     async_events = get_all_async_events()

@@ -6,10 +6,13 @@
 import asyncio
 import json
 import uuid
+from uuid import UUID
 import time
 import logging
 from datetime import datetime, timezone, date
 from typing import Dict, Any, Optional, Set, Union, List
+
+from app.utils.uuid_utils import generate_uuid_str
 from dataclasses import dataclass, field
 from collections import deque
 from decimal import Decimal
@@ -383,7 +386,7 @@ class WSEConnection:
 
         # Add message ID if not present
         if 'id' not in message:
-            message['id'] = str(uuid.uuid4())
+            message['id'] = generate_uuid_str()
 
         # Add sequence number
         if 'seq' not in message:

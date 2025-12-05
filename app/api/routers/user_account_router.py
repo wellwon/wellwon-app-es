@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import os
-import uuid
+from uuid import UUID
 import logging
 import secrets
+
+from app.utils.uuid_utils import generate_uuid
 import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Annotated, Optional, Dict
@@ -391,7 +393,7 @@ async def register(
     log.info("Registration attempt username=%s email=%s", payload.username, payload.email)
 
     cmd = CreateUserAccountCommand(
-        user_id=uuid.uuid4(),
+        user_id=generate_uuid(),
         username=payload.username,
         email=payload.email,
         password=payload.password,

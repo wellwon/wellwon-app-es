@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING, List, Optional
 
 from app.config.logging_config import get_logger

@@ -19,8 +19,11 @@ import os
 import random
 import time
 import uuid
+from uuid import UUID
 from typing import Dict, Any, Callable, Awaitable, Optional, AsyncIterator, List, Union
 from datetime import datetime
+
+from app.utils.uuid_utils import generate_uuid_hex
 from dataclasses import dataclass
 from enum import Enum
 from decimal import Decimal
@@ -1202,7 +1205,7 @@ class RedpandaTransportAdapter(TransportAdapter):
 
         consumer_config = {
             **self._consumer_config_template,
-            'group_id': f"raw-stream-{uuid.uuid4().hex[:8]}",
+            'group_id': f"raw-stream-{generate_uuid_hex()[:8]}",
             'auto_offset_reset': 'latest',
             'enable_auto_commit': False,
         }

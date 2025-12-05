@@ -273,7 +273,7 @@ class ChatProjector:
             1. Write message content to ScyllaDB (primary storage)
             2. Update PostgreSQL chat.last_message_* (metadata preview)
         """
-        log.info(f"[SYNC-PROJECTION] on_message_sent CALLED - event_id={envelope.event_id}")
+        log.info(f"[SYNC-PROJECTION] *** MessageSent PROJECTION CALLED *** event_id={envelope.event_id}")
 
         event_data = envelope.event_data
         chat_id = uuid.UUID(event_data['chat_id'])
@@ -465,8 +465,19 @@ class ChatProjector:
         chat_id = uuid.UUID(event_data['chat_id']) if isinstance(event_data['chat_id'], str) else event_data['chat_id']
         # last_read_message_id is now a snowflake (int64) or None
         last_read_message_id = event_data.get('last_read_message_id')
-        telegram_read_at = event_data.get('telegram_read_at')
         last_read_telegram_message_id = event_data.get('last_read_telegram_message_id')
+
+        # Parse telegram_read_at from ISO string to datetime
+        telegram_read_at_raw = event_data.get('telegram_read_at')
+        if isinstance(telegram_read_at_raw, str):
+            try:
+                telegram_read_at = datetime.fromisoformat(telegram_read_at_raw.replace('Z', '+00:00'))
+            except ValueError:
+                telegram_read_at = datetime.now(timezone.utc)
+        elif isinstance(telegram_read_at_raw, datetime):
+            telegram_read_at = telegram_read_at_raw
+        else:
+            telegram_read_at = datetime.now(timezone.utc)
 
         log.info(
             f"[BLUE-CHECK] Projecting MessagesReadOnTelegram: chat={chat_id}, "
@@ -475,23 +486,26 @@ class ChatProjector:
             f"telegram_read_at={telegram_read_at}"
         )
 
-        # Skip if no message ID (couldn't find the message in ScyllaDB)
-        if last_read_message_id is None:
-            log.warning(
-                f"[BLUE-CHECK] Skipping ScyllaDB update - no last_read_message_id found. "
-                f"Telegram message {last_read_telegram_message_id} not mapped to WellWon message. "
-                f"Check telegram_message_mapping table."
-            )
-            return
-
-        # Update ScyllaDB - set telegram_read_at on messages up to last_read_message_id
+        # Update ScyllaDB - set telegram_read_at on messages
         try:
-            log.info(f"[BLUE-CHECK] Updating ScyllaDB telegram_read_at for messages up to {last_read_message_id}")
-            await self.message_scylla_repo.update_telegram_read_status(
-                channel_id=chat_id,
-                last_read_message_id=last_read_message_id,
-                telegram_read_at=telegram_read_at,
-            )
+            if last_read_message_id is not None:
+                # Have specific message ID - update up to this message
+                log.info(f"[BLUE-CHECK] Updating ScyllaDB telegram_read_at for messages up to {last_read_message_id}")
+                await self.message_scylla_repo.update_telegram_read_status(
+                    channel_id=chat_id,
+                    last_read_message_id=last_read_message_id,
+                    telegram_read_at=telegram_read_at,
+                )
+            else:
+                # No specific message ID - update ALL messages with telegram_message_id in this chat
+                log.warning(
+                    f"[BLUE-CHECK] No last_read_message_id found for telegram_message {last_read_telegram_message_id}. "
+                    f"Updating ALL unread messages in chat {chat_id}."
+                )
+                await self.message_scylla_repo.update_all_telegram_read_status(
+                    channel_id=chat_id,
+                    telegram_read_at=telegram_read_at,
+                )
             log.info(f"[BLUE-CHECK] Successfully updated telegram_read_at in ScyllaDB")
         except Exception as e:
             log.warning(f"[BLUE-CHECK] Failed to update telegram_read_at in ScyllaDB: {e}")

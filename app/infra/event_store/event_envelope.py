@@ -5,31 +5,32 @@
 
 from __future__ import annotations
 
-import uuid
+from uuid import UUID
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 
 from app.common.base.base_model import BaseEvent
 from app.infra.event_bus.event_registry import get_event_model
+from app.utils.uuid_utils import generate_uuid, generate_event_id
 
 
 @dataclass
 class EventEnvelope:
     """Enhanced wrapper for events stored in the event store with sequence support"""
-    aggregate_id: uuid.UUID
+    aggregate_id: UUID
     aggregate_type: str
     aggregate_version: int
-    event_id: uuid.UUID
+    event_id: UUID
     event_type: str
     event_data: Dict[str, Any]
     event_version: int = 1  # FIXED: Made optional with default value
-    causation_id: Optional[uuid.UUID] = None  # FIXED: Made properly optional
-    correlation_id: Optional[uuid.UUID] = None  # FIXED: Made properly optional
+    causation_id: Optional[UUID] = None  # FIXED: Made properly optional
+    correlation_id: Optional[UUID] = None  # FIXED: Made properly optional
     metadata: Optional[Dict[str, Any]] = None  # FIXED: Made properly optional
     stored_at: datetime = None  # FIXED: Will be set in __post_init__ if not provided
     sequence_number: Optional[int] = None
-    saga_id: Optional[uuid.UUID] = None  # Track which saga created this event
+    saga_id: Optional[UUID] = None  # Track which saga created this event
     projection_checkpoint: Optional[Dict[str, int]] = None  # Track projection progress
     commit_position: Optional[int] = None  # ADDED (2025-11-10): KurrentDB global position for read-after-write
 
@@ -44,19 +45,19 @@ class EventEnvelope:
     def from_event(
             cls,
             event: BaseEvent,
-            aggregate_id: uuid.UUID,
+            aggregate_id: UUID,
             aggregate_type: str,
             aggregate_version: int,
-            causation_id: Optional[uuid.UUID] = None,
-            correlation_id: Optional[uuid.UUID] = None,
+            causation_id: Optional[UUID] = None,
+            correlation_id: Optional[UUID] = None,
             metadata: Optional[Dict[str, Any]] = None,
             sequence_number: Optional[int] = None,
-            saga_id: Optional[uuid.UUID] = None
+            saga_id: Optional[UUID] = None
     ) -> EventEnvelope:
         """Create envelope from domain event with enhanced metadata"""
         # Extract saga_id from metadata if present
         if metadata and 'saga_id' in metadata and not saga_id:
-            saga_id = uuid.UUID(metadata['saga_id']) if isinstance(metadata['saga_id'], str) else metadata['saga_id']
+            saga_id = UUID(metadata['saga_id']) if isinstance(metadata['saga_id'], str) else metadata['saga_id']
 
         # Get event version from event or default to 1
         event_version = getattr(event, 'version', 1)
@@ -101,19 +102,19 @@ class EventEnvelope:
     def from_dict(cls, data: Dict[str, Any]) -> EventEnvelope:
         """Recreate from stored dictionary"""
         return cls(
-            aggregate_id=uuid.UUID(data["aggregate_id"]),
+            aggregate_id=UUID(data["aggregate_id"]),
             aggregate_type=data["aggregate_type"],
             aggregate_version=data["aggregate_version"],
-            event_id=uuid.UUID(data["event_id"]),
+            event_id=UUID(data["event_id"]),
             event_type=data["event_type"],
             event_data=data["event_data"],
             event_version=data.get("event_version", 1),  # FIXED: Default to 1 if missing
-            causation_id=uuid.UUID(data["causation_id"]) if data.get("causation_id") else None,
-            correlation_id=uuid.UUID(data["correlation_id"]) if data.get("correlation_id") else None,
+            causation_id=UUID(data["causation_id"]) if data.get("causation_id") else None,
+            correlation_id=UUID(data["correlation_id"]) if data.get("correlation_id") else None,
             metadata=data.get("metadata", {}),
             stored_at=datetime.fromisoformat(data["stored_at"]),
             sequence_number=data.get("sequence_number"),
-            saga_id=uuid.UUID(data["saga_id"]) if data.get("saga_id") else None,
+            saga_id=UUID(data["saga_id"]) if data.get("saga_id") else None,
             projection_checkpoint=data.get("projection_checkpoint"),
             commit_position=data.get("commit_position")  # ADDED (2025-11-10)
         )
@@ -194,7 +195,7 @@ class EventEnvelope:
         """
         # Extract core fields with defaults
         event_type = data.get('event_type', 'UnknownEvent')
-        event_id = data.get('event_id', str(uuid.uuid4()))
+        event_id = data.get('event_id', generate_event_id())
 
         # For different event types, aggregate_id might be in different fields
         aggregate_id = (
@@ -203,23 +204,23 @@ class EventEnvelope:
                 data.get('user_id') or  # User domain events
                 data.get('account_id') or  # Account events
                 data.get('virtual_account_id') or  # Virtual broker events
-                str(uuid.uuid4())
+                str(generate_uuid())
         )
 
         # Ensure UUIDs are properly formatted - handle str, UUID objects, and ints
         if isinstance(event_id, str):
-            event_id = uuid.UUID(event_id)
+            event_id = UUID(event_id)
         elif isinstance(event_id, int):
             # Fallback: generate new UUID if int was passed (shouldn't happen)
-            event_id = uuid.uuid4()
-        # If already uuid.UUID, use as-is
+            event_id = generate_uuid()
+        # If already UUID, use as-is
 
         if isinstance(aggregate_id, str):
-            aggregate_id = uuid.UUID(aggregate_id)
+            aggregate_id = UUID(aggregate_id)
         elif isinstance(aggregate_id, int):
             # Fallback: generate new UUID if int was passed (shouldn't happen)
-            aggregate_id = uuid.uuid4()
-        # If already uuid.UUID, use as-is
+            aggregate_id = generate_uuid()
+        # If already UUID, use as-is
 
         # Handle timestamp
         timestamp = None
@@ -241,17 +242,17 @@ class EventEnvelope:
             event_version=data.get('event_version', data.get('version', 1)),
             stored_at=timestamp,
             sequence_number=data.get('sequence_number'),
-            correlation_id=uuid.UUID(data['correlation_id']) if data.get('correlation_id') else None,
-            causation_id=uuid.UUID(data['causation_id']) if data.get('causation_id') else None,
+            correlation_id=UUID(data['correlation_id']) if data.get('correlation_id') else None,
+            causation_id=UUID(data['causation_id']) if data.get('causation_id') else None,
             metadata=data.get('metadata', {}),
-            saga_id=uuid.UUID(data['saga_id']) if data.get('saga_id') else None
+            saga_id=UUID(data['saga_id']) if data.get('saga_id') else None
         )
 
 
 @dataclass
 class AggregateSnapshot:
     """Snapshot of aggregate state at a specific version"""
-    aggregate_id: uuid.UUID
+    aggregate_id: UUID
     aggregate_type: str
     version: int
     state: Dict[str, Any]
@@ -273,7 +274,7 @@ class AggregateSnapshot:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> AggregateSnapshot:
         return cls(
-            aggregate_id=uuid.UUID(data["aggregate_id"]),
+            aggregate_id=UUID(data["aggregate_id"]),
             aggregate_type=data["aggregate_type"],
             version=data["version"],
             state=data["state"],

@@ -5,6 +5,7 @@
 // =============================================================================
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { v7 as uuidv7 } from 'uuid';  // UUIDv7: time-sortable, RFC 9562
 import * as chatApi from '@/api/chat';
 import type { Message, SendMessageRequest, SendMessageResponse } from '@/api/chat';
 import { chatKeys, addOptimisticMessage, removeMessageFromCache, reconcileMessageId } from './useChatMessages';
@@ -28,6 +29,8 @@ interface SendMessageParams {
   // Client temp ID for optimistic UI (Industry Standard - Discord/Slack pattern)
   // Format: "temp_<uuid>" - easy to identify as temporary
   _clientTempId?: string;
+  // Idempotency key for exactly-once delivery (prevents duplicates on retry)
+  _idempotencyKey?: string;
 }
 
 interface EditMessageParams {
@@ -51,11 +54,13 @@ export function useSendMessage() {
 
   const mutation = useMutation({
     mutationFn: async (params: SendMessageParams): Promise<SendMessageResponse & { chatId: string; clientTempId: string }> => {
-      // Use the pre-generated client temp ID from params (set by wrapper below)
+      // Use the pre-generated client temp ID and idempotency key from params (set by wrapper below)
       const clientTempId = params._clientTempId!;
+      const idempotencyKey = params._idempotencyKey!;
 
       const request: SendMessageRequest = {
         client_temp_id: clientTempId,
+        idempotency_key: idempotencyKey,  // For exactly-once delivery
         content: params.content,
         message_type: params.messageType || 'text',
         reply_to_id: params.replyToId,
@@ -115,15 +120,45 @@ export function useSendMessage() {
       return { previousMessages, clientTempId };
     },
 
-    onError: (error, params, context) => {
-      logger.error('Failed to send message, rolling back', { error, chatId: params.chatId });
+    onError: (error: any, params, context) => {
+      logger.error('Failed to send message', { error, chatId: params.chatId });
 
-      // Rollback to previous state
-      if (context?.previousMessages) {
+      // DON'T rollback - keep message visible but mark as FAILED
+      // User can see error state and retry
+      if (context?.clientTempId) {
+        const errorMessage = error?.response?.data?.message ||
+                            error?.message ||
+                            'Failed to send';
+
         queryClient.setQueryData(
           chatKeys.messages(params.chatId),
-          context.previousMessages
+          (oldData: any) => {
+            if (!oldData?.pages) return oldData;
+
+            return {
+              ...oldData,
+              pages: oldData.pages.map((page: any) => ({
+                ...page,
+                messages: page.messages.map((msg: Message) => {
+                  if (msg.id === context.clientTempId || (msg as any)._stableKey === context.clientTempId) {
+                    return {
+                      ...msg,
+                      _failed: true,
+                      _error: errorMessage,
+                      _idempotencyKey: params._idempotencyKey, // Keep for retry
+                    };
+                  }
+                  return msg;
+                }),
+              })),
+            };
+          }
         );
+
+        logger.info('Message marked as failed, user can retry', {
+          clientTempId: context.clientTempId,
+          error: errorMessage,
+        });
       }
     },
 
@@ -148,18 +183,90 @@ export function useSendMessage() {
     },
   });
 
-  // Wrapper that generates client temp ID ONCE before mutation
+  // Retry a failed message - uses the same idempotency key for deduplication
+  const retryMessage = (chatId: string, clientTempId: string) => {
+    // Find the failed message in cache
+    const data = queryClient.getQueryData(chatKeys.messages(chatId)) as any;
+    if (!data?.pages) return;
+
+    let failedMessage: any = null;
+    for (const page of data.pages) {
+      for (const msg of page.messages) {
+        if (msg.id === clientTempId || msg._stableKey === clientTempId) {
+          failedMessage = msg;
+          break;
+        }
+      }
+      if (failedMessage) break;
+    }
+
+    if (!failedMessage || !failedMessage._failed) {
+      logger.warn('Message not found or not failed', { clientTempId });
+      return;
+    }
+
+    // Clear failed state
+    queryClient.setQueryData(
+      chatKeys.messages(chatId),
+      (oldData: any) => {
+        if (!oldData?.pages) return oldData;
+        return {
+          ...oldData,
+          pages: oldData.pages.map((page: any) => ({
+            ...page,
+            messages: page.messages.map((msg: Message) => {
+              if (msg.id === clientTempId || (msg as any)._stableKey === clientTempId) {
+                const { _failed, _error, ...rest } = msg as any;
+                return rest;
+              }
+              return msg;
+            }),
+          })),
+        };
+      }
+    );
+
+    // Retry with same idempotency key (server will dedupe if already processed)
+    mutation.mutate({
+      chatId,
+      content: failedMessage.content,
+      messageType: failedMessage.message_type,
+      replyToId: failedMessage.reply_to_id,
+      fileUrl: failedMessage.file_url,
+      fileName: failedMessage.file_name,
+      fileSize: failedMessage.file_size,
+      fileType: failedMessage.file_type,
+      voiceDuration: failedMessage.voice_duration,
+      _clientTempId: clientTempId,
+      _idempotencyKey: failedMessage._idempotencyKey || crypto.randomUUID(),
+    });
+
+    logger.info('Retrying failed message', { clientTempId });
+  };
+
+  // Discard a failed message
+  const discardMessage = (chatId: string, clientTempId: string) => {
+    removeMessageFromCache(queryClient, chatId, clientTempId);
+    logger.info('Discarded failed message', { clientTempId });
+  };
+
+  // Wrapper that generates client temp ID and idempotency key ONCE before mutation
   // Format: "temp_<uuid>" - easy to identify as temporary
+  // UUIDv7 for idempotency: time-sortable (RFC 9562), better for debugging and tracing
   return {
     ...mutation,
-    mutate: (params: Omit<SendMessageParams, '_clientTempId'>) => {
-      const clientTempId = `temp_${crypto.randomUUID()}`;
-      mutation.mutate({ ...params, _clientTempId: clientTempId });
+    mutate: (params: Omit<SendMessageParams, '_clientTempId' | '_idempotencyKey'>) => {
+      const clientTempId = `temp_${uuidv7()}`;
+      const idempotencyKey = uuidv7();  // UUIDv7: time-ordered, sortable
+      mutation.mutate({ ...params, _clientTempId: clientTempId, _idempotencyKey: idempotencyKey });
     },
-    mutateAsync: async (params: Omit<SendMessageParams, '_clientTempId'>) => {
-      const clientTempId = `temp_${crypto.randomUUID()}`;
-      return mutation.mutateAsync({ ...params, _clientTempId: clientTempId });
+    mutateAsync: async (params: Omit<SendMessageParams, '_clientTempId' | '_idempotencyKey'>) => {
+      const clientTempId = `temp_${uuidv7()}`;
+      const idempotencyKey = uuidv7();  // UUIDv7: time-ordered, sortable
+      return mutation.mutateAsync({ ...params, _clientTempId: clientTempId, _idempotencyKey: idempotencyKey });
     },
+    retryMessage,
+    discardMessage,
   };
 }
 

@@ -9,8 +9,11 @@ import asyncio
 import json
 import logging
 import uuid
+from uuid import UUID
 from typing import Dict, Any, Optional, List, Type, Awaitable, Set, Union, Callable, TYPE_CHECKING
 from datetime import datetime, timezone, timedelta
+
+from app.utils.uuid_utils import generate_event_id
 from dataclasses import dataclass, field
 from collections import defaultdict
 from enum import Enum
@@ -1359,7 +1362,7 @@ class SagaService:
         """
         try:
             alert_event = {
-                "event_id": str(uuid.uuid4()),
+                "event_id": generate_event_id(),
                 "event_type": "StaleSagaDetected",
                 "saga_id": saga_id,
                 "saga_type": saga_type,
@@ -1411,7 +1414,7 @@ class SagaService:
         try:
             # Publish a saga cancellation event with circuit breaker
             cancellation_event = {
-                "event_id": str(uuid.uuid4()),
+                "event_id": generate_event_id(),
                 "event_type": "SagaCancellationRequested",
                 "saga_id": str(saga_id),
                 "reason": "Conflicting saga started",
@@ -1781,7 +1784,7 @@ class SagaService:
             from app.infra.saga.saga_events import SagaTriggered
 
             monitoring_event = SagaTriggered(
-                event_id=str(uuid.uuid4()),
+                event_id=generate_event_id(),
                 saga_id=str(saga_id),
                 saga_type=saga_type,
                 trigger_event_type=trigger_event.get("event_type"),
@@ -1907,7 +1910,7 @@ class SagaService:
         return await self._trigger_saga(
             saga_class,
             context,
-            {"event_type": "ManualTrigger", "event_id": str(uuid.uuid4())},
+            {"event_type": "ManualTrigger", "event_id": generate_event_id()},
             "Manual saga trigger"
         )
 

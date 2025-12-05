@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import os
-import uuid
+from uuid import UUID
 import logging
+
+from app.utils.uuid_utils import generate_event_id
 import json
 from pathlib import Path
 from typing import (
@@ -150,7 +152,7 @@ class EventBus:
         # Ensure event_id is a string
         event_id_val = event_data.get("event_id")
         if not isinstance(event_id_val, str) or not event_id_val:
-            event_data["event_id"] = str(uuid.uuid4())
+            event_data["event_id"] = generate_event_id()
             log.debug(
                 f"EventBus: Generated event_id '{event_data['event_id']}' for event (type: {event_data.get('event_type')}) in '{context_for_log}'.")
 

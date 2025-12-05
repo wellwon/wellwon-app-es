@@ -495,8 +495,13 @@ class MessageScyllaRepo:
             ... )
             >>> snowflake_id = await repo.insert_message(msg)
         """
-        # Log for debugging
-        log.info(f"[SCYLLA-WRITE] insert_message: channel_id={message.channel_id}, bucket={message.bucket}, message_id={message.message_id}")
+        # Log for debugging - include current bucket for comparison
+        current_bucket = calculate_current_bucket()
+        log.info(
+            f"[SCYLLA-WRITE] insert_message: channel_id={message.channel_id}, "
+            f"bucket={message.bucket}, message_id={message.message_id}, "
+            f"current_bucket={current_bucket}, match={message.bucket == current_bucket}"
+        )
 
         # Insert into messages table
         await self.client.execute_prepared(
@@ -626,8 +631,6 @@ class MessageScyllaRepo:
             ...     before_id=messages[-1]['message_id']
             ... )
         """
-        log.info(f"[SCYLLA-READ] get_messages: channel_id={channel_id}, limit={limit}, before_id={before_id}, after_id={after_id}")
-
         # Clamp limit
         limit = min(limit, MAX_MESSAGE_LIMIT)
         messages: List[Dict[str, Any]] = []
@@ -645,7 +648,7 @@ class MessageScyllaRepo:
             current_bucket = calculate_current_bucket()
             buckets = list(range(current_bucket, max(0, current_bucket - BUCKET_SCAN_DEPTH + 1), -1))
 
-        log.info(f"[SCYLLA] Querying buckets: {buckets} for channel {channel_id}")
+        log.info(f"[SCYLLA-READ] get_messages: channel_id={channel_id}, limit={limit}, current_bucket={calculate_current_bucket()}, buckets_to_scan={buckets}")
 
         # Query each bucket until we have enough messages
         for bucket in buckets:
@@ -677,6 +680,10 @@ class MessageScyllaRepo:
                 )
 
             log.info(f"[SCYLLA] Bucket {bucket}: found {len(result)} messages")
+            # Debug: log telegram_read_at values
+            if result:
+                has_read_at = [m.get('telegram_read_at') for m in result[:3]]
+                log.info(f"[SCYLLA-DEBUG] First 3 telegram_read_at values: {has_read_at}")
             messages.extend(result)
 
         log.info(f"[SCYLLA] Total messages found: {len(messages)} for channel {channel_id}")
@@ -828,6 +835,11 @@ class MessageScyllaRepo:
 
         # Also insert into telegram_message_mapping for O(1) lookup
         try:
+            log.info(
+                f"[MAPPING-INSERT] Inserting mapping: telegram_message_id={telegram_message_id}, "
+                f"telegram_chat_id={telegram_chat_id}, channel_id={channel_id}, "
+                f"bucket={bucket}, message_id={message_id}"
+            )
             await self.client.execute_prepared(
                 """INSERT INTO telegram_message_mapping
                    (telegram_message_id, telegram_chat_id, channel_id, bucket, message_id, created_at)
@@ -842,9 +854,10 @@ class MessageScyllaRepo:
                 ),
                 execution_profile='write',
             )
+            log.info(f"[MAPPING-INSERT] Successfully inserted mapping for telegram_message_id={telegram_message_id}")
         except Exception as mapping_error:
             # Log but don't fail - message update succeeded
-            log.warning(f"Failed to insert telegram_message_mapping during sync: {mapping_error}")
+            log.warning(f"[MAPPING-INSERT] Failed to insert telegram_message_mapping during sync: {mapping_error}")
 
     async def update_telegram_read_status(
             self,
@@ -881,20 +894,21 @@ class MessageScyllaRepo:
                 if bucket < 0:
                     continue
 
+                # ScyllaDB doesn't support IS NOT NULL in WHERE - fetch all and filter in code
                 rows = await self.client.execute_prepared(
-                    """SELECT message_id FROM messages
-                       WHERE channel_id = ? AND bucket = ?
-                       AND telegram_message_id IS NOT NULL
-                       AND telegram_read_at IS NULL
-                       ALLOW FILTERING""",
+                    """SELECT message_id, telegram_message_id, telegram_read_at FROM messages
+                       WHERE channel_id = ? AND bucket = ?""",
                     (channel_id, bucket),
                     execution_profile='read',
                 )
 
                 for row in rows:
                     message_id = row['message_id']
-                    # Only update messages up to and including last_read_message_id
-                    if message_id <= last_read_message_id:
+                    tg_msg_id = row.get('telegram_message_id')
+                    tg_read_at = row.get('telegram_read_at')
+
+                    # Filter in code: has telegram_message_id, no telegram_read_at, <= last_read
+                    if tg_msg_id is not None and tg_read_at is None and message_id <= last_read_message_id:
                         await self.client.execute_prepared(
                             """UPDATE messages
                                SET telegram_read_at = ?, updated_at = ?
@@ -909,14 +923,84 @@ class MessageScyllaRepo:
                             execution_profile='write',
                         )
                         updated_count += 1
+                        log.debug(f"[BLUE-CHECK] Updated message {message_id} with telegram_read_at")
 
             log.info(
-                f"Updated telegram_read_at for {updated_count} messages "
+                f"[BLUE-CHECK] Updated telegram_read_at for {updated_count} messages "
                 f"in channel {channel_id} (buckets: {buckets_to_check})"
             )
+            return updated_count
 
         except Exception as e:
-            log.warning(f"Failed to update telegram_read_at: {e}")
+            log.error(f"[BLUE-CHECK] Failed to update telegram_read_at: {e}", exc_info=True)
+            raise  # Re-raise so caller knows update failed
+
+    async def update_all_telegram_read_status(
+            self,
+            channel_id: ChannelID,
+            telegram_read_at: Optional[datetime] = None,
+    ) -> None:
+        """
+        Update ALL messages in a channel with Telegram read confirmation.
+
+        Called when we receive a read receipt but can't find the specific message mapping.
+        This ensures blue checkmarks still appear for all synced messages.
+
+        Args:
+            channel_id: UUID of the channel
+            telegram_read_at: When the messages were read on Telegram
+        """
+        if telegram_read_at is None:
+            telegram_read_at = datetime.now(timezone.utc)
+
+        # Get current bucket and check recent buckets
+        current_bucket = calculate_current_bucket()
+        buckets_to_check = [current_bucket, current_bucket - 1, current_bucket - 2]
+
+        updated_count = 0
+
+        try:
+            for bucket in buckets_to_check:
+                # ScyllaDB doesn't support IS NOT NULL - fetch all and filter in code
+                messages = await self.client.execute_prepared(
+                    """SELECT message_id, telegram_message_id, telegram_read_at FROM messages
+                       WHERE channel_id = ? AND bucket = ?""",
+                    (channel_id, bucket),
+                    execution_profile='read',
+                )
+
+                for msg in messages:
+                    message_id = msg.get('message_id')
+                    tg_msg_id = msg.get('telegram_message_id')
+                    tg_read_at = msg.get('telegram_read_at')
+
+                    # Filter in code: has telegram_message_id, no telegram_read_at
+                    if message_id and tg_msg_id is not None and tg_read_at is None:
+                        await self.client.execute_prepared(
+                            """UPDATE messages
+                               SET telegram_read_at = ?, updated_at = ?
+                               WHERE channel_id = ? AND bucket = ? AND message_id = ?""",
+                            (
+                                telegram_read_at,
+                                datetime.now(timezone.utc),
+                                channel_id,
+                                bucket,
+                                message_id,
+                            ),
+                            execution_profile='write',
+                        )
+                        updated_count += 1
+                        log.debug(f"[BLUE-CHECK] Updated message {message_id} with telegram_read_at")
+
+            log.info(
+                f"[BLUE-CHECK] Updated telegram_read_at for ALL {updated_count} messages "
+                f"in channel {channel_id} (buckets: {buckets_to_check})"
+            )
+            return updated_count
+
+        except Exception as e:
+            log.error(f"[BLUE-CHECK] Failed to update all telegram_read_at: {e}", exc_info=True)
+            raise  # Re-raise so caller knows update failed
 
     async def get_messages_by_author(
             self,
@@ -1034,6 +1118,11 @@ class MessageScyllaRepo:
         Returns:
             Mapping dict with {channel_id, bucket, message_id} if found, None otherwise
         """
+        log.info(
+            f"[MAPPING-LOOKUP] Looking up mapping: telegram_chat_id={telegram_chat_id}, "
+            f"telegram_message_id={telegram_message_id}"
+        )
+
         # Try with the ID as provided (raw format from read receipts)
         mapping_result = await self.client.execute_prepared(
             """SELECT channel_id, bucket, message_id
@@ -1043,12 +1132,19 @@ class MessageScyllaRepo:
         )
 
         if mapping_result:
+            log.info(
+                f"[MAPPING-LOOKUP] Found with raw ID: channel_id={mapping_result[0].get('channel_id')}, "
+                f"message_id={mapping_result[0].get('message_id')}"
+            )
             return mapping_result[0]
+
+        log.info(f"[MAPPING-LOOKUP] Not found with raw ID {telegram_chat_id}, trying fallback with -100 prefix")
 
         # Fallback: try with -100 prefix (old format)
         # This handles backwards compatibility for old mappings
         if telegram_chat_id > 0:
             prefixed_chat_id = int(f"-100{telegram_chat_id}")
+            log.info(f"[MAPPING-LOOKUP] Trying with prefixed ID: {prefixed_chat_id}")
             mapping_result = await self.client.execute_prepared(
                 """SELECT channel_id, bucket, message_id
                    FROM telegram_message_mapping
@@ -1056,14 +1152,20 @@ class MessageScyllaRepo:
                 (telegram_message_id, prefixed_chat_id),
             )
             if mapping_result:
-                log.debug(f"Found mapping with -100 prefix for chat {telegram_chat_id}")
+                log.info(
+                    f"[MAPPING-LOOKUP] Found with -100 prefix: channel_id={mapping_result[0].get('channel_id')}, "
+                    f"message_id={mapping_result[0].get('message_id')}"
+                )
                 return mapping_result[0]
+
+        log.info(f"[MAPPING-LOOKUP] Not found with -100 prefix either")
 
         # Fallback: try without -100 prefix (if provided ID has prefix)
         if telegram_chat_id < -100_000_000_000:
             # Extract raw ID: -1003312214640 -> 3312214640
             raw_chat_id = abs(telegram_chat_id) % 10_000_000_000_000
             if raw_chat_id > 1_000_000_000:  # Looks like a valid channel ID
+                log.info(f"[MAPPING-LOOKUP] Trying with extracted raw ID: {raw_chat_id}")
                 mapping_result = await self.client.execute_prepared(
                     """SELECT channel_id, bucket, message_id
                        FROM telegram_message_mapping
@@ -1071,9 +1173,35 @@ class MessageScyllaRepo:
                     (telegram_message_id, raw_chat_id),
                 )
                 if mapping_result:
-                    log.debug(f"Found mapping with raw ID for chat {telegram_chat_id}")
+                    log.info(
+                        f"[MAPPING-LOOKUP] Found with extracted raw ID: channel_id={mapping_result[0].get('channel_id')}, "
+                        f"message_id={mapping_result[0].get('message_id')}"
+                    )
                     return mapping_result[0]
 
+        # Last resort: scan by telegram_message_id only (slower but guaranteed to find)
+        log.info(f"[MAPPING-LOOKUP] All prefix attempts failed, trying ALLOW FILTERING scan")
+        try:
+            mapping_result = await self.client.execute_prepared(
+                """SELECT channel_id, bucket, message_id, telegram_chat_id
+                   FROM telegram_message_mapping
+                   WHERE telegram_message_id = ? ALLOW FILTERING""",
+                (telegram_message_id,),
+            )
+            if mapping_result:
+                found = mapping_result[0]
+                log.info(
+                    f"[MAPPING-LOOKUP] Found with ALLOW FILTERING: channel_id={found.get('channel_id')}, "
+                    f"message_id={found.get('message_id')}, stored_telegram_chat_id={found.get('telegram_chat_id')}"
+                )
+                return found
+        except Exception as e:
+            log.warning(f"[MAPPING-LOOKUP] ALLOW FILTERING scan failed: {e}")
+
+        log.warning(
+            f"[MAPPING-LOOKUP] No mapping found for telegram_message_id={telegram_message_id}, "
+            f"telegram_chat_id={telegram_chat_id}"
+        )
         return None
 
     # =========================================================================

@@ -27,8 +27,11 @@ import asyncio
 import json
 import logging
 import uuid
+from uuid import UUID
 import time
 from datetime import datetime, timezone
+
+from app.utils.uuid_utils import generate_uuid
 from typing import (
     List, Optional, Dict, Any, Set, Callable, Awaitable, AsyncIterator,
     Type, Tuple, TYPE_CHECKING
@@ -1790,7 +1793,7 @@ class KurrentDBEventStore:
         from app.infra.event_store.outbox_service import OutboxEntry
 
         return OutboxEntry(
-            id=uuid.uuid4(),
+            id=generate_uuid(),
             event_id=envelope.event_id,
             aggregate_id=envelope.aggregate_id,
             aggregate_type=envelope.aggregate_type,

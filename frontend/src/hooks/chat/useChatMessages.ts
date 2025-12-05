@@ -688,6 +688,13 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
             };
           }
 
+          // Build map of fresh messages for O(1) lookup
+          const freshMessageMap = new Map<string, Message>();
+          for (const msg of normalizedMessages) {
+            freshMessageMap.set(String(msg.id), msg);
+          }
+          console.log('[CATCH-UP] Fresh messages from API:', freshMessageMap.size);
+
           // Build set of existing message IDs for O(1) lookup
           const existingIds = buildMessageIdSet(oldData.pages);
           console.log('[CATCH-UP] Existing message IDs count:', existingIds.size);
@@ -697,21 +704,47 @@ export function useChatMessages(chatId: string | null, options: UseChatMessagesO
             (msg) => !existingIds.has(String(msg.id))
           );
 
-          if (newMessages.length === 0) {
-            console.log('[CATCH-UP] No new messages found (all already in cache)');
-            logger.debug('[CATCH-UP] No new messages found');
+          // IMPORTANT: Update existing messages with fresh data (telegram_read_at, etc.)
+          // This ensures blue checkmarks persist after page refresh
+          let updatedCount = 0;
+          const newPages = oldData.pages.map((page: any) => ({
+            ...page,
+            messages: page.messages.map((m: Message) => {
+              const freshMsg = freshMessageMap.get(String(m.id));
+              if (freshMsg) {
+                // Merge fresh data into existing message (preserves _stableKey)
+                const hasChanges =
+                  freshMsg.telegram_read_at !== m.telegram_read_at ||
+                  freshMsg.telegram_message_id !== m.telegram_message_id;
+                if (hasChanges) {
+                  updatedCount++;
+                }
+                return { ...m, ...freshMsg, _stableKey: m._stableKey };
+              }
+              return m;
+            }),
+          }));
+
+          if (updatedCount > 0) {
+            console.log('[CATCH-UP] Updated', updatedCount, 'existing messages with fresh data (telegram_read_at, etc.)');
+          }
+
+          if (newMessages.length === 0 && updatedCount === 0) {
+            console.log('[CATCH-UP] No new messages and no updates needed');
+            logger.debug('[CATCH-UP] No changes needed');
             return oldData;
           }
 
           console.log('[CATCH-UP] Found', newMessages.length, 'new messages to add');
-          logger.info('[CATCH-UP] Found new messages', { count: newMessages.length });
+          logger.info('[CATCH-UP] Catch-up complete', { newMessages: newMessages.length, updated: updatedCount });
 
           // Add new messages to front of first page (newest messages)
-          const newPages = [...oldData.pages];
-          newPages[0] = {
-            ...newPages[0],
-            messages: [...newMessages, ...newPages[0].messages],
-          };
+          if (newMessages.length > 0) {
+            newPages[0] = {
+              ...newPages[0],
+              messages: [...newMessages, ...newPages[0].messages],
+            };
+          }
 
           return { ...oldData, pages: newPages };
         }

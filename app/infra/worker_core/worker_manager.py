@@ -7,11 +7,13 @@ import asyncio
 import logging
 import os
 import signal
-import uuid
+from uuid import UUID
 import json
 import socket
 from typing import Dict, List, Optional, Set, Any, Callable
 from datetime import datetime, timezone, timedelta
+
+from app.utils.uuid_utils import generate_uuid_hex, generate_event_id
 from dataclasses import dataclass, field
 from enum import Enum
 from contextlib import asynccontextmanager
@@ -76,7 +78,7 @@ class ManagedWorkerInfo:
 class ManagerConfig:
     """Configuration for the worker manager"""
     manager_id: str = field(
-        default_factory=lambda: f"manager-{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+        default_factory=lambda: f"manager-{socket.gethostname()}-{os.getpid()}-{generate_uuid_hex()[:8]}")
     min_workers: int = 1
     max_workers: int = 10
     initial_workers: int = 2
@@ -262,7 +264,7 @@ class WorkerManager:
                 log.warning(f"Cannot spawn worker: max workers ({self.config.max_workers}) reached")
                 return None
 
-            worker_id = f"worker-{self.config.manager_id}-{len(self._workers)}-{uuid.uuid4().hex[:8]}"
+            worker_id = f"worker-{self.config.manager_id}-{len(self._workers)}-{generate_uuid_hex()[:8]}"
 
             # Prepare environment variables
             env = os.environ.copy()
@@ -729,7 +731,7 @@ class WorkerManager:
         """Publish manager event"""
         if self._event_bus:
             event_data = {
-                "event_id": str(uuid.uuid4()),
+                "event_id": generate_event_id(),
                 "event_type": event_type.value,
                 "manager_id": self.config.manager_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),

@@ -10,9 +10,12 @@ import asyncio
 import logging
 import time
 import uuid
+from uuid import UUID
 import json
 from typing import Dict, Any, Optional, Set, TYPE_CHECKING, List
 from datetime import datetime, timezone, timedelta
+
+from app.utils.uuid_utils import generate_event_id
 from collections import defaultdict
 
 from app.infra.event_bus.event_bus import EventBus
@@ -383,7 +386,7 @@ class EventProcessor:
         try:
             rebuild_event = {
                 "event_type": "ProjectionRebuildRequested",
-                "event_id": str(uuid.uuid4()),
+                "event_id": generate_event_id(),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "domain": domain_name,
                 "aggregate_filter": {
@@ -1070,7 +1073,7 @@ class EventProcessor:
         else:
             # Fallback to old method
             dlq_payload = {
-                "event_id": str(uuid.uuid4()),
+                "event_id": generate_event_id(),
                 "event_type": "WorkerProcessingFailed",
                 "original_event_id": str(event_id),
                 "original_event_type": event_type,
@@ -1130,7 +1133,7 @@ class EventProcessor:
         else:
             # Fallback to old method
             dlq_payload = {
-                "event_id": str(uuid.uuid4()),
+                "event_id": generate_event_id(),
                 "event_type": "MalformedEventRejected",
                 "original_event_id": event_dict.get("event_id", "MISSING"),
                 "original_event_type": event_dict.get("event_type", "unknown"),

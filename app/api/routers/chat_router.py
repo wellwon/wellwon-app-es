@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import uuid
+from uuid import UUID
 import logging
 import asyncio
 from typing import Annotated, List, Optional, Union
@@ -14,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, U
 from pydantic import BaseModel, Field
 
 from app.security.jwt_auth import get_current_user
+from app.utils.uuid_utils import generate_uuid
 from app.chat.commands import (
     CreateChatCommand,
     UpdateChatCommand,
@@ -87,8 +89,8 @@ class CreateChatRequest(BaseModel):
     """Request to create a new chat"""
     name: Optional[str] = Field(None, max_length=255)
     chat_type: str = Field(default="direct", description="direct, group, or company")
-    company_id: Optional[uuid.UUID] = None
-    participant_ids: List[uuid.UUID] = Field(default_factory=list)
+    company_id: Optional[UUID] = None
+    participant_ids: List[UUID] = Field(default_factory=list)
     telegram_supergroup_id: Optional[int] = None  # Telegram supergroup ID
     telegram_topic_id: Optional[int] = None
 
@@ -100,7 +102,7 @@ class UpdateChatRequest(BaseModel):
 
 class AddParticipantRequest(BaseModel):
     """Request to add participant to chat"""
-    user_id: uuid.UUID
+    user_id: UUID
     role: str = Field(default="member", description="member, admin, or observer")
 
 
@@ -164,7 +166,7 @@ class MarkAsReadRequest(BaseModel):
         if len(value) == 36 and value.count('-') == 4:
             try:
                 # Convert UUID to deterministic Snowflake ID (same formula as projector)
-                message_uuid = uuid.UUID(value)
+                message_uuid = UUID(value)
                 return int.from_bytes(message_uuid.bytes[:8], byteorder='big') & 0x7FFFFFFFFFFFFFFF
             except ValueError:
                 # Not a valid UUID despite looking like one
@@ -190,7 +192,7 @@ class LinkTelegramRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     """Generic chat response"""
-    id: uuid.UUID
+    id: UUID
     message: str = "Success"
 
 
@@ -220,7 +222,7 @@ async def create_chat(
     """Create a new chat"""
     try:
         command = CreateChatCommand(
-            chat_id=uuid.uuid4(),
+            chat_id=generate_uuid(),
             name=request.name,
             chat_type=request.chat_type,
             created_by=current_user["user_id"],
@@ -292,7 +294,7 @@ async def get_unread_chats_count(
 
 @router.get("/{chat_id}", response_model=ChatDetail)
 async def get_chat(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
@@ -309,7 +311,7 @@ async def get_chat(
 
 @router.patch("/{chat_id}", response_model=ChatResponse)
 async def update_chat(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     request: UpdateChatRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
@@ -345,7 +347,7 @@ async def update_chat(
 
 @router.post("/{chat_id}/archive", response_model=ChatResponse)
 async def archive_chat_post(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
@@ -379,7 +381,7 @@ async def archive_chat_post(
 
 @router.delete("/{chat_id}", response_model=ChatResponse)
 async def archive_chat(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
@@ -413,7 +415,7 @@ async def archive_chat(
 
 @router.post("/{chat_id}/restore", response_model=ChatResponse)
 async def restore_chat(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
 ):
@@ -444,7 +446,7 @@ async def restore_chat(
 
 @router.post("/{chat_id}/delete", response_model=ChatResponse)
 async def hard_delete_chat(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
@@ -487,7 +489,7 @@ async def hard_delete_chat(
 
 @router.get("/{chat_id}/participants", response_model=List[ParticipantInfo])
 async def get_chat_participants(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
@@ -504,7 +506,7 @@ async def get_chat_participants(
 
 @router.post("/{chat_id}/participants", response_model=ChatResponse)
 async def add_participant(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     request: AddParticipantRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
@@ -528,8 +530,8 @@ async def add_participant(
 
 @router.delete("/{chat_id}/participants/{user_id}", response_model=ChatResponse)
 async def remove_participant(
-    chat_id: uuid.UUID,
-    user_id: uuid.UUID,
+    chat_id: UUID,
+    user_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
@@ -551,8 +553,8 @@ async def remove_participant(
 
 @router.patch("/{chat_id}/participants/{user_id}/role", response_model=ChatResponse)
 async def change_participant_role(
-    chat_id: uuid.UUID,
-    user_id: uuid.UUID,
+    chat_id: UUID,
+    user_id: UUID,
     request: ChangeRoleRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
@@ -576,7 +578,7 @@ async def change_participant_role(
 
 @router.post("/{chat_id}/leave", response_model=ChatResponse)
 async def leave_chat(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
@@ -601,7 +603,7 @@ async def leave_chat(
 
 @router.get("/{chat_id}/messages", response_model=List[MessageDetail])
 async def get_messages(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
@@ -624,7 +626,7 @@ async def get_messages(
 
 @router.post("/{chat_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
 async def send_message(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     request: SendMessageRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
@@ -666,8 +668,8 @@ async def send_message(
 
 @router.patch("/{chat_id}/messages/{message_id}", response_model=MessageResponse)
 async def edit_message(
-    chat_id: uuid.UUID,
-    message_id: uuid.UUID,
+    chat_id: UUID,
+    message_id: UUID,
     request: EditMessageRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
@@ -691,8 +693,8 @@ async def edit_message(
 
 @router.delete("/{chat_id}/messages/{message_id}", response_model=MessageResponse)
 async def delete_message(
-    chat_id: uuid.UUID,
-    message_id: uuid.UUID,
+    chat_id: UUID,
+    message_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
@@ -714,7 +716,7 @@ async def delete_message(
 
 @router.get("/{chat_id}/messages/search", response_model=List[MessageDetail])
 async def search_messages(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
@@ -733,7 +735,7 @@ async def search_messages(
 
 @router.post("/{chat_id}/read", response_model=ChatResponse)
 async def mark_messages_as_read(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     request: MarkAsReadRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
@@ -804,7 +806,7 @@ async def mark_messages_as_read(
 
 @router.get("/{chat_id}/unread-count", response_model=UnreadCountResponse)
 async def get_unread_count(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
@@ -825,7 +827,7 @@ async def get_unread_count(
 
 @router.post("/{chat_id}/typing/start", status_code=status.HTTP_204_NO_CONTENT)
 async def start_typing(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
@@ -841,7 +843,7 @@ async def start_typing(
 
 @router.post("/{chat_id}/typing/stop", status_code=status.HTTP_204_NO_CONTENT)
 async def stop_typing(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
@@ -861,7 +863,7 @@ async def stop_typing(
 
 @router.post("/{chat_id}/telegram/link", response_model=ChatResponse)
 async def link_telegram_chat(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     request: LinkTelegramRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
@@ -885,7 +887,7 @@ async def link_telegram_chat(
 
 @router.delete("/{chat_id}/telegram/link", response_model=ChatResponse)
 async def unlink_telegram_chat(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     command_bus=Depends(get_command_bus),
     query_bus=Depends(get_query_bus),
@@ -952,7 +954,7 @@ ALLOWED_VOICE_TYPES = {
 
 @router.post("/{chat_id}/upload/file", response_model=FileUploadResponse)
 async def upload_chat_file(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     file: UploadFile = File(...),
 ):
@@ -1008,7 +1010,7 @@ async def upload_chat_file(
 
 @router.post("/{chat_id}/upload/voice", response_model=VoiceUploadResponse)
 async def upload_voice_message(
-    chat_id: uuid.UUID,
+    chat_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     file: UploadFile = File(...),
     duration: int = Query(0, ge=0, description="Duration of voice message in seconds"),
@@ -1113,7 +1115,7 @@ async def get_templates_by_category(
 
 @router.get("/templates/{template_id}", response_model=MessageTemplateDetail)
 async def get_template_by_id(
-    template_id: uuid.UUID,
+    template_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
     query_bus=Depends(get_query_bus),
 ):

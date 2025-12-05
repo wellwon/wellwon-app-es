@@ -207,11 +207,11 @@ class PubSubBus:
             return
 
         import time
-        import uuid
+        from app.utils.uuid_utils import generate_event_id
         start_time = time.time()
 
         # Generate or extract event ID for tracking
-        event_id = event.get('id') or event.get('event_id') or str(uuid.uuid4())
+        event_id = event.get('id') or event.get('event_id') or generate_event_id()
         event_type = event.get('event_type') or event.get('t') or 'unknown'
 
         # ENHANCED DEBUG LOGGING - Phase 6

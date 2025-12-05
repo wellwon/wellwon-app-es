@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import uuid
+from uuid import UUID
 from typing import TYPE_CHECKING
 
 from app.config.logging_config import get_logger
+from app.utils.uuid_utils import generate_uuid
 from app.company.commands import (
     CreateTelegramSupergroupCommand,
     LinkTelegramSupergroupCommand,
@@ -211,7 +213,7 @@ class DeleteTelegramSupergroupHandler(BaseCommandHandler):
 
         # Get company_id from command (enriched by router) or use synthetic UUID
         company_id = command.company_id
-        aggregate_company_id = company_id if company_id else uuid.uuid4()
+        aggregate_company_id = company_id if company_id else generate_uuid()
 
         # Load or create aggregate
         if company_id:

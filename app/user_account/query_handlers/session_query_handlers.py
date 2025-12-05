@@ -7,10 +7,12 @@
 # =============================================================================
 
 import logging
-import uuid
+from uuid import UUID
 import json
 from typing import TYPE_CHECKING, Any
 from datetime import datetime, timezone, timedelta
+
+from app.utils.uuid_utils import generate_uuid_hex, generate_event_id
 
 from app.infra.cqrs.query_bus import IQueryHandler
 from app.infra.cqrs.cqrs_decorators import query_handler, readonly_query
@@ -104,7 +106,7 @@ class CreateUserSessionQueryHandler(BaseQueryHandler[CreateUserSessionQuery, Ses
     async def handle(self, query: CreateUserSessionQuery) -> SessionCreationResult:
         """Store session metadata that complements JWT tokens"""
         # Generate session ID
-        session_id = query.session_id or f"sess_{uuid.uuid4().hex}"
+        session_id = query.session_id or f"sess_{generate_uuid_hex()}"
 
         # Store session metadata
         session_key = self.cache_manager._make_key('auth', 'session', 'meta', str(query.user_id), session_id)
@@ -406,7 +408,7 @@ class LogSecurityEventQueryHandler(BaseQueryHandler[LogSecurityEventQuery, dict[
     async def handle(self, query: LogSecurityEventQuery) -> dict[str, Any]:
         """Log security event to cache"""
         # Store in cache for recent events
-        event_id = f"evt_{uuid.uuid4().hex}"
+        event_id = f"evt_{generate_uuid_hex()}"
         event_key = self.cache_manager._make_key('auth', 'security', 'event', event_id)
 
         event_data = {

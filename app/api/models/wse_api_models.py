@@ -4,12 +4,13 @@
 # =============================================================================
 from __future__ import annotations
 
-import uuid
+from uuid import UUID
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Type, Literal as Lit
 
 from pydantic import BaseModel, Field, ConfigDict, model_validator, field_serializer
+from app.utils.uuid_utils import generate_uuid_str
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Shared ConfigDict – ONE place, ZERO warnings
@@ -89,7 +90,7 @@ class WsBaseEvent(BaseModel):
 
     # Optional fields
     id: Optional[str] = Field(
-        default_factory=lambda: str(uuid.uuid4()),
+        default_factory=generate_uuid_str,
         description="Unique message ID"
     )
     correlation_id: Optional[str] = Field(None, alias="cid", description="For request-response correlation")

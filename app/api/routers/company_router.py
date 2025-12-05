@@ -6,12 +6,14 @@
 from __future__ import annotations
 
 import uuid
+from uuid import UUID
 import logging
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, UploadFile, File
 
 from app.security.jwt_auth import get_current_user
+from app.utils.uuid_utils import generate_uuid
 
 # API Models
 from app.api.models.company_api_models import (
@@ -119,7 +121,7 @@ async def create_company(
     3. Create company chat (or link existing chat if link_chat_id is provided)
     """
     try:
-        company_id = uuid.uuid4()
+        company_id = generate_uuid()
         command = CreateCompanyCommand(
             company_id=company_id,
             name=request.name,

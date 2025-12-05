@@ -15,8 +15,11 @@ import asyncio
 import json
 import logging
 import uuid
+from uuid import UUID
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime, timezone, timedelta
+
+from app.utils.uuid_utils import generate_uuid, generate_event_id
 from dataclasses import dataclass, field
 from asyncio import Queue, QueueFull
 import traceback
@@ -588,7 +591,7 @@ class DLQService:
 
         # Build DLQ entry
         dlq_entry = {
-            "id": str(uuid.uuid4()),
+            "id": generate_event_id(),
             "source_system": source,
             "original_event_id": uuid_to_str(self._extract_event_id(event)),  # FIX: Convert UUID to str
             "event_type": event.get("event_type", "unknown"),
@@ -796,7 +799,7 @@ class DLQService:
 
         # Ensure event_id
         if "event_id" not in kafka_event:
-            kafka_event["event_id"] = kafka_event.get("id", str(uuid.uuid4()))
+            kafka_event["event_id"] = kafka_event.get("id", generate_event_id())
 
         # Add event type for routing
         kafka_event["event_type"] = "DLQEvent"

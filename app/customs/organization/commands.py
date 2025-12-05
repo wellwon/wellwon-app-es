@@ -6,11 +6,12 @@
 from __future__ import annotations
 
 from pydantic import Field
-import uuid
+from uuid import UUID
 from typing import Optional, Dict, Any
 
 from app.infra.cqrs.command_bus import Command
 from app.customs.enums import OrganizationType
+from app.utils.uuid_utils import generate_uuid
 
 
 # =============================================================================
@@ -24,8 +25,8 @@ class CreateCommonOrgCommand(Command):
     If INN is provided, will auto-fetch from EGRUL via Kontur (optional sync).
     User-provided fields override registry data.
     """
-    org_id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    user_id: uuid.UUID
+    org_id: UUID = Field(default_factory=generate_uuid)
+    user_id: UUID
     org_name: str = Field(..., min_length=1, max_length=255)
     short_name: Optional[str] = Field(None, max_length=100)
     org_type: OrganizationType = OrganizationType.LEGAL_ENTITY
@@ -41,8 +42,8 @@ class CreateCommonOrgCommand(Command):
 
 class UpdateCommonOrgCommand(Command):
     """Command to update organization details."""
-    org_id: uuid.UUID
-    user_id: uuid.UUID
+    org_id: UUID
+    user_id: UUID
     org_name: Optional[str] = Field(None, max_length=255)
     short_name: Optional[str] = Field(None, max_length=100)
     org_type: Optional[OrganizationType] = None
@@ -57,22 +58,22 @@ class SyncOrgFromRegistryCommand(Command):
 
     Fetches latest data from registry and updates organization.
     """
-    org_id: uuid.UUID
-    user_id: uuid.UUID
+    org_id: UUID
+    user_id: UUID
     inn: str = Field(..., min_length=10, max_length=12)
 
 
 class DeleteCommonOrgCommand(Command):
     """Command to delete organization."""
-    org_id: uuid.UUID
-    user_id: uuid.UUID
+    org_id: UUID
+    user_id: UUID
     reason: Optional[str] = None
 
 
 class LinkOrgToKonturCommand(Command):
     """Command to link organization to Kontur (after creation in Kontur)."""
-    org_id: uuid.UUID
-    user_id: uuid.UUID
+    org_id: UUID
+    user_id: UUID
     kontur_org_id: str
 
 

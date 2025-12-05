@@ -7,10 +7,11 @@
 import asyncio
 import json
 import logging
-import uuid
+from uuid import UUID
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
-from uuid import UUID
+
+from app.utils.uuid_utils import generate_uuid
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, Header, Cookie, Request
 from starlette.websockets import WebSocketState
@@ -282,7 +283,7 @@ async def websocket_endpoint(
         return
 
     # Generate connection ID
-    conn_id = f"ws_{user_id.hex[:8]}_{uuid.uuid4().hex[:8]}"
+    conn_id = f"ws_{user_id.hex[:8]}_{generate_uuid().hex[:8]}"
 
     log.info(
         f"WebSocket v{protocol_version} connection authenticated - "

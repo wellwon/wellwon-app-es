@@ -10,8 +10,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from uuid import UUID
 import json
 import time
+
+from app.utils.uuid_utils import generate_uuid, generate_event_id, generate_correlation_id
 from typing import Dict, Any, List, Optional, Type, Callable, Awaitable, TYPE_CHECKING
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -200,7 +203,7 @@ class BaseSaga(ABC):
     """
 
     def __init__(self, saga_id: Optional[uuid.UUID] = None):
-        self.saga_id = saga_id or uuid.uuid4()
+        self.saga_id = saga_id or generate_uuid()
         self.context: Dict[str, Any] = {}
         # OPTIMIZED: Track if this is a fast-track saga
         self._fast_track = False
@@ -503,7 +506,7 @@ class SagaManager:
 
         # Enhanced causation tracking
         causation_id = str(saga.saga_id)
-        correlation_id = context.get('correlation_id', str(uuid.uuid4()))
+        correlation_id = context.get('correlation_id', generate_event_id())
 
         context['causation_id'] = causation_id
         context['correlation_id'] = correlation_id
@@ -913,7 +916,7 @@ class SagaManager:
 
         # Start compensation with proper event structure
         compensation_event = {
-            "event_id": str(uuid.uuid4()),
+            "event_id": generate_event_id(),
             "event_type": "SagaCompensationStarted",
             "saga_id": str(saga_id),
             "saga_type": state.saga_type,
@@ -952,7 +955,7 @@ class SagaManager:
         try:
             # Base event data with Event Store enhancements
             event_data = {
-                "event_id": str(uuid.uuid4()),
+                "event_id": generate_event_id(),
                 "event_type": event_type,
                 "saga_id": str(state.saga_id),
                 "saga_type": state.saga_type,

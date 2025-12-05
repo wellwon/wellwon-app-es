@@ -243,12 +243,13 @@ async def telegram_webhook(
                 company = await query_bus.query(company_query)
 
                 if company:
-                    import uuid
+                    from uuid import UUID as StdUUID
+                    from app.utils.uuid_utils import generate_uuid
                     # Create new chat for this topic
                     # The creator (owner_id) will be automatically added as admin by CreateChatHandler
-                    creator_id = company.owner_id or uuid.UUID('00000000-0000-0000-0000-000000000000')
+                    creator_id = company.owner_id or StdUUID('00000000-0000-0000-0000-000000000000')
                     create_cmd = CreateChatCommand(
-                        chat_id=uuid.uuid4(),
+                        chat_id=generate_uuid(),
                         name=topic_name,
                         chat_type="company",
                         created_by=creator_id,
@@ -657,7 +658,7 @@ async def send_message(
 from typing import List, Annotated
 from pydantic import BaseModel
 from datetime import datetime
-import uuid as uuid_module
+from uuid import UUID
 from app.security.jwt_auth import get_current_user
 from app.infra.read_repos.company_read_repo import CompanyReadRepo
 
@@ -665,7 +666,7 @@ from app.infra.read_repos.company_read_repo import CompanyReadRepo
 class SupergroupResponse(BaseModel):
     """Telegram supergroup info"""
     id: int
-    company_id: Optional[uuid_module.UUID] = None  # FK to companies.id (UUID)
+    company_id: Optional[UUID] = None  # FK to companies.id (UUID)
     title: str
     username: Optional[str] = None
     description: Optional[str] = None

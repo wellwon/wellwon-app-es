@@ -6,12 +6,14 @@
 # =============================================================================
 
 import asyncio
-import uuid
+from uuid import UUID
 import time
 import os
 import random
 from typing import Optional, Dict, Any, Union, TypeVar, Generic, List
 from datetime import datetime, timezone
+
+from app.utils.uuid_utils import generate_uuid, generate_uuid_hex
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -166,19 +168,19 @@ class DistributedLock(Generic[T]):
         # Generate unique owner ID
         task = asyncio.current_task()
         task_name = task.get_name() if task else "no-task"
-        self.owner_id = f"{uuid.uuid4().hex[:8]}-{task_name}:{os.getpid()}"
+        self.owner_id = f"{generate_uuid_hex()[:8]}-{task_name}:{os.getpid()}"
 
         # Start cleanup task if enabled
         if self.config.enable_auto_cleanup:
             asyncio.create_task(self._auto_cleanup_task())
 
-    def _get_lock_key(self, resource_id: Union[str, uuid.UUID, T]) -> str:
+    def _get_lock_key(self, resource_id: Union[str, UUID, T]) -> str:
         """Generate Redis key for the lock"""
         return f"{self.config.namespace}:{str(resource_id)}"
 
     def _generate_lock_value(self) -> str:
         """Generate unique lock value"""
-        return f"{self.owner_id}:{uuid.uuid4().hex}:{int(time.time() * 1000)}"
+        return f"{self.owner_id}:{generate_uuid_hex()}:{int(time.time() * 1000)}"
 
     async def _check_and_cleanup_stale_lock(self, lock_key: str, current_value: str) -> bool:
         """Check if a lock is stale and clean it up if necessary"""
@@ -208,7 +210,7 @@ class DistributedLock(Generic[T]):
 
     async def acquire(
             self,
-            resource_id: Union[str, uuid.UUID, T],
+            resource_id: Union[str, UUID, T],
             ttl_seconds: Optional[int] = None,
             timeout_ms: Optional[int] = None,
             retry_times: Optional[int] = None,
@@ -463,7 +465,7 @@ class DistributedLock(Generic[T]):
     @asynccontextmanager
     async def lock_context(
             self,
-            resource_id: Union[str, uuid.UUID, T],
+            resource_id: Union[str, UUID, T],
             ttl_seconds: Optional[int] = None,
             timeout_ms: Optional[int] = None
     ):
@@ -485,7 +487,7 @@ class DistributedLock(Generic[T]):
         finally:
             await self.release(lock_info)
 
-    async def is_locked(self, resource_id: Union[str, uuid.UUID, T]) -> bool:
+    async def is_locked(self, resource_id: Union[str, UUID, T]) -> bool:
         """Check if resource is currently locked"""
         try:
             redis = await get_global_client()
@@ -496,7 +498,7 @@ class DistributedLock(Generic[T]):
             logger.error(f"Error checking lock status: {e}")
             return False
 
-    async def force_release(self, resource_id: Union[str, uuid.UUID, T]) -> bool:
+    async def force_release(self, resource_id: Union[str, UUID, T]) -> bool:
         """
         Force release a lock (admin operation).
         Should only be used when certain the lock holder is dead.
@@ -539,7 +541,7 @@ class DistributedLock(Generic[T]):
 
 
 # Backward compatibility classes
-class DistributedLockManager(DistributedLock[uuid.UUID]):
+class DistributedLockManager(DistributedLock[UUID]):
     """EventStore compatibility class"""
 
     def __init__(
@@ -563,7 +565,7 @@ class DistributedLockManager(DistributedLock[uuid.UUID]):
 
     async def acquire_lock(
             self,
-            aggregate_id: uuid.UUID,
+            aggregate_id: UUID,
             ttl_ms: Optional[int] = None,
             wait: bool = True
     ) -> 'LockInfo':
@@ -588,7 +590,7 @@ class DistributedLockManager(DistributedLock[uuid.UUID]):
     @asynccontextmanager
     async def lock_aggregate(
             self,
-            aggregate_id: uuid.UUID,
+            aggregate_id: UUID,
             ttl_ms: Optional[int] = None,
             wait: bool = True
     ):
@@ -614,7 +616,7 @@ class SemaphoreManager:
         """
         redis = await get_global_client()
         semaphore_key = f"{self.redis_prefix}{name}"
-        member = str(uuid.uuid4())
+        member = str(generate_uuid())
 
         if name not in self._semaphore_metrics:
             self._semaphore_metrics[name] = {

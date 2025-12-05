@@ -229,6 +229,11 @@ class MessageResponse(BaseModel):
     external_message_id: Optional[str] = None
     sync_direction: Optional[MessageDirection] = None
 
+    # Telegram sync (for checkmarks)
+    telegram_message_id: Optional[int] = None  # Delivery status (double gray checkmark)
+    telegram_chat_id: Optional[int] = None
+    telegram_read_at: Optional[datetime] = None  # Read status (double blue checkmark)
+
     # Template
     template_id: Optional[str] = None
     template_data: Optional[Dict[str, Any]] = None

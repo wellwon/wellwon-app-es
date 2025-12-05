@@ -351,6 +351,16 @@ class TelegramMTProtoClient:
         self._processed_messages_ttl = 300.0  # 5 minutes TTL
         self._last_dedup_cleanup = time.time()
 
+        # Track handler registration to prevent duplicate handlers on reconnect
+        self._handlers_registered = False
+        self._handler_registration_count = 0
+
+        # Read event deduplication - prevents double-processing when both
+        # events.MessageRead and raw UpdateReadHistoryOutbox fire for same event
+        # Key: (chat_id, max_id), Value: timestamp when processed
+        self._processed_reads: Dict[Tuple[int, int], float] = {}
+        self._processed_reads_ttl = 10.0  # 10 seconds TTL (short, just for dedup)
+
     async def connect(self) -> bool:
         """Connect to Telegram MTProto servers"""
         if not TELETHON_AVAILABLE:
@@ -414,6 +424,12 @@ class TelegramMTProtoClient:
             # Reset reconnection counter on successful connect
             self._reconnect_attempts = 0
 
+            # Register event handlers (only once per client instance)
+            # Track registration to debug handler state issues
+            self._handler_registration_count += 1
+            reg_count = self._handler_registration_count
+            log.info(f"[HANDLER-REG] Registering handlers (count={reg_count})")
+
             # Register message handler for ALL messages (incoming AND outgoing)
             # We need outgoing=True to capture messages sent by MTProto user from Telegram app
             # Bot messages are filtered out in _handle_new_message
@@ -421,16 +437,18 @@ class TelegramMTProtoClient:
             async def handle_new_message(event):
                 await self._handle_new_message(event)
 
-            log.info("MTProto message handler registered")
-            print("[MTPROTO] Message handler registered")
+            log.info(f"[HANDLER-REG] MTProto message handler registered (reg={reg_count})")
+            print(f"[MTPROTO] Message handler registered (registration #{reg_count})")
 
             # Register MessageRead handler (for syncing read status from Telegram to WellWon)
+            # CRITICAL: This handler triggers blue checkmarks
             @self._client.on(events.MessageRead)
             async def handle_message_read(event):
+                log.info(f"[HANDLER-INVOKE] MessageRead event received (reg={reg_count})")
                 await self._handle_message_read(event)
 
-            log.info("MTProto MessageRead handler registered")
-            print("[MTPROTO] MessageRead handler registered")
+            log.info(f"[HANDLER-REG] MTProto MessageRead handler registered (reg={reg_count})")
+            print(f"[MTPROTO] MessageRead handler registered (registration #{reg_count})")
 
             # Register raw handler for forum topic read receipts
             # events.MessageRead doesn't handle forum topics properly
@@ -444,10 +462,16 @@ class TelegramMTProtoClient:
 
             @self._client.on(tl_events.Raw)
             async def handle_raw_update(update):
+                # Log all raw updates to debug read receipt handling
+                update_type = type(update).__name__
+                if 'Read' in update_type:
+                    log.info(f"[HANDLER-INVOKE] Raw {update_type} received (reg={reg_count})")
                 await self._handle_raw_read_update(update)
 
-            log.info("MTProto raw read handler registered (forum topics)")
-            print("[MTPROTO] Raw read handler registered for forum topics")
+            log.info(f"[HANDLER-REG] MTProto raw read handler registered (reg={reg_count})")
+            print(f"[MTPROTO] Raw read handler registered for forum topics (registration #{reg_count})")
+
+            self._handlers_registered = True
 
             # Start the update loop in a background task
             # This is required for Telethon to actually receive new messages
@@ -918,12 +942,33 @@ class TelegramMTProtoClient:
         except (AttributeError, TypeError, ValueError) as msg_err:
             log.error(f"[EVENT] Error handling incoming message: {msg_err}", exc_info=True)
 
+    def _is_read_already_processed(self, chat_id: int, max_id: int) -> bool:
+        """Check if this read event was already processed (deduplication)."""
+        key = (chat_id, max_id)
+        now = time.time()
+
+        # Clean up old entries
+        expired = [k for k, v in self._processed_reads.items() if now - v > self._processed_reads_ttl]
+        for k in expired:
+            del self._processed_reads[k]
+
+        if key in self._processed_reads:
+            log.debug(f"[READ-DEDUP] Skipping duplicate read event: chat={chat_id}, max_id={max_id}")
+            return True
+
+        self._processed_reads[key] = now
+        return False
+
     async def _handle_message_read(self, event) -> None:
         """
         Handle MessageRead event from Telegram.
 
         This is called by Telethon when messages are marked as read.
         We forward this to the registered callback to sync read status to WellWon.
+
+        NOTE: events.MessageRead is unreliable (GitHub issue #4149).
+        The raw handler in _handle_raw_read_update is now the PRIMARY handler.
+        This method serves as a BACKUP in case raw handler misses something.
         """
         try:
             chat_id = event.chat_id
@@ -933,9 +978,14 @@ class TelegramMTProtoClient:
             # Convert chat_id to stored format (remove -100 prefix if present)
             stored_chat_id = self._from_telegram_peer_id(chat_id)
 
+            # Deduplication - raw handler may have already processed this
+            if self._is_read_already_processed(stored_chat_id, max_id):
+                log.info(f"[READ-DEBUG] MessageRead already processed by raw handler, skipping")
+                return
+
             # Debug logging for tracing read receipt flow
             log.info(
-                f"[READ-DEBUG] MTProto MessageRead received: "
+                f"[READ-DEBUG] MTProto MessageRead received (backup handler): "
                 f"chat_id={stored_chat_id}, max_id={max_id}, is_outbox={is_outbox}, "
                 f"callback_registered={self._read_callback is not None}"
             )
@@ -949,9 +999,9 @@ class TelegramMTProtoClient:
 
             # Forward to callback if registered
             if self._read_callback is not None:
-                log.info(f"[READ-DEBUG] Invoking read callback for chat {stored_chat_id}")
+                log.info(f"[READ-DEBUG] Invoking read callback for chat {stored_chat_id} (backup)")
                 await self._read_callback(read_info)
-                log.info(f"[READ-DEBUG] Read callback completed for chat {stored_chat_id}")
+                log.info(f"[READ-DEBUG] Read callback completed for chat {stored_chat_id} (backup)")
             else:
                 log.warning("[READ-DEBUG] No read callback registered, MessageRead event IGNORED")
 
@@ -974,6 +1024,7 @@ class TelegramMTProtoClient:
             UpdateReadChannelDiscussionInbox,
             UpdateReadHistoryOutbox,
             UpdateReadHistoryInbox,
+            UpdateReadChannelOutbox,  # Channels/supergroups (non-forum)
         )
 
         try:
@@ -1022,7 +1073,9 @@ class TelegramMTProtoClient:
                     await self._read_callback(read_info)
                     log.info(f"[READ-DEBUG] Forum inbox read callback completed for channel {channel_id} topic {topic_id}")
 
-            # Regular outbox read - others read your messages (backup for events.MessageRead)
+            # Regular outbox read - others read your messages
+            # IMPORTANT: events.MessageRead is unreliable (GitHub issue #4149)
+            # Process here as PRIMARY handler instead of relying on events.MessageRead
             elif isinstance(update, UpdateReadHistoryOutbox):
                 peer = update.peer
                 max_id = update.max_id
@@ -1032,13 +1085,58 @@ class TelegramMTProtoClient:
                 if peer_id is None:
                     return
 
+                # Convert to stored format
+                stored_peer_id = self._from_telegram_peer_id(peer_id)
+
                 log.info(
                     f"[READ-DEBUG] Raw UpdateReadHistoryOutbox: "
-                    f"peer={peer_id}, max_id={max_id}"
+                    f"peer={peer_id}, stored_peer={stored_peer_id}, max_id={max_id}"
                 )
 
-                # Note: Don't process here to avoid duplicate with events.MessageRead
-                # Only log for debugging
+                # Deduplication - mark as processed before calling callback
+                if self._is_read_already_processed(stored_peer_id, max_id):
+                    log.debug(f"[READ-DEBUG] UpdateReadHistoryOutbox already processed, skipping")
+                    return
+
+                # Process the read event - this is now the PRIMARY handler
+                # events.MessageRead may or may not fire, so we handle here
+                if self._read_callback is not None:
+                    read_info = ReadEventInfo(
+                        chat_id=stored_peer_id,
+                        max_id=max_id,
+                        is_outbox=True,  # Others read YOUR messages -> blue checkmarks
+                    )
+                    await self._read_callback(read_info)
+                    log.info(f"[READ-DEBUG] Raw outbox read callback completed for peer {stored_peer_id}")
+                else:
+                    log.warning("[READ-DEBUG] No read callback registered for UpdateReadHistoryOutbox")
+
+            # Channel/supergroup outbox read (non-forum) - others read your messages
+            # This handles supergroups that don't have forum topics enabled
+            elif isinstance(update, UpdateReadChannelOutbox):
+                channel_id = update.channel_id
+                max_id = update.max_id
+
+                log.info(
+                    f"[READ-DEBUG] Raw UpdateReadChannelOutbox: "
+                    f"channel={channel_id}, max_id={max_id}"
+                )
+
+                # Deduplication
+                if self._is_read_already_processed(channel_id, max_id):
+                    log.debug(f"[READ-DEBUG] UpdateReadChannelOutbox already processed, skipping")
+                    return
+
+                if self._read_callback is not None:
+                    read_info = ReadEventInfo(
+                        chat_id=channel_id,  # Already without -100 prefix from Telethon
+                        max_id=max_id,
+                        is_outbox=True,  # Others read YOUR messages -> blue checkmarks
+                    )
+                    await self._read_callback(read_info)
+                    log.info(f"[READ-DEBUG] Channel outbox read callback completed for channel {channel_id}")
+                else:
+                    log.warning("[READ-DEBUG] No read callback registered for UpdateReadChannelOutbox")
 
         except Exception as e:
             log.debug(f"[READ-DEBUG] Error in raw read update handler: {e}")

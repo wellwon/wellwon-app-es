@@ -732,6 +732,11 @@ class TelegramIncomingHandler:
             log.info(f"[READ-DEBUG] Found WellWon chat: {chat_id}")
 
             # 2. Find the WellWon message that corresponds to the Telegram max_id
+            log.info(
+                f"[READ-DEBUG] Attempting to find WellWon message for: "
+                f"wellwon_chat_id={chat_id}, telegram_chat_id={read_event.chat_id}, "
+                f"telegram_message_id={read_event.max_id}"
+            )
             wellwon_message_id = await self._find_message_by_telegram_id(
                 chat_id,
                 read_event.chat_id,
@@ -742,10 +747,11 @@ class TelegramIncomingHandler:
             if not wellwon_message_id:
                 log.warning(
                     f"[READ-DEBUG] No WellWon message found for Telegram message {read_event.max_id} "
-                    f"in chat {read_event.chat_id} - emitting event anyway"
+                    f"in telegram_chat {read_event.chat_id} - ScyllaDB update will be skipped! "
+                    f"Check [MAPPING-INSERT] and [MAPPING-LOOKUP] logs for details."
                 )
             else:
-                log.info(f"[READ-DEBUG] Found WellWon message: {wellwon_message_id}")
+                log.info(f"[READ-DEBUG] Found WellWon message (snowflake): {wellwon_message_id}")
 
             # 3. Get chat participants for WSE routing
             participant_ids = await self._get_chat_participant_ids(chat_id)
@@ -774,6 +780,29 @@ class TelegramIncomingHandler:
                 f"telegram_max_id={read_event.max_id}, wellwon_message_id={wellwon_message_id}, "
                 f"participants={len(participant_ids)}"
             )
+
+            # 5. CRITICAL: Update ScyllaDB directly (don't wait for event processor worker)
+            # This ensures telegram_read_at persists even if worker is not running
+            try:
+                from app.infra.read_repos.message_scylla_repo import MessageScyllaRepo
+                message_repo = MessageScyllaRepo()
+
+                if wellwon_message_id:
+                    log.info(f"[BLUE-CHECK-INLINE] Updating ScyllaDB for messages up to {wellwon_message_id}")
+                    await message_repo.update_telegram_read_status(
+                        channel_id=chat_id,
+                        last_read_message_id=wellwon_message_id,
+                        telegram_read_at=telegram_read_at,
+                    )
+                else:
+                    log.info(f"[BLUE-CHECK-INLINE] No specific message - updating ALL in chat {chat_id}")
+                    await message_repo.update_all_telegram_read_status(
+                        channel_id=chat_id,
+                        telegram_read_at=telegram_read_at,
+                    )
+                log.info(f"[BLUE-CHECK-INLINE] ScyllaDB updated successfully!")
+            except Exception as scylla_error:
+                log.warning(f"[BLUE-CHECK-INLINE] Failed to update ScyllaDB directly: {scylla_error}")
 
             return True
 
@@ -820,6 +849,8 @@ class TelegramIncomingHandler:
                 return False
 
             # 4. Dispatch MarkMessagesAsReadCommand with source='telegram'
+            # Handle optimistic concurrency conflicts gracefully - if another
+            # concurrent read event already updated, that's fine
             from app.chat.commands import MarkMessagesAsReadCommand
 
             command = MarkMessagesAsReadCommand(
@@ -830,7 +861,20 @@ class TelegramIncomingHandler:
                 telegram_message_id=read_event.max_id,  # Include for completeness
             )
 
-            await self._command_bus.send(command)
+            try:
+                await self._command_bus.send(command)
+            except Exception as cmd_error:
+                # Check if it's an optimistic concurrency conflict
+                error_msg = str(cmd_error).lower()
+                if "concurrency" in error_msg or "conflict" in error_msg or "version" in error_msg:
+                    # This is OK - another read event already updated the aggregate
+                    log.info(
+                        f"[READ-CONFLICT] Concurrency conflict for read event - "
+                        f"another update already processed. chat={chat_id}, max_id={read_event.max_id}"
+                    )
+                    return True  # Consider it success
+                else:
+                    raise  # Re-raise other errors
 
             log.info(
                 f"Synced read status from Telegram: chat={read_event.chat_id}, "

@@ -141,7 +141,7 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
             from app.chat.commands import ProcessTelegramMessageCommand
             from app.chat.queries import GetChatByTelegramIdQuery
             from app.infra.event_store.kurrentdb_event_store import ConcurrencyError
-            import uuid
+            from app.utils.uuid_utils import generate_uuid
 
             async def handle_incoming_telegram_message(msg: IncomingMessage):
                 """Handle incoming message from Telegram MTProto and dispatch to Chat domain"""
@@ -258,7 +258,7 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
                         try:
                             command = ProcessTelegramMessageCommand(
                                 chat_id=chat_detail.id,
-                                message_id=uuid.uuid4(),  # New UUID for each retry
+                                message_id=generate_uuid(),  # New UUIDv7 for each retry
                                 telegram_message_id=msg.message_id,
                                 telegram_chat_id=normalized_chat_id,  # For deduplication lookup
                                 telegram_user_id=msg.sender_id,

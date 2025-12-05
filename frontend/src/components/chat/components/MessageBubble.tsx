@@ -16,7 +16,10 @@ import {
   FileAudio,
   X,
   ExternalLink,
-  Copy
+  Copy,
+  AlertCircle,
+  RotateCcw,
+  Trash2,
 } from 'lucide-react';
 import { OptimizedImage } from './OptimizedImage';
 import { ImageMessageBubble } from './ImageMessageBubble';
@@ -35,7 +38,11 @@ import { ReplyMessageBubble } from './ReplyMessageBubble';
 import { avatarCache } from '@/utils/avatarCache';
 
 interface MessageBubbleProps {
-  message: Message;
+  message: Message & {
+    _failed?: boolean;
+    _error?: string;
+    _stableKey?: string;
+  };
   isOwn: boolean;
   isSending?: boolean;
   currentUser?: {
@@ -46,6 +53,8 @@ interface MessageBubbleProps {
   };
   onReply?: (message: Message) => void;
   onDelete?: (messageId: string) => void;
+  onRetry?: (messageId: string) => void;
+  onDiscard?: (messageId: string) => void;
   className?: string;
 }
 
@@ -56,8 +65,14 @@ export function MessageBubble({
   currentUser,
   onReply,
   onDelete,
+  onRetry,
+  onDiscard,
   className = ''
 }: MessageBubbleProps) {
+  // Check for failed state
+  const isFailed = !!(message as any)._failed;
+  const errorMessage = (message as any)._error;
+  const messageKey = (message as any)._stableKey || message.id;
   const { options } = useChatDisplayOptions();
   const { isLightTheme } = usePlatform();
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
@@ -654,6 +669,7 @@ export function MessageBubble({
     const isReadOnTelegram = !!message.telegram_read_at;
     const isRead = isReadByWeb || isReadOnTelegram;
 
+
     // Message is "delivered to Telegram" when it has telegram_message_id
     // (backend emits MessageSyncedToTelegram event after successful Telegram API call)
     const isDeliveredToTelegram = !!message.telegram_message_id;
@@ -663,7 +679,40 @@ export function MessageBubble({
 
     // Status element with WhatsApp/Telegram-style checkmarks
     const statusEl = isOwn ? (
-      isSending ? (
+      isFailed ? (
+        // FAILED - red error icon with retry/discard actions
+        <div className="flex items-center gap-1">
+          <AlertCircle
+            size={16}
+            className="text-red-500"
+            strokeWidth={2}
+          />
+          {onRetry && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRetry(messageKey);
+              }}
+              className="p-0.5 hover:bg-red-100 rounded transition-colors"
+              title="Retry sending"
+            >
+              <RotateCcw size={14} className="text-red-500" />
+            </button>
+          )}
+          {onDiscard && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDiscard(messageKey);
+              }}
+              className="p-0.5 hover:bg-red-100 rounded transition-colors"
+              title="Discard message"
+            >
+              <Trash2 size={14} className="text-red-400" />
+            </button>
+          )}
+        </div>
+      ) : isSending ? (
         // Sending - single gray checkmark with low opacity
         <Check
           size={16}
@@ -722,10 +771,17 @@ export function MessageBubble({
     }
 
     return (
-      <div className="flex items-center gap-1 text-xs text-gray-400">
-        {editedEl}
-        {timeEl}
-        {statusEl}
+      <div className="flex flex-col items-end gap-0.5">
+        <div className="flex items-center gap-1 text-xs text-gray-400">
+          {editedEl}
+          {timeEl}
+          {statusEl}
+        </div>
+        {isFailed && errorMessage && (
+          <div className="text-[10px] text-red-400 max-w-[200px] truncate" title={errorMessage}>
+            {errorMessage}
+          </div>
+        )}
       </div>
     );
   };
@@ -1090,9 +1146,11 @@ export function MessageBubble({
                   ? 'inline-block w-auto'
                   : 'max-w-[66.666%] min-w-[140px]'
                 }
-                ${isOwn
-                  ? `bg-accent-red/20 ${isLightTheme ? 'text-gray-600' : 'text-white'} rounded-br-md border border-accent-red/30 group-hover:bg-accent-red/25`
-                  : 'bg-[hsl(var(--light-gray))] text-white rounded-bl-md border border-white/10 group-hover:bg-[hsl(var(--light-gray))]/80'
+                ${isFailed
+                  ? 'bg-red-500/10 border-2 border-red-500/50 opacity-80'
+                  : isOwn
+                    ? `bg-accent-red/20 ${isLightTheme ? 'text-gray-600' : 'text-white'} rounded-br-md border border-accent-red/30 group-hover:bg-accent-red/25`
+                    : 'bg-[hsl(var(--light-gray))] text-white rounded-bl-md border border-white/10 group-hover:bg-[hsl(var(--light-gray))]/80'
                 }
                 transition-colors duration-150
               `}

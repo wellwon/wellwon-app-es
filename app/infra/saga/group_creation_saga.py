@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import uuid
+from uuid import UUID
 import asyncio
 import logging
 from typing import Dict, Any, List, Optional
@@ -14,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 
 from app.infra.saga.saga_manager import BaseSaga, SagaStep
 from app.config.saga_config import saga_config
+from app.utils.uuid_utils import generate_uuid, generate_event_id
 
 log = logging.getLogger("wellwon.saga.group_creation")
 
@@ -158,7 +160,7 @@ class GroupCreationSaga(BaseSaga):
         try:
             from app.chat.commands import CreateChatCommand
 
-            chat_id = uuid.uuid4()
+            chat_id = generate_uuid()
             self._chat_id = chat_id
             self._linked_existing_chat = False
 
@@ -271,7 +273,7 @@ class GroupCreationSaga(BaseSaga):
             event_bus = context.get('event_bus')
             if event_bus:
                 await event_bus.publish("saga.compensation", {
-                    "event_id": str(uuid.uuid4()),
+                    "event_id": str(generate_uuid()),
                     "event_type": "TelegramGroupCompensationRequired",
                     "saga_id": str(self.saga_id),
                     "telegram_group_id": self._telegram_group_id,

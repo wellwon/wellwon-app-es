@@ -23,9 +23,11 @@ import logging
 import os
 import socket
 import time
-import uuid
+from uuid import UUID
 from datetime import datetime, timezone
 from pathlib import Path
+
+from app.utils.uuid_utils import generate_event_id
 from typing import Optional, Dict, Any, Callable, Awaitable, List
 from dataclasses import dataclass, field
 
@@ -483,7 +485,7 @@ class WorkerLifecycleManager:
 
         try:
             event_data = {
-                "event_id": str(uuid.uuid4()),
+                "event_id": generate_event_id(),
                 "event_type": event_type,
                 "worker_id": self.config.worker_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),

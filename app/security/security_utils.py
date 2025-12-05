@@ -9,12 +9,13 @@
 # =============================================================================
 
 import logging
-import uuid
+from uuid import UUID
 import time
 from typing import Optional, Tuple
 from app.common.enums.enums import CacheTTL
 
 from app.security.encryption import encrypt_data, decrypt_data
+from app.utils.uuid_utils import generate_uuid_hex
 
 _log = logging.getLogger("app.utils.security_utils")
 
@@ -33,7 +34,7 @@ def generate_access_token(user_id: str, environment: str, lifetime_seconds: int 
     if lifetime_seconds is None:
         lifetime_seconds = CacheTTL.ACCESS_TOKEN
     issued_at = int(time.time())
-    rand = uuid.uuid4().hex
+    rand = generate_uuid_hex()
     plaintext = f"{user_id}:{environment}:{issued_at}:{rand}:{lifetime_seconds}"
     return encrypt_data(plaintext)
 
@@ -42,7 +43,7 @@ def generate_refresh_token(user_id: str, environment: str) -> str:
     Generates a secure encrypted refresh token.
     Payload: user_id:environment:random
     """
-    rand = uuid.uuid4().hex
+    rand = generate_uuid_hex()
     plaintext = f"{user_id}:{environment}:{rand}"
     return encrypt_data(plaintext)
 

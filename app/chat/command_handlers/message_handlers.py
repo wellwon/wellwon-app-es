@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import TYPE_CHECKING, Optional, Tuple
 
 from app.chat.commands import (
@@ -37,9 +38,14 @@ class SendMessageHandler(BaseCommandHandler):
     Handle SendMessageCommand with bidirectional Telegram sync.
 
     When a message is sent from WellWon web:
-    1. Store in event store (WellWon DB)
-    2. Sync to Telegram if chat has telegram_chat_id (from aggregate state)
+    1. Check idempotency key (prevents duplicate messages on retry)
+    2. Store in event store (WellWon DB)
+    3. Sync to Telegram if chat has telegram_chat_id (from aggregate state)
     """
+
+    # Redis key prefix for idempotency
+    IDEMPOTENCY_PREFIX = "msg:idempotency:"
+    IDEMPOTENCY_TTL = 3600 * 24  # 24 hours
 
     def __init__(self, deps: 'HandlerDependencies'):
         super().__init__(
@@ -48,6 +54,7 @@ class SendMessageHandler(BaseCommandHandler):
             event_store=deps.event_store
         )
         self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
+        self.redis_client = getattr(deps, 'redis_client', None)
 
     async def handle(self, command: SendMessageCommand) -> Tuple[int, Optional[str]]:
         """
@@ -57,9 +64,39 @@ class SendMessageHandler(BaseCommandHandler):
             Tuple of (snowflake_id, client_temp_id) for response reconciliation.
             - snowflake_id: Server-generated permanent ID (int64)
             - client_temp_id: Echo back client's temp ID for optimistic UI reconciliation
+
+        Exactly-once delivery:
+            If idempotency_key is provided and was already processed,
+            returns the existing snowflake_id without creating a duplicate message.
         """
+        # Check idempotency key for exactly-once delivery
+        if command.idempotency_key and self.redis_client:
+            existing_id = await self._check_idempotency(command.idempotency_key)
+            if existing_id:
+                log.info(
+                    f"[IDEMPOTENCY] Duplicate request detected: key={command.idempotency_key}, "
+                    f"returning existing snowflake_id={existing_id}"
+                )
+                return (existing_id, command.client_temp_id)
+
         # Generate server-side Snowflake ID (Discord/Twitter pattern)
         snowflake_id = generate_snowflake_id()
+
+        # Store idempotency key -> snowflake_id mapping ATOMICALLY
+        # This prevents race conditions with concurrent requests
+        if command.idempotency_key and self.redis_client:
+            stored = await self._store_idempotency_atomic(command.idempotency_key, snowflake_id)
+            if not stored:
+                # Another request won the race - fetch their result
+                existing_id = await self._check_idempotency(command.idempotency_key)
+                if existing_id:
+                    log.info(
+                        f"[IDEMPOTENCY] Race condition resolved: key={command.idempotency_key}, "
+                        f"returning winner's snowflake_id={existing_id}"
+                    )
+                    return (existing_id, command.client_temp_id)
+                # If still no existing_id, proceed anyway (Redis inconsistency, rare)
+                log.warning(f"[IDEMPOTENCY] Race detected but no existing_id found, proceeding")
 
         log.info(
             f"Sending message to chat {command.chat_id} from {command.sender_id}, "
@@ -174,6 +211,52 @@ class SendMessageHandler(BaseCommandHandler):
         except Exception as e:
             # Don't fail the command if Telegram sync fails
             log.error(f"Error syncing message to Telegram: {e}")
+
+    async def _check_idempotency(self, idempotency_key: str) -> Optional[int]:
+        """Check if idempotency key was already processed, return existing snowflake_id."""
+        try:
+            key = f"{self.IDEMPOTENCY_PREFIX}{idempotency_key}"
+            result = await self.redis_client.get(key)
+            if result:
+                return int(result)
+            return None
+        except ValueError:
+            log.error(f"[IDEMPOTENCY] Invalid snowflake_id in cache for key={idempotency_key}")
+            return None
+        except Exception as e:
+            # Fail safe: proceed without dedup (may create duplicate, but service works)
+            log.error(f"[IDEMPOTENCY] Redis failure checking key: {e}")
+            return None
+
+    async def _store_idempotency_atomic(self, idempotency_key: str, snowflake_id: int) -> bool:
+        """
+        Store idempotency key -> snowflake_id mapping ATOMICALLY using SET NX.
+
+        Returns True if stored successfully (key was new).
+        Returns False if key already existed (another request won the race).
+
+        This prevents race conditions where two concurrent requests both pass
+        the idempotency check and create duplicate messages.
+        """
+        try:
+            key = f"{self.IDEMPOTENCY_PREFIX}{idempotency_key}"
+            # SET NX: Only set if key doesn't exist (atomic operation)
+            result = await self.redis_client.set(
+                key,
+                str(snowflake_id),
+                nx=True,  # CRITICAL: Only set if Not eXists
+                ex=self.IDEMPOTENCY_TTL
+            )
+            if result:
+                log.debug(f"[IDEMPOTENCY] Stored key={idempotency_key} -> snowflake_id={snowflake_id}")
+                return True
+            else:
+                log.info(f"[IDEMPOTENCY] Key already exists (race condition): {idempotency_key}")
+                return False
+        except Exception as e:
+            log.error(f"[IDEMPOTENCY] Failed to store key atomically: {e}")
+            # Fail safe: assume stored (may duplicate, but won't lose message)
+            return True
 
 
 @command_handler(EditMessageCommand)

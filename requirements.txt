@@ -185,4 +185,4 @@ cryptg>=0.4.0                     # C-based crypto for Telethon (10x speedup)
 # - Optional dependencies are commented out
 # - Uncomment optional dependencies as needed
 # - Version ranges allow minor updates while ensuring compatibility
-# =============================================================================
+# =============================================================================uuid7

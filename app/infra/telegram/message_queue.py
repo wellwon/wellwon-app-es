@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-import uuid
+from uuid import UUID
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
@@ -24,6 +24,7 @@ from typing import Optional, Dict, Any, List, Callable, Awaitable
 
 from app.config.logging_config import get_logger
 from app.config.telegram_config import get_telegram_config
+from app.utils.uuid_utils import generate_uuid_str
 
 log = get_logger("wellwon.telegram.message_queue")
 
@@ -52,7 +53,7 @@ class OutgoingMessage:
     Contains all information needed to send a message to Telegram.
     """
     # Message identification
-    message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    message_id: str = field(default_factory=generate_uuid_str)
     created_at: float = field(default_factory=time.time)
 
     # Telegram destination

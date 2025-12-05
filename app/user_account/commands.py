@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 from pydantic import Field, EmailStr, field_validator
-import uuid
+from uuid import UUID
 from typing import Optional
 
 from app.infra.cqrs.command_bus import Command
+from app.utils.uuid_utils import generate_uuid
 
 
 # -----------------------------------------------------------------------------
@@ -17,7 +18,7 @@ from app.infra.cqrs.command_bus import Command
 # -----------------------------------------------------------------------------
 class CreateUserAccountCommand(Command):
     """Command to create a new user account."""
-    user_id: uuid.UUID = Field(default_factory=uuid.uuid4, description="Generated user ID")
+    user_id: UUID = Field(default_factory=generate_uuid, description="Generated user ID (UUIDv7)")
     username: str = Field(..., min_length=3, max_length=50, description="Unique username")
     email: EmailStr = Field(..., description="User email address")
     password: str = Field(..., min_length=8, description="Plaintext password for hashing")
@@ -50,7 +51,7 @@ class AuthenticateUserCommand(Command):
 
 class ChangeUserPasswordCommand(Command):
     """Command to change a user's password."""
-    user_id: uuid.UUID
+    user_id: UUID
     current_password: str
     new_password: str = Field(..., min_length=8)
 
@@ -71,7 +72,7 @@ class DeleteUserAccountCommand(Command):
     Command to delete a user account.
     Triggers cascade deletion via saga orchestration.
     """
-    user_id: uuid.UUID
+    user_id: UUID
     grace_period: int = Field(
         default=0,
         ge=0,
@@ -87,7 +88,7 @@ class DeleteUserAccountCommand(Command):
 
 class VerifyUserEmailCommand(Command):
     """Command to verify user's email address."""
-    user_id: uuid.UUID
+    user_id: UUID
     verification_token: str
 
     # saga_id inherited from Command base class
@@ -98,7 +99,7 @@ class VerifyUserEmailCommand(Command):
 # -----------------------------------------------------------------------------
 class UpdateUserProfileCommand(Command):
     """Command to update user profile information (WellWon)."""
-    user_id: uuid.UUID
+    user_id: UUID
     first_name: Optional[str] = Field(None, max_length=100)
     last_name: Optional[str] = Field(None, max_length=100)
     avatar_url: Optional[str] = Field(None, max_length=500)
@@ -114,8 +115,8 @@ class UpdateUserProfileCommand(Command):
 # -----------------------------------------------------------------------------
 class UpdateUserAdminStatusCommand(Command):
     """Command for admin to update user status (active, developer, user_type, role)."""
-    user_id: uuid.UUID
-    admin_user_id: uuid.UUID  # The admin performing the action
+    user_id: UUID
+    admin_user_id: UUID  # The admin performing the action
     is_active: Optional[bool] = None
     is_developer: Optional[bool] = None
     user_type: Optional[str] = None  # ww_admin, client, etc.

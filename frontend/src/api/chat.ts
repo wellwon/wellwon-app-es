@@ -63,7 +63,10 @@ export interface Message {
   voice_duration: number | null;
   // Source
   source: string;
-  telegram_message_id: number | null;
+  // Telegram sync
+  telegram_message_id: number | null;  // Delivery status (double gray checkmark)
+  telegram_chat_id: number | null;
+  telegram_read_at: string | null;  // Read status (double blue checkmark)
   // Sender info (joined)
   sender_name: string | null;
   sender_avatar_url: string | null;
@@ -108,6 +111,7 @@ export interface UpdateChatRequest {
 
 export interface SendMessageRequest {
   client_temp_id?: string;  // Client temp ID for optimistic UI reconciliation
+  idempotency_key?: string; // For exactly-once delivery (prevents duplicates on retry)
   content: string;
   message_type?: string;
   reply_to_id?: string;  // Snowflake ID (string)

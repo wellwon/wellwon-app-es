@@ -15,11 +15,13 @@ Type definitions for WebSocket Event System:
 - SubscriptionStats: Subscription statistics
 """
 
-import uuid
+from uuid import UUID
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, Optional, Protocol, Set
+
+from app.utils.uuid_utils import generate_uuid_str
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -150,7 +152,7 @@ class EventHandler(Protocol):
 @dataclass
 class EventMetadata:
     """Metadata for events"""
-    event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    event_id: str = field(default_factory=lambda: generate_uuid_str())
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     version: int = 1
     priority: EventPriority = EventPriority.NORMAL
@@ -166,7 +168,7 @@ class EventMetadata:
 @dataclass
 class Subscription:
     """Represents an event subscription"""
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    id: str = field(default_factory=lambda: generate_uuid_str())
     subscriber_id: str = ""
     topics: Set[str] = field(default_factory=set)
     handler: EventHandler = None

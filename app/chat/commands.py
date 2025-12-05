@@ -7,11 +7,12 @@ from __future__ import annotations
 
 from typing import Optional, List, Dict, Any
 from pydantic import Field, field_validator
-import uuid
+from uuid import UUID
 from datetime import datetime
 
 from app.infra.cqrs.command_bus import Command
 from app.chat.enums import ChatType, ParticipantRole, MessageType
+from app.utils.uuid_utils import generate_uuid
 
 
 # =============================================================================
@@ -20,12 +21,12 @@ from app.chat.enums import ChatType, ParticipantRole, MessageType
 
 class CreateChatCommand(Command):
     """Create a new chat"""
-    chat_id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    chat_id: UUID = Field(default_factory=generate_uuid)
     name: Optional[str] = Field(None, max_length=255)
     chat_type: str = Field(default="direct", description="direct, group, or company")
-    created_by: uuid.UUID
-    company_id: Optional[uuid.UUID] = None
-    participant_ids: List[uuid.UUID] = Field(default_factory=list)
+    created_by: UUID
+    company_id: Optional[UUID] = None
+    participant_ids: List[UUID] = Field(default_factory=list)
     # Telegram integration
     telegram_supergroup_id: Optional[int] = None  # Telegram supergroup ID
     telegram_topic_id: Optional[int] = None
@@ -41,28 +42,28 @@ class CreateChatCommand(Command):
 
 class UpdateChatCommand(Command):
     """Update chat details"""
-    chat_id: uuid.UUID
+    chat_id: UUID
     name: Optional[str] = Field(None, max_length=255)
-    updated_by: uuid.UUID
+    updated_by: UUID
 
 
 class ArchiveChatCommand(Command):
     """Archive (soft delete) a chat"""
-    chat_id: uuid.UUID
-    archived_by: uuid.UUID
+    chat_id: UUID
+    archived_by: UUID
     reason: Optional[str] = Field(None, max_length=500)
 
 
 class RestoreChatCommand(Command):
     """Restore an archived chat"""
-    chat_id: uuid.UUID
-    restored_by: uuid.UUID
+    chat_id: UUID
+    restored_by: UUID
 
 
 class DeleteChatCommand(Command):
     """Hard delete a chat (permanent, removes from database)"""
-    chat_id: uuid.UUID
-    deleted_by: uuid.UUID
+    chat_id: UUID
+    deleted_by: UUID
     reason: Optional[str] = Field(None, max_length=500)
 
 
@@ -72,16 +73,16 @@ class DeleteChatCommand(Command):
 
 class LinkChatToCompanyCommand(Command):
     """Link an existing chat to a company (used by saga)"""
-    chat_id: uuid.UUID
-    company_id: uuid.UUID
+    chat_id: UUID
+    company_id: UUID
     telegram_supergroup_id: Optional[int] = None
-    linked_by: uuid.UUID
+    linked_by: UUID
 
 
 class UnlinkChatFromCompanyCommand(Command):
     """Unlink a chat from its company (used by saga compensation)"""
-    chat_id: uuid.UUID
-    unlinked_by: uuid.UUID
+    chat_id: UUID
+    unlinked_by: UUID
     reason: Optional[str] = Field(None, max_length=500)
 
 
@@ -91,10 +92,10 @@ class UnlinkChatFromCompanyCommand(Command):
 
 class AddParticipantCommand(Command):
     """Add participant to chat"""
-    chat_id: uuid.UUID
-    user_id: uuid.UUID
+    chat_id: UUID
+    user_id: UUID
     role: str = Field(default="member", description="member, admin, or observer")
-    added_by: Optional[uuid.UUID] = None
+    added_by: Optional[UUID] = None
 
     @field_validator('role')
     @classmethod
@@ -107,18 +108,18 @@ class AddParticipantCommand(Command):
 
 class RemoveParticipantCommand(Command):
     """Remove participant from chat"""
-    chat_id: uuid.UUID
-    user_id: uuid.UUID
-    removed_by: uuid.UUID
+    chat_id: UUID
+    user_id: UUID
+    removed_by: UUID
     reason: Optional[str] = None
 
 
 class ChangeParticipantRoleCommand(Command):
     """Change participant's role in chat"""
-    chat_id: uuid.UUID
-    user_id: uuid.UUID
+    chat_id: UUID
+    user_id: UUID
     new_role: str
-    changed_by: uuid.UUID
+    changed_by: UUID
 
     @field_validator('new_role')
     @classmethod
@@ -131,8 +132,8 @@ class ChangeParticipantRoleCommand(Command):
 
 class LeaveChatCommand(Command):
     """Leave chat voluntarily"""
-    chat_id: uuid.UUID
-    user_id: uuid.UUID
+    chat_id: UUID
+    user_id: UUID
 
 
 # =============================================================================
@@ -146,12 +147,13 @@ class SendMessageCommand(Command):
     ID Strategy (Industry Standard - Discord/Slack pattern):
     - client_temp_id: Optional client-generated UUID for optimistic UI reconciliation
     - snowflake_id: Server-generated Snowflake ID (set by handler, not client)
+    - idempotency_key: Optional UUID for exactly-once delivery (prevents duplicates on retry)
 
     The server generates the permanent snowflake_id, client_temp_id is only
     used to reconcile optimistic UI updates with server response.
     """
-    chat_id: uuid.UUID
-    sender_id: uuid.UUID
+    chat_id: UUID
+    sender_id: UUID
     content: str = Field(..., max_length=10000)
     message_type: str = Field(default="text", description="text, file, voice, image, system")
     reply_to_id: Optional[int] = None  # Snowflake ID of replied message
@@ -159,6 +161,11 @@ class SendMessageCommand(Command):
     client_temp_id: Optional[str] = Field(
         default=None,
         description="Client-generated temp ID for optimistic UI reconciliation"
+    )
+    # Idempotency key for exactly-once delivery (prevents duplicate messages on retry)
+    idempotency_key: Optional[str] = Field(
+        default=None,
+        description="Client-generated UUID for deduplication - if same key sent twice, return existing message"
     )
     # File attachments
     file_url: Optional[str] = None
@@ -184,9 +191,9 @@ class EditMessageCommand(Command):
 
     telegram_message_id should be enriched by the caller (router) before sending.
     """
-    message_id: uuid.UUID
-    chat_id: uuid.UUID
-    edited_by: uuid.UUID
+    message_id: UUID
+    chat_id: UUID
+    edited_by: UUID
     new_content: str = Field(..., max_length=10000)
     telegram_message_id: Optional[int] = None  # Enriched by router for Telegram sync
 
@@ -196,17 +203,17 @@ class DeleteMessageCommand(Command):
 
     telegram_message_id should be enriched by the caller (router) before sending.
     """
-    message_id: uuid.UUID
-    chat_id: uuid.UUID
-    deleted_by: uuid.UUID
+    message_id: UUID
+    chat_id: UUID
+    deleted_by: UUID
     telegram_message_id: Optional[int] = None  # Enriched by router for Telegram sync
 
 
 class MarkMessageAsReadCommand(Command):
     """Mark a single message as read"""
-    message_id: uuid.UUID
-    chat_id: uuid.UUID
-    user_id: uuid.UUID
+    message_id: UUID
+    chat_id: UUID
+    user_id: UUID
 
 
 class MarkMessagesAsReadCommand(Command):
@@ -220,8 +227,8 @@ class MarkMessagesAsReadCommand(Command):
         source: Origin of read event (web, telegram, api) - prevents sync loops
         telegram_message_id: Telegram message ID for syncing (enriched by router)
     """
-    chat_id: uuid.UUID
-    user_id: uuid.UUID
+    chat_id: UUID
+    user_id: UUID
     last_read_message_id: int  # Snowflake ID (bigint) - matches ScyllaDB schema
     source: str = Field(default="web", description="web, telegram, api - prevents sync loops")
     telegram_message_id: Optional[int] = None  # Enriched by router for Telegram sync
@@ -233,14 +240,14 @@ class MarkMessagesAsReadCommand(Command):
 
 class StartTypingCommand(Command):
     """Indicate user started typing"""
-    chat_id: uuid.UUID
-    user_id: uuid.UUID
+    chat_id: UUID
+    user_id: UUID
 
 
 class StopTypingCommand(Command):
     """Indicate user stopped typing"""
-    chat_id: uuid.UUID
-    user_id: uuid.UUID
+    chat_id: UUID
+    user_id: UUID
 
 
 # =============================================================================
@@ -249,10 +256,10 @@ class StopTypingCommand(Command):
 
 class LinkTelegramChatCommand(Command):
     """Link a Telegram chat to WellWon chat"""
-    chat_id: uuid.UUID
+    chat_id: UUID
     telegram_chat_id: int
     telegram_topic_id: Optional[int] = None
-    linked_by: uuid.UUID
+    linked_by: UUID
 
 
 class LinkChatToTelegramCommand(Command):
@@ -260,15 +267,15 @@ class LinkChatToTelegramCommand(Command):
     Link an existing WellWon chat to Telegram supergroup (used by saga).
     Creates a Telegram topic in the supergroup and updates the chat.
     """
-    chat_id: uuid.UUID
+    chat_id: UUID
     telegram_supergroup_id: int
-    linked_by: uuid.UUID
+    linked_by: UUID
 
 
 class UnlinkTelegramChatCommand(Command):
     """Unlink a Telegram chat from WellWon chat"""
-    chat_id: uuid.UUID
-    unlinked_by: uuid.UUID
+    chat_id: UUID
+    unlinked_by: UUID
 
 
 class ProcessTelegramMessageCommand(Command):
@@ -278,11 +285,11 @@ class ProcessTelegramMessageCommand(Command):
     Note: message_id (Snowflake) is generated by the handler, not provided by client.
     This follows Discord's pattern where server generates permanent IDs.
     """
-    chat_id: uuid.UUID
+    chat_id: UUID
     telegram_message_id: int
     telegram_chat_id: int  # Required for deduplication lookup
     telegram_user_id: int
-    sender_id: Optional[uuid.UUID] = None  # Mapped WellWon user if exists
+    sender_id: Optional[UUID] = None  # Mapped WellWon user if exists
     content: str
     message_type: str = Field(default="text")
     # File attachments
@@ -310,7 +317,7 @@ class UpdateMessageFileUrlCommand(Command):
     This enables instant message display while file processing happens in background.
     """
     message_id: int  # Snowflake ID (bigint) - matches ScyllaDB message_id
-    chat_id: uuid.UUID
+    chat_id: UUID
     new_file_url: str = Field(..., min_length=1)
     file_name: Optional[str] = None
     file_size: Optional[int] = None
