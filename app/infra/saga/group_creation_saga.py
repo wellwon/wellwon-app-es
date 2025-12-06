@@ -218,7 +218,7 @@ class GroupCreationSaga(BaseSaga):
         log.info(f"Saga {self.saga_id}: Creating Telegram group for company {company_name}")
 
         try:
-            # Get Telegram port from context (injected at saga start)
+            # Get Telegram port from context (injected at saga start, restored after Redis load)
             telegram_port: 'TelegramGroupsPort' = context.get('telegram_groups_port')
             if not telegram_port:
                 raise RuntimeError("telegram_groups_port not provided in saga context")

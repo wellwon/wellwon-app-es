@@ -366,6 +366,13 @@ class SagaManager:
                 state.context['projection_rebuilder'] = self._parent_service.projection_rebuilder
                 log.debug(f"Restored ProjectionRebuilder for saga {state.saga_id}")
 
+        # CRITICAL FIX: Restore telegram_groups_port from parent service
+        # Port is not serializable to JSON, so must be restored after loading from Redis
+        if self._parent_service and hasattr(self._parent_service, '_telegram_groups_port'):
+            if self._parent_service._telegram_groups_port and not state.context.get('telegram_groups_port'):
+                state.context['telegram_groups_port'] = self._parent_service._telegram_groups_port
+                log.debug(f"Restored telegram_groups_port for saga {state.saga_id}")
+
         # Validate restored context
         if not state.context.get('command_bus'):
             raise RuntimeError("Failed to restore command bus to saga context")

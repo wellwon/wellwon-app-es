@@ -292,13 +292,12 @@ const SidebarChat: React.FC = () => {
       id: chat.id,
       title: chat.name || 'Новый чат',
       updatedAt: validDate,
-      unreadCount: 0,
-      company_id: chat.company_id, // Add company_id for CompanyBadge
-      // Note: unread messages count to be implemented
+      unreadCount: chat.unread_count || 0,
+      company_id: chat.company_id,
       dealInfo: chat.metadata?.dealNumber ? {
         dealNumber: chat.metadata.dealNumber
       } : undefined,
-      telegram_supergroup_id: chat.telegram_supergroup_id // Для фильтрации
+      telegram_supergroup_id: chat.telegram_supergroup_id
     };
   }), [chats]);
 
@@ -781,7 +780,7 @@ const SidebarChat: React.FC = () => {
 
         {/* Контент в зависимости от активного режима */}
         <div className="flex-1 min-h-0">
-          <ScrollArea className="h-full pt-4">
+          <ScrollArea className="h-full pt-3">
             {(activeMode === 'personal' || (!groupsPanelCollapsed || selectedSupergroupId !== null)) && (
               <>
                 {initialLoading ? (

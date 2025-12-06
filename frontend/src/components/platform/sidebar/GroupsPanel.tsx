@@ -41,8 +41,19 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
   onModeChange
 }) => {
   const queryClient = useQueryClient();
-  const { setScopeBySupergroup } = useRealtimeChatContext();
+  const { setScopeBySupergroup, chats } = useRealtimeChatContext();
   const { profile } = useAuth();
+
+  // Calculate unread count per supergroup (sum of all chats' unread_count)
+  const groupUnreadCounts = React.useMemo(() => {
+    const counts: Record<number, number> = {};
+    chats.forEach((chat) => {
+      if (chat.telegram_supergroup_id && (chat.unread_count || 0) > 0) {
+        counts[chat.telegram_supergroup_id] = (counts[chat.telegram_supergroup_id] || 0) + (chat.unread_count || 0);
+      }
+    });
+    return counts;
+  }, [chats]);
 
   // Check if user is admin - only admins can delete, regular users can only archive
   // role = 'admin' | 'user' - for permissions
@@ -165,24 +176,30 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
 
       // Если есть companyId, загружаем данные компании
       if (companyId) {
-        const companyData = await companyApi.getCompanyById(String(companyId));
-        
-        if (companyData) {
-          setPreloadedCompanyData({
-            id: companyData.id,
-            vat: companyData.vat || '',
-            kpp: companyData.kpp || '',
-            ogrn: companyData.ogrn || '',
-            company_name: companyData.name || '',
-            email: companyData.email || '',
-            phone: companyData.phone || '',
-            street: companyData.street || '',
-            city: companyData.city || '',
-            postal_code: companyData.postal_code || '',
-            country: companyData.country || '',
-            director: companyData.director || '',
-            company_type: companyData.company_type || 'company'
-          });
+        try {
+          const companyData = await companyApi.getCompanyById(String(companyId));
+
+          if (companyData) {
+            setPreloadedCompanyData({
+              id: companyData.id,
+              vat: companyData.vat || '',
+              kpp: companyData.kpp || '',
+              ogrn: companyData.ogrn || '',
+              company_name: companyData.name || '',
+              email: companyData.email || '',
+              phone: companyData.phone || '',
+              street: companyData.street || '',
+              city: companyData.city || '',
+              postal_code: companyData.postal_code || '',
+              country: companyData.country || '',
+              director: companyData.director || '',
+              company_type: companyData.company_type || 'company'
+            });
+          }
+        } catch (error) {
+          // Company may have been deleted (e.g. saga compensation)
+          logger.warn('Company not found, may have been deleted', { companyId, error });
+          setPreloadedCompanyData(null);
         }
       } else {
         // Устанавливаем пустые данные компании для создания новой
@@ -732,42 +749,57 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
         </div>
         
         <div className="flex-1 flex flex-col items-center py-3 space-y-3">
-          {filteredSupergroups.map((group) => (
-            <div
-              key={group.company_id || group.id}
-                     onClick={() => {
-                       // Toggle: if already selected, deselect (show "Все чаты")
-                       if (selectedSupergroupId === group.id) {
-                         onSelectGroup(null);
-                       } else {
-                         onSelectGroup(group.id);
-                         setScopeBySupergroup(group.id, group.company_id);
-                       }
-                     }}
-              title={group.title}
-              className={`
-                ${selectedSupergroupId === group.id ? 'w-14 h-14' : 'w-12 h-12'}
-                flex items-center justify-center rounded-md cursor-pointer overflow-hidden
-                backdrop-blur-sm border transition-all duration-200
-                ${selectedSupergroupId === group.id
-                  ? 'bg-primary/20 border-primary/30 text-primary'
-                  : 'bg-medium-gray/60 text-gray-400 border-white/10 hover:text-white hover:bg-medium-gray/80 hover:border-white/20'
-                }
-              `}
-            >
-              {group.company_logo ? (
-                <OptimizedImage
-                  src={group.company_logo}
-                  alt={group.title || 'Company logo'}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <span className="font-medium text-sm">
-                  {group.title.charAt(0).toUpperCase()}
-                </span>
-              )}
-            </div>
-          ))}
+          {filteredSupergroups.map((group) => {
+            const unreadCount = groupUnreadCounts[group.id] || 0;
+            return (
+              <div
+                key={group.company_id || group.id}
+                className="relative"
+              >
+                <div
+                  onClick={() => {
+                    // Toggle: if already selected, deselect (show "Все чаты")
+                    if (selectedSupergroupId === group.id) {
+                      onSelectGroup(null);
+                    } else {
+                      onSelectGroup(group.id);
+                      setScopeBySupergroup(group.id, group.company_id);
+                    }
+                  }}
+                  title={group.title}
+                  className={`
+                    ${selectedSupergroupId === group.id ? 'w-14 h-14' : 'w-12 h-12'}
+                    flex items-center justify-center rounded-md cursor-pointer overflow-hidden
+                    backdrop-blur-sm border transition-all duration-200
+                    ${selectedSupergroupId === group.id
+                      ? 'bg-primary/20 border-primary/30 text-primary'
+                      : 'bg-medium-gray/60 text-gray-400 border-white/10 hover:text-white hover:bg-medium-gray/80 hover:border-white/20'
+                    }
+                  `}
+                >
+                  {group.company_logo ? (
+                    <OptimizedImage
+                      src={group.company_logo}
+                      alt={group.title || 'Company logo'}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="font-medium text-sm">
+                      {group.title.charAt(0).toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                {/* Unread badge - bottom right */}
+                {unreadCount > 0 && (
+                  <div className="absolute -bottom-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 bg-accent-red rounded-full flex items-center justify-center shadow-lg">
+                    <span className="text-white text-[9px] font-bold">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
         
         {/* Модальные окна - рендерятся и в collapsed режиме */}
@@ -914,12 +946,13 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
             filteredSupergroups.map((group) => {
               const isExpanded = expandedGroupId === group.id;
               const companyBalance = group.company_id ? companyBalances[group.company_id] : null;
+              const unreadCount = groupUnreadCounts[group.id] || 0;
 
               return (
                 <div
                   key={group.company_id || group.id}
                   className={`
-                    border rounded-lg overflow-hidden
+                    relative border rounded-lg overflow-hidden
                     ${selectedSupergroupId === group.id
                       ? 'bg-white/5 border-white/15'
                       : 'bg-[#2e2e33] border-white/10 hover:bg-[#3a3a40] hover:border-white/20'
@@ -953,12 +986,20 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
                         }
                       }
                     }}
-                    className={`w-full px-3 py-2.5 cursor-pointer transition-colors rounded-lg ${
+                    className={`relative w-full px-3 py-2.5 cursor-pointer transition-colors rounded-lg ${
                       selectedSupergroupId === group.id
                         ? 'text-white bg-white/5'
                         : 'text-gray-300 hover:bg-white/10 hover:text-white'
                     }`}
                   >
+                    {/* Unread badge - bottom right of header tile */}
+                    {unreadCount > 0 && (
+                      <div className="absolute bottom-1.5 right-2 min-w-[16px] h-[16px] px-1 bg-accent-red rounded-full flex items-center justify-center shadow-lg z-10">
+                        <span className="text-white text-[9px] font-bold">
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex items-center gap-3 w-full">
                       {/* Иконка группы */}
                       <div className="flex-shrink-0 w-10 h-10 bg-primary/20 rounded-md flex items-center justify-center overflow-hidden">

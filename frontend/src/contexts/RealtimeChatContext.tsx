@@ -126,6 +126,10 @@ export const RealtimeChatProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setActiveChatId(chatId);
     setReplyingTo(null);
 
+    // OPTIMISTIC: Reset unread_count immediately when chat is selected
+    // This makes the badge disappear instantly without waiting for API
+    window.dispatchEvent(new CustomEvent('messagesRead', { detail: { chat_id: chatId } }));
+
     if (updateUrl && platform.setActiveSection) {
       platform.setActiveSection('chat', chatId);
     }
@@ -151,10 +155,31 @@ export const RealtimeChatProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setIsCreatingChat(true);
 
     try {
-      // CRITICAL: Validate company_id when creating chat in supergroup context
-      // If a supergroup is selected but no company_id, warn and log
+      // DEBUG: Log raw chatScope object
+      console.log('[CREATE-CHAT] Raw chatScope:', JSON.stringify(chatScope, null, 2));
+
+      // Get supergroup and company from chatScope
+      // chatScope.type can be 'supergroup' or 'company'
       const supergroupId = chatScope.type === 'supergroup' ? chatScope.supergroupId : undefined;
       const companyId = chatScope.companyId || undefined;
+
+      // Debug logging
+      console.log('[CREATE-CHAT] Extracted values:', {
+        chatScopeType: chatScope.type,
+        chatScopeSupergroupId: chatScope.supergroupId,
+        chatScopeCompanyId: chatScope.companyId,
+        resolvedSupergroupId: supergroupId,
+        resolvedCompanyId: companyId,
+      });
+
+      logger.info('Creating chat with scope', {
+        chatScopeType: chatScope.type,
+        chatScopeSupergroupId: chatScope.type === 'supergroup' ? chatScope.supergroupId : null,
+        chatScopeCompanyId: chatScope.companyId,
+        resolvedSupergroupId: supergroupId,
+        resolvedCompanyId: companyId,
+        component: 'RealtimeChatContext.createChat'
+      });
 
       if (supergroupId && !companyId) {
         logger.warn('Creating chat with supergroup but no company_id! This indicates scope sync issue', {
@@ -488,8 +513,10 @@ export const RealtimeChatProvider: React.FC<{ children: React.ReactNode }> = ({ 
     loadHistoryUntilMessage,
 
     // Chat scope
-    setScopeBySupergroup: (supergroup: any) => {
-      setScopeBySupergroup(supergroup.id, supergroup.company_id);
+    // NOTE: This accepts (supergroupId, companyId) directly - NOT an object
+    // GroupsPanel and SidebarChat call this with two arguments
+    setScopeBySupergroup: (supergroupId: number, companyId: string | null) => {
+      setScopeBySupergroup(supergroupId, companyId);
     },
     setScopeByCompany: (companyId: string | null) => {
       setScopeByCompany(companyId);

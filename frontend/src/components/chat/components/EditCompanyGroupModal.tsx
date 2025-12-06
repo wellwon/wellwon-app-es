@@ -199,11 +199,16 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
     setIsLoading(true);
     try {
       // Загружаем данные компании и супергруппы параллельно
-      const [companyData, supergroupData] = await Promise.all([
-        companyApi.getCompanyById(companyId as number),
+      // Company may not exist if saga compensation deleted it
+      const [companyResult, supergroupData] = await Promise.all([
+        companyApi.getCompanyById(companyId as number).catch((err) => {
+          logger.warn('Company not found, may have been deleted', { companyId, error: err });
+          return null;
+        }),
         telegramApi.getGroupInfo(supergroupId)
       ]);
-      
+      const companyData = companyResult;
+
       if (companyData) {
         const loadedCompanyData = {
           id: companyData.id,

@@ -9,17 +9,17 @@ import PageLoader from '@/components/ui/PageLoader';
 
 const PlatformPage = () => {
   return (
-    <PlatformErrorBoundary>
-      <LoadingOverlayProvider>
-        <PlatformProvider>
+    <LoadingOverlayProvider>
+      <PlatformProvider>
+        <PlatformErrorBoundary>
           <ProvidersWrapper>
             <Suspense fallback={<PageLoader />}>
               <PlatformLayout />
             </Suspense>
           </ProvidersWrapper>
-        </PlatformProvider>
-      </LoadingOverlayProvider>
-    </PlatformErrorBoundary>
+        </PlatformErrorBoundary>
+      </PlatformProvider>
+    </LoadingOverlayProvider>
   );
 };
 

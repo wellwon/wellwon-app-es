@@ -9,6 +9,7 @@ import uuid
 from uuid import UUID
 import logging
 import asyncio
+from datetime import datetime, timezone
 from typing import Annotated, List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, UploadFile, File
@@ -195,6 +196,20 @@ class ChatResponse(BaseModel):
     """Generic chat response"""
     id: UUID
     message: str = "Success"
+
+
+class ChatCreatedResponse(BaseModel):
+    """Full chat data returned on creation - eliminates need for subsequent GET"""
+    id: UUID
+    name: Optional[str] = None
+    chat_type: str
+    company_id: Optional[UUID] = None
+    telegram_supergroup_id: Optional[int] = None
+    telegram_topic_id: Optional[int] = None
+    created_by: UUID
+    created_at: datetime
+    is_active: bool = True
+    participant_count: int = 1
 
 
 class MessageResponse(BaseModel):
@@ -769,10 +784,15 @@ async def mark_messages_as_read(
         )
         if message:
             telegram_message_id = message.telegram_message_id
-            log.debug(f"Enriched mark as read with telegram_message_id={telegram_message_id}")
+            log.info(
+                f"[MARK_AS_READ] Enriched: chat_id={chat_id}, snowflake_id={snowflake_id}, "
+                f"telegram_message_id={telegram_message_id}"
+            )
+        else:
+            log.warning(f"[MARK_AS_READ] Message not found: chat_id={chat_id}, snowflake_id={snowflake_id}")
     except Exception as e:
         # Don't fail mark as read if enrichment fails - just skip Telegram sync
-        log.debug(f"Could not enrich telegram_message_id: {e}")
+        log.warning(f"[MARK_AS_READ] Could not enrich telegram_message_id: {e}")
 
     for attempt in range(max_retries):
         try:

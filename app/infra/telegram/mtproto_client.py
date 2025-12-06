@@ -2247,18 +2247,24 @@ class TelegramMTProtoClient:
             peer_id = TelegramMTProtoClient._to_telegram_peer_id(group_id)
             group = await self._client.get_entity(peer_id)
 
-            log.info(f"[READ_SYNC] Marking topic messages read: group={group_id}, topic={topic_id}, max_id={max_id}")
+            log.info(
+                f"[READ_SYNC] Marking topic messages read: group={group_id}, topic={topic_id}, max_id={max_id}, "
+                f"entity_type={type(group).__name__}"
+            )
 
-            # ReadDiscussionRequest marks messages in a forum topic as read
-            # msg_id = topic_id (the thread's root message ID)
-            # read_max_id = the max message ID to mark as read
-            result = await self._client(ReadDiscussionRequest(
-                peer=group,
-                msg_id=topic_id,  # Topic's thread message ID
-                read_max_id=max_id if max_id > 0 else 2147483647,  # Max int for "all"
+            # Try channels.readHistory first (works for supergroups)
+            # ReadDiscussionRequest is for discussion threads (comments on channel posts),
+            # not for forum topics in supergroups
+            from telethon.tl.functions.channels import ReadHistoryRequest as ChannelReadHistoryRequest
+
+            # For forums, we need to use channels.readHistory which marks the channel as read
+            # Forum topics share the same "read" state as the main group in Telegram's model
+            await self._client(ChannelReadHistoryRequest(
+                channel=group,
+                max_id=max_id if max_id > 0 else 0,
             ))
 
-            log.info(f"[READ_SYNC] ReadDiscussionRequest result: {result}")
+            log.info(f"[READ_SYNC] channels.ReadHistoryRequest completed for group={group_id}, max_id={max_id}")
             log.info(f"Marked messages as read in group {group_id} topic {topic_id} up to {max_id}")
             return True
 

@@ -412,14 +412,19 @@ export function useChatList(options: UseChatListOptions = {}) {
       logger.info('WSE: Chat deleted, all caches cleared', { chatId });
     };
 
-    // OPTIMISTIC UPDATE: Update last_message when message is created
+    // OPTIMISTIC UPDATE: Update last_message and unread_count when message is created
     const handleMessageCreated = (event: CustomEvent) => {
       const message = event.detail;
       const chatId = message.chat_id;
+      const senderId = message.sender_id;
 
       if (!chatId) return;
 
-      logger.debug('WSE: Message created, updating chat last_message', { chatId });
+      // Get active chat from Zustand to know if user is viewing this chat
+      const activeChatId = useChatUIStore.getState().activeChatId;
+      const isViewingChat = activeChatId === chatId;
+
+      logger.debug('WSE: Message created, updating chat', { chatId, isViewingChat, senderId });
 
       queryClient.setQueryData(
         chatKeys.list({ includeArchived, limit }),
@@ -431,8 +436,54 @@ export function useChatList(options: UseChatListOptions = {}) {
                   ...chat,
                   last_message_at: message.created_at || new Date().toISOString(),
                   last_message_content: message.content || message.text || null,
-                  last_message_sender_id: message.sender_id || null,
+                  last_message_sender_id: senderId || null,
+                  // Increment unread_count if:
+                  // 1. User is NOT viewing this chat
+                  // 2. Message is NOT from current user (senderId check happens on backend)
+                  unread_count: isViewingChat
+                    ? (chat.unread_count || 0)  // Don't increment if viewing
+                    : (chat.unread_count || 0) + 1,  // Increment if not viewing
                 }
+              : chat
+          );
+        }
+      );
+
+      syncZustandCache();
+    };
+
+    // Handle messages marked as read - reset unread_count
+    // IMPORTANT: Only reset if current user is viewing this chat or event is from current user
+    const handleMessagesRead = (event: CustomEvent) => {
+      const data = event.detail;
+      const chatId = data.chat_id;
+      const readByUserId = data.user_id; // Who marked as read
+
+      if (!chatId) return;
+
+      // Get current user and active chat
+      const activeChatId = useChatUIStore.getState().activeChatId;
+      const isViewingChat = activeChatId === chatId;
+
+      // If event has user_id and it's NOT from someone else reading,
+      // OR if user is currently viewing this chat - then reset unread
+      // If no user_id in event (local optimistic), always reset
+      const shouldResetUnread = isViewingChat || !readByUserId;
+
+      if (!shouldResetUnread) {
+        logger.debug('WSE: Ignoring messagesRead from other user', { chatId, readByUserId });
+        return;
+      }
+
+      logger.debug('WSE: Messages marked as read, resetting unread_count', { chatId, isViewingChat });
+
+      queryClient.setQueryData(
+        chatKeys.list({ includeArchived, limit }),
+        (oldData: ChatListItem[] | undefined) => {
+          if (!oldData) return oldData;
+          return oldData.map((chat) =>
+            chat.id === chatId
+              ? { ...chat, unread_count: 0 }
               : chat
           );
         }
@@ -685,6 +736,7 @@ export function useChatList(options: UseChatListOptions = {}) {
     window.addEventListener('chatArchived', handleChatArchived as EventListener);
     window.addEventListener('chatDeleted', handleChatDeleted as EventListener);
     window.addEventListener('messageCreated', handleMessageCreated as EventListener);
+    window.addEventListener('messagesRead', handleMessagesRead as EventListener);
     window.addEventListener('chatTelegramLinked', handleChatTelegramLinked as EventListener);
     window.addEventListener('groupDeletionCompleted', handleGroupDeletionCompleted as EventListener);
     window.addEventListener('groupCreationCompleted', handleGroupCreationCompleted as EventListener);
@@ -697,6 +749,7 @@ export function useChatList(options: UseChatListOptions = {}) {
       window.removeEventListener('chatArchived', handleChatArchived as EventListener);
       window.removeEventListener('chatDeleted', handleChatDeleted as EventListener);
       window.removeEventListener('messageCreated', handleMessageCreated as EventListener);
+      window.removeEventListener('messagesRead', handleMessagesRead as EventListener);
       window.removeEventListener('chatTelegramLinked', handleChatTelegramLinked as EventListener);
       window.removeEventListener('groupDeletionCompleted', handleGroupDeletionCompleted as EventListener);
       window.removeEventListener('groupCreationCompleted', handleGroupCreationCompleted as EventListener);

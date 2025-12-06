@@ -129,12 +129,14 @@ export function MessageBubble({
   
 
   // Helper function to get Telegram user display name (inlined from service)
+  // Priority: first_name + last_name > username > fallback
   const getTelegramUserDisplayName = (userData: any): string => {
     if (!userData) return 'Пользователь';
     const firstName = userData.first_name || '';
     const lastName = userData.last_name || '';
     const fullName = `${firstName} ${lastName}`.trim();
-    return userData.username || fullName || 'Пользователь';
+    // Prefer full name over username for display
+    return fullName || userData.username || 'Пользователь';
   };
 
   // Определяем имя отправителя с учетом опций отображения

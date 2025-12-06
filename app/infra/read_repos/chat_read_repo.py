@@ -308,7 +308,7 @@ class ChatReadRepo:
                 c.id, c.name, c.type as chat_type, c.participant_count,
                 c.last_message_at, c.last_message_content, c.is_active,
                 c.telegram_supergroup_id, c.telegram_topic_id, c.company_id,
-                0 as unread_count,
+                COALESCE(cp.unread_count, 0) as unread_count,
                 CASE
                     WHEN c.type = 'direct' THEN other_user.full_name
                     ELSE NULL
@@ -672,3 +672,106 @@ class ChatReadRepo:
         )
 
         return [dict(row) for row in rows]
+
+    # =========================================================================
+    # Unread Count Operations
+    # =========================================================================
+
+    @staticmethod
+    async def get_unread_chats_count(user_id: uuid.UUID) -> int:
+        """
+        Get count of chats with unread messages for a user.
+
+        Used by:
+        - GET /chats/unread-count endpoint
+        - GetUnreadChatsCountQuery handler
+
+        Returns count of chats where unread_count > 0 for this user.
+        """
+        result = await pg_client.fetchval(
+            """
+            SELECT COUNT(*)
+            FROM chats c
+            INNER JOIN chat_participants cp ON c.id = cp.chat_id
+            WHERE cp.user_id = $1
+              AND cp.is_active = true
+              AND cp.unread_count > 0
+              AND c.is_active = true
+            """,
+            user_id
+        )
+        return result or 0
+
+    @staticmethod
+    async def increment_unread_count(
+        chat_id: uuid.UUID,
+        exclude_user_id: uuid.UUID,
+    ) -> None:
+        """
+        Increment unread_count for all participants EXCEPT the sender.
+
+        Called by MessageSent projector to mark message as unread
+        for all other participants in the chat.
+
+        Args:
+            chat_id: Chat where message was sent
+            exclude_user_id: User who sent the message (don't increment for them)
+        """
+        await pg_client.execute(
+            """
+            UPDATE chat_participants
+            SET unread_count = unread_count + 1
+            WHERE chat_id = $1
+              AND user_id != $2
+              AND is_active = true
+            """,
+            chat_id, exclude_user_id
+        )
+
+    @staticmethod
+    async def reset_unread_count(
+        chat_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        """
+        Reset unread_count to 0 when user reads messages.
+
+        Called by MessagesMarkedAsRead projector.
+
+        Args:
+            chat_id: Chat where messages were read
+            user_id: User who read the messages
+        """
+        await pg_client.execute(
+            """
+            UPDATE chat_participants
+            SET unread_count = 0, last_read_at = NOW()
+            WHERE chat_id = $1 AND user_id = $2
+            """,
+            chat_id, user_id
+        )
+
+    @staticmethod
+    async def get_participant_unread_count(
+        chat_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> int:
+        """
+        Get unread count for a specific participant in a chat.
+
+        Args:
+            chat_id: Chat ID
+            user_id: User ID
+
+        Returns:
+            Number of unread messages for this user in this chat
+        """
+        result = await pg_client.fetchval(
+            """
+            SELECT COALESCE(unread_count, 0)
+            FROM chat_participants
+            WHERE chat_id = $1 AND user_id = $2
+            """,
+            chat_id, user_id
+        )
+        return result or 0

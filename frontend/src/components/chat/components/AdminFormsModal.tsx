@@ -489,8 +489,9 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
         telegram_group_description: telegramGroupData.description || `Рабочая группа для ${companyFormData.company_name}`,
         // Auto-create company chat theme
         create_chat: true,
-        // If we have an active chat, link it instead of creating new
-        link_chat_id: activeChat?.id || undefined,
+        // If we have an active chat that is still active, link it instead of creating new
+        // Don't pass deleted/inactive chats - saga will fail trying to link them
+        link_chat_id: (activeChat?.id && activeChat?.is_active) ? activeChat.id : undefined,
       };
 
       logger.debug('Prepared company data with saga options', {
@@ -756,28 +757,43 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
 
           {showingProcess && <div className="w-full bg-glass-surface/30 border border-glass-border rounded-lg p-6">
               <div className="flex flex-col items-center space-y-6">
-                {/* Заголовок */}
-                <div className="text-center">
-                  <h3 className="text-lg font-semibold text-foreground mb-2">
-                    Создание компании
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    Пожалуйста, подождите...
-                  </p>
-                </div>
+                {/* Заголовок и прогресс-бар - скрываем когда все шаги завершены */}
+                {(() => {
+                  const allStepsComplete = stepStatuses.length > 0 && stepStatuses.every(s => s === 'success' || s === 'error');
+                  const hasError = stepStatuses.some(s => s === 'error');
 
-                {/* Прогресс бар */}
-                <div className="w-full">
-                    <div className={`rounded-full h-2 mb-4 ${
-                      stepStatuses.some(s => s === 'error') ? 'bg-accent-red/20' : 'bg-secondary'
-                    }`}>
-                     <div className={`h-2 rounded-full transition-all duration-500 ${
-                       stepStatuses.some(s => s === 'error') ? 'bg-accent-red' : 'bg-accent-blue'
-                     }`} style={{
-                   width: `${stepStatuses.filter(s => s === 'success').length / processSteps.length * 100}%`
-                 }} />
-                  </div>
-                </div>
+                  if (allStepsComplete && !hasError) {
+                    // Все шаги успешны - не показываем заголовок и прогресс
+                    return null;
+                  }
+
+                  return (
+                    <>
+                      {/* Заголовок */}
+                      <div className="text-center">
+                        <h3 className="text-lg font-semibold text-foreground mb-2">
+                          Создание компании
+                        </h3>
+                        <p className="text-sm text-muted-foreground">
+                          {hasError ? 'Произошла ошибка' : 'Пожалуйста, подождите...'}
+                        </p>
+                      </div>
+
+                      {/* Прогресс бар */}
+                      <div className="w-full">
+                        <div className={`rounded-full h-2 mb-4 ${
+                          hasError ? 'bg-accent-red/20' : 'bg-secondary'
+                        }`}>
+                          <div className={`h-2 rounded-full transition-all duration-500 ${
+                            hasError ? 'bg-accent-red' : 'bg-accent-blue'
+                          }`} style={{
+                            width: `${stepStatuses.filter(s => s === 'success').length / processSteps.length * 100}%`
+                          }} />
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
 
                 {/* Этапы - первая карточка */}
                 <div className="w-full p-4 border border-border rounded-lg bg-card/50">

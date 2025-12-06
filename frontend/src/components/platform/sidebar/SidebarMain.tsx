@@ -49,9 +49,11 @@ const renderSection = (section: SectionConfig, activeSection: SectionId, setActi
           <Icon size={20} />
         </div>
         {section.badge && (
-          <Badge variant="destructive" className="absolute -top-1 -right-1 w-5 h-5 p-0 text-xs flex items-center justify-center bg-accent-red border-0 rounded-full text-white">
-            {section.badge}
-          </Badge>
+          <div className="absolute -bottom-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 bg-accent-red rounded-full flex items-center justify-center shadow-lg">
+            <span className="text-white text-[9px] font-bold">
+              {section.badge}
+            </span>
+          </div>
         )}
       </div>
     );
@@ -67,9 +69,11 @@ const renderSection = (section: SectionConfig, activeSection: SectionId, setActi
         <span className="font-medium text-sm">{section.label}</span>
       </div>
       {section.badge && (
-        <Badge variant="destructive" className="h-5 w-5 p-0 text-xs flex items-center justify-center bg-accent-red border-0">
-          {section.badge}
-        </Badge>
+        <div className="min-w-[16px] h-[16px] px-1 bg-accent-red rounded-full flex items-center justify-center shadow-lg">
+          <span className="text-white text-[9px] font-bold">
+            {section.badge}
+          </span>
+        </div>
       )}
     </div>
   );
@@ -138,17 +142,19 @@ const SidebarMain = () => {
   const shouldShowBadge = unreadCount > 0;
 
   // Добавляем бейджи для ungrouped секций
+  // NOTE: personal-chats badge disabled - will be repurposed later
   const ungroupedSectionsWithBadges = ungroupedSections.map(section => ({
     ...section,
-    badge: (section.id === 'chat' || section.id === 'personal-chats') && shouldShowBadge ? unreadCount : section.badge
+    badge: section.id === 'chat' && shouldShowBadge ? unreadCount : section.badge
   }));
 
   // Добавляем бейджи для секций в группах
+  // NOTE: personal-chats badge disabled - will be repurposed later
   const groupsWithBadges = availableGroups.map(group => ({
     ...group,
     sections: group.sections.map(section => ({
       ...section,
-      badge: (section.id === 'chat' || section.id === 'personal-chats') && shouldShowBadge ? unreadCount : section.badge
+      badge: section.id === 'chat' && shouldShowBadge ? unreadCount : section.badge
     }))
   }));
   return <div 

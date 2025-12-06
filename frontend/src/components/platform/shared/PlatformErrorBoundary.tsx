@@ -17,9 +17,6 @@ interface State {
 }
 
 class PlatformErrorBoundary extends Component<Props, State> {
-  private retryCount = 0;
-  private maxRetries = 3;
-
   constructor(props: Props) {
     super(props);
     this.state = {
@@ -46,33 +43,17 @@ class PlatformErrorBoundary extends Component<Props, State> {
     logger.error('Компонент упал с ошибкой', error, {
       component: 'PlatformErrorBoundary',
       errorInfo: errorInfo.componentStack,
-      retryCount: this.retryCount,
       errorId: this.state.errorId,
     });
   }
 
   handleRetry = () => {
-    if (this.retryCount < this.maxRetries) {
-      this.retryCount++;
-      logger.info('Повтор после ошибки', {
-        component: 'PlatformErrorBoundary',
-        retryCount: this.retryCount,
-        errorId: this.state.errorId,
-      });
-      
-      this.setState({
-        hasError: false,
-        error: undefined,
-        errorInfo: undefined,
-        errorId: '',
-      });
-    } else {
-      logger.warn('Достигнуто максимальное количество повторов', {
-        component: 'PlatformErrorBoundary',
-        maxRetries: this.maxRetries,
-        errorId: this.state.errorId,
-      });
-    }
+    // Simply reload the page - this is the most reliable way to recover
+    logger.info('Перезагрузка страницы после ошибки', {
+      component: 'PlatformErrorBoundary',
+      errorId: this.state.errorId,
+    });
+    window.location.reload();
   };
 
   handleGoHome = () => {
@@ -110,13 +91,11 @@ class PlatformErrorBoundary extends Component<Props, State> {
               <div className="w-full space-y-3">
                 <GlassButton
                   onClick={this.handleRetry}
-                  disabled={this.retryCount >= this.maxRetries}
                   variant="primary"
                   className="w-full"
                 >
                   <RefreshCw className="w-4 h-4 mr-2" />
-                  Повторить
-                  {this.retryCount > 0 && ` (${this.retryCount}/${this.maxRetries})`}
+                  Перезагрузить
                 </GlassButton>
                 
                 <GlassButton

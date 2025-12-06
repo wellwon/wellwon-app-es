@@ -82,10 +82,10 @@ class ChatProjector:
     # Chat Lifecycle Projections (PostgreSQL)
     # =========================================================================
 
-    @async_projection("ChatCreated")
+    @sync_projection("ChatCreated")
     @monitor_projection
     async def on_chat_created(self, envelope: EventEnvelope) -> None:
-        """Project ChatCreated to PostgreSQL. ASYNC - saga uses event data."""
+        """Project ChatCreated to PostgreSQL. SYNC - chat must exist before API returns."""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
 
@@ -188,11 +188,11 @@ class ChatProjector:
     # Participant Projections (PostgreSQL)
     # =========================================================================
 
-    # ASYNC: Optimistic UI + WSE notification
-    @async_projection("ParticipantAdded")
+    # SYNC: Participant must exist when chat is queried
+    @sync_projection("ParticipantAdded")
     @monitor_projection
     async def on_participant_added(self, envelope: EventEnvelope) -> None:
-        """Project ParticipantAdded to PostgreSQL. ASYNC - optimistic UI."""
+        """Project ParticipantAdded to PostgreSQL. SYNC - participant must exist before API returns."""
         event_data = envelope.event_data
         chat_id = envelope.aggregate_id
         user_id = uuid.UUID(event_data['user_id'])
@@ -331,6 +331,20 @@ class ChatProjector:
                 raise RetriableProjectionError(f"Chat {chat_id} not yet projected") from e
             raise
 
+        # -----------------------------------------------------------------
+        # 3. PostgreSQL - increment unread_count for OTHER participants
+        # -----------------------------------------------------------------
+        if sender_id:
+            try:
+                await self.chat_read_repo.increment_unread_count(
+                    chat_id=chat_id,
+                    exclude_user_id=sender_id,
+                )
+                log.debug(f"Incremented unread_count for chat {chat_id}, excluding sender {sender_id}")
+            except Exception as e:
+                # Non-critical - don't fail message persistence
+                log.warning(f"Failed to increment unread_count: {e}")
+
     @async_projection("MessageEdited")
     @monitor_projection
     async def on_message_edited(self, envelope: EventEnvelope) -> None:
@@ -413,6 +427,13 @@ class ChatProjector:
             last_read_message_id=last_read_message_id,
             last_read_at=envelope.stored_at,
         )
+
+        # PostgreSQL - reset unread_count to 0 for this user
+        await self.chat_read_repo.reset_unread_count(
+            chat_id=chat_id,
+            user_id=user_id,
+        )
+        log.debug(f"Reset unread_count for chat {chat_id}, user {user_id}")
 
     # =========================================================================
     # Telegram Delivery Confirmation (Bidirectional Read Receipts)

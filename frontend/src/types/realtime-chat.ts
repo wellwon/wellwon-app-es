@@ -204,12 +204,12 @@ export interface RealtimeChatContextType {
   loadHistoryUntilMessage: (messageId: string) => Promise<boolean>;
   
   // Chat scope управление
-  setScopeBySupergroup: (supergroup: any) => void;
-  setScopeByCompany: (companyId: number | null) => void;
+  setScopeBySupergroup: (supergroupId: number, companyId: string | null) => void;
+  setScopeByCompany: (companyId: string | null) => void;
   chatScope: {
     type: 'company' | 'supergroup';
-    companyId?: number | null;
-    supergroupId?: number | null;
+    companyId?: string | null;  // UUID string
+    supergroupId?: number | null;  // Telegram supergroup ID
     supergroupData?: any;
   };
 }

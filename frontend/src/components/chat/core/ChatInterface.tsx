@@ -158,6 +158,26 @@ const ChatInterface = React.memo(() => {
     lastMarkedAsReadRef.current = null; // Reset mark as read tracking
   }, [activeChat?.id]);
 
+  // Auto mark as read when chat is opened and messages are loaded
+  // Track previous chat id to detect chat change
+  const prevChatIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const chatId = activeChat?.id;
+    const hasMessages = displayedMessages.length > 0;
+    const isChatChange = prevChatIdRef.current !== chatId;
+
+    // Only run once when: new chat selected AND messages are loaded
+    if (chatId && hasMessages && isChatChange) {
+      prevChatIdRef.current = chatId;
+      // Small delay to ensure UI is ready
+      const timer = setTimeout(() => {
+        handleMarkAsRead();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [activeChat?.id, displayedMessages.length, handleMarkAsRead]);
+
   // Отслеживание позиции скролла с IntersectionObserver
   useEffect(() => {
     const viewport = getViewport();

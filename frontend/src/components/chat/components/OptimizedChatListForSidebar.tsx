@@ -80,14 +80,16 @@ const ChatItem = memo<ChatItemProps>(({
       <div
         onClick={handleChatClick}
         className={cn(
-          "group relative px-3 py-2.5 rounded-lg cursor-pointer border",
+          "group relative px-3 py-3 rounded-lg cursor-pointer border transition-all duration-150",
+          // Selected (active) state - RED accent
           isActive
             ? isLightTheme
-              ? 'bg-gray-100 border-l-2 border-l-accent-red border-gray-300'
-              : 'bg-white/10 border-l-2 border-l-accent-red border-white/20'
+              ? 'bg-red-50 border-accent-red/40'
+              : 'bg-accent-red/15 border-accent-red/40'
+            // Default state (same for read/unread - no red glow)
             : isLightTheme
-              ? 'bg-white hover:bg-gray-50 border-gray-200 hover:border-gray-300 hover:border-l-2 hover:border-l-accent-red/60'
-              : 'bg-[#2e2e33] hover:bg-[#3a3a40] border-white/10 hover:border-white/20 hover:border-l-2 hover:border-l-accent-red/60'
+              ? 'bg-white hover:bg-gray-50 border-gray-200 hover:border-gray-300'
+              : 'bg-[#2e2e33] hover:bg-[#3a3a40] border-white/10 hover:border-white/20'
         )}
       >
         <div className="flex justify-between items-start gap-2">
@@ -100,13 +102,6 @@ const ChatItem = memo<ChatItemProps>(({
                 <TelegramIndicator chat={conversation} className="flex-shrink-0" />
               </div>
               <div className="flex items-center gap-2">
-                {(conversation.unreadCount || 0) > 0 && (
-                  <div className="h-4 w-4 bg-accent-red rounded-full flex items-center justify-center">
-                    <span className="text-white text-[10px] font-bold">
-                      {(conversation.unreadCount || 0) > 9 ? '9+' : conversation.unreadCount}
-                    </span>
-                  </div>
-                )}
                 {/* Deal badge */}
                 {conversation.dealInfo && (
                   <Badge
@@ -173,6 +168,15 @@ const ChatItem = memo<ChatItemProps>(({
               </Button>
             )}
           </div>
+
+          {/* Unread count badge - bottom right, pill/capsule shape */}
+          {(conversation.unreadCount || 0) > 0 && (
+            <div className="absolute bottom-2 right-2 min-w-[16px] h-[16px] px-1 bg-accent-red rounded-full flex items-center justify-center shadow-lg">
+              <span className="text-white text-[9px] font-bold">
+                {(conversation.unreadCount || 0) > 99 ? '99+' : conversation.unreadCount}
+              </span>
+            </div>
+          )}
       </div>
 
       {/* Rename dialog is handled in parent component */}

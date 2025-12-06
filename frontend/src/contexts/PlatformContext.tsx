@@ -198,10 +198,31 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   );
 };
 
+// Default values for when context is not available (e.g., during hot reload)
+const defaultPlatformContext: PlatformContextType = {
+  activeSection: 'chat',
+  setActiveSection: () => {},
+  sidebarCollapsed: false,
+  setSidebarCollapsed: () => {},
+  toggleSidebar: () => {},
+  userTheme: 'theme-logistics',
+  availableSections: [],
+  isDeveloper: false,
+  selectedCompany: null,
+  setSelectedCompany: () => {},
+  companyInitialized: false,
+  chatId: undefined,
+  isLightTheme: false,
+  toggleTheme: () => {},
+};
+
 export const usePlatform = () => {
   const context = useContext(PlatformContext);
   if (!context) {
-    throw new Error('usePlatform must be used within a PlatformProvider');
+    // During hot reload or error recovery, return defaults instead of throwing
+    // This prevents cascading errors when the provider is temporarily unmounted
+    logger.warn('usePlatform called outside PlatformProvider, returning defaults');
+    return defaultPlatformContext;
   }
   return context;
 };

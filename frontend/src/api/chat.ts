@@ -199,8 +199,18 @@ export async function getChatById(chatId: string): Promise<ChatDetail> {
 }
 
 export async function createChat(request: CreateChatRequest): Promise<ChatDetail> {
+  // Log request for debugging
+  console.log('[CREATE-CHAT] Request:', {
+    name: request.name,
+    chat_type: request.chat_type,
+    company_id: request.company_id,
+    telegram_supergroup_id: request.telegram_supergroup_id,
+  });
+
   // Create the chat - returns only id and message
   const { data } = await API.post<CommandResponse>("/chats", request);
+
+  console.log('[CREATE-CHAT] Response:', data);
 
   // Fetch the full chat details
   const chatDetail = await getChatById(data.id);
