@@ -932,8 +932,8 @@ const ChatInterface = React.memo(() => {
 
 
       {/* Input Area - зафиксировано внизу экрана, как в Telegram/WhatsApp */}
-      <div className={`border-t ${theme.border} ${theme.main} flex-shrink-0`}>
-        <div className="px-6 py-3 w-full">
+      <div className={`border-t ${theme.border} ${theme.main} flex-shrink-0 min-h-24 flex items-center`}>
+        <div className="px-6 w-full">
           {/* Reply Preview - показывается над полем ввода когда отвечаем */}
           {replyTarget && (
             <div className="mb-2">
