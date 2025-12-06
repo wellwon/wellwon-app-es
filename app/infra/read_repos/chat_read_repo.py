@@ -616,8 +616,7 @@ class ChatReadRepo:
         """
         active_filter = "AND is_active = true" if active_only else ""
 
-        rows = await pg_client.fetch(
-            f"""
+        sql = f"""
             SELECT
                 id as chat_id,
                 telegram_supergroup_id,
@@ -627,8 +626,11 @@ class ChatReadRepo:
             WHERE telegram_supergroup_id IS NOT NULL
             {active_filter}
             ORDER BY updated_at DESC NULLS LAST
-            """,
-        )
+            """
+
+        log.info(f"[get_linked_telegram_chats] Querying for active_only={active_only}")
+        rows = await pg_client.fetch(sql)
+        log.info(f"[get_linked_telegram_chats] Found {len(rows)} linked chats")
 
         return [dict(row) for row in rows]
 
@@ -645,12 +647,14 @@ class ChatReadRepo:
         username: Optional[str] = None,
         status: str = "member",
         joined_at: Optional[datetime] = None,
+        role_label: Optional[str] = None,
     ) -> None:
         """
         Upsert a Telegram group member.
 
         Used when clients are invited to groups via InviteClientCommand.
         Also used by incoming_handler when users join via invite link.
+        Also used by MessageSent projector to track group participants.
 
         Args:
             supergroup_id: Telegram supergroup ID (BIGINT)
@@ -660,13 +664,14 @@ class ChatReadRepo:
             username: User's @username (optional)
             status: member, administrator, creator, left, kicked
             joined_at: When user joined (defaults to now)
+            role_label: User's role label for @mentions (e.g., Директор, Бухгалтер)
         """
         await pg_client.execute(
             """
             INSERT INTO telegram_group_members (
                 supergroup_id, telegram_user_id, first_name, last_name,
-                username, status, joined_at, is_active, last_seen
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, NOW())
+                username, status, joined_at, is_active, last_seen, role_label
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, NOW(), $8)
             ON CONFLICT (supergroup_id, telegram_user_id) DO UPDATE SET
                 first_name = EXCLUDED.first_name,
                 last_name = EXCLUDED.last_name,
@@ -674,9 +679,10 @@ class ChatReadRepo:
                 status = EXCLUDED.status,
                 is_active = true,
                 last_seen = NOW()
+                -- Note: role_label is NOT updated on conflict - only via explicit update
             """,
             supergroup_id, telegram_user_id, first_name, last_name,
-            username, status, joined_at or datetime.utcnow()
+            username, status, joined_at or datetime.utcnow(), role_label
         )
 
     @staticmethod
@@ -684,7 +690,7 @@ class ChatReadRepo:
         supergroup_id: int,
         active_only: bool = True,
     ) -> List[Dict[str, Any]]:
-        """Get all members of a Telegram supergroup"""
+        """Get all members of a Telegram supergroup for @mentions"""
         active_filter = "AND is_active = true" if active_only else ""
 
         rows = await pg_client.fetch(
@@ -695,17 +701,45 @@ class ChatReadRepo:
                 last_name,
                 username,
                 status,
+                role_label,
+                is_bot,
                 joined_at,
                 last_seen,
                 is_active
             FROM telegram_group_members
             WHERE supergroup_id = $1 {active_filter}
-            ORDER BY joined_at DESC
+            ORDER BY first_name ASC
             """,
             supergroup_id
         )
 
         return [dict(row) for row in rows]
+
+    @staticmethod
+    async def update_telegram_group_member_role(
+        supergroup_id: int,
+        telegram_user_id: int,
+        role_label: Optional[str],
+    ) -> bool:
+        """
+        Update role_label for a Telegram group member.
+
+        Used by admin UI to assign roles like "Директор", "Бухгалтер", etc.
+        These roles are displayed in @mentions dropdown.
+
+        Returns:
+            True if a row was updated, False if member not found
+        """
+        result = await pg_client.execute(
+            """
+            UPDATE telegram_group_members
+            SET role_label = $1
+            WHERE supergroup_id = $2 AND telegram_user_id = $3
+            """,
+            role_label, supergroup_id, telegram_user_id
+        )
+        # asyncpg returns "UPDATE N" where N is affected rows
+        return result and result != "UPDATE 0"
 
     # =========================================================================
     # Unread Count Operations

@@ -1012,6 +1012,9 @@ ALTER TABLE IF EXISTS chats DROP CONSTRAINT IF EXISTS fk_chats_telegram_supergro
 -- ======================
 -- TELEGRAM_GROUP_MEMBERS
 -- ======================
+-- Stores Telegram users who are members of supergroups.
+-- Used for @mentions, participants list, and tracking group membership.
+-- Note: role_label is for WellWon display purposes (e.g., "Директор", "Бухгалтер")
 CREATE TABLE IF NOT EXISTS telegram_group_members (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     supergroup_id BIGINT NOT NULL REFERENCES telegram_supergroups(id) ON DELETE CASCADE,
@@ -1020,7 +1023,8 @@ CREATE TABLE IF NOT EXISTS telegram_group_members (
     first_name TEXT,
     last_name TEXT,
     is_bot BOOLEAN DEFAULT FALSE,
-    status TEXT DEFAULT 'member',
+    status TEXT DEFAULT 'member',  -- member, administrator, creator, left, kicked
+    role_label TEXT,  -- WellWon display label for @mentions (e.g., "Директор", "Бухгалтер")
     joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     is_active BOOLEAN DEFAULT TRUE,
@@ -1031,40 +1035,7 @@ CREATE TABLE IF NOT EXISTS telegram_group_members (
 
 CREATE INDEX IF NOT EXISTS idx_telegram_group_members_supergroup_id ON telegram_group_members(supergroup_id);
 CREATE INDEX IF NOT EXISTS idx_telegram_group_members_telegram_user_id ON telegram_group_members(telegram_user_id);
-
--- ======================
--- TELEGRAM_USERS (Telegram Users)
--- ======================
-CREATE TABLE IF NOT EXISTS telegram_users (
-    id BIGINT PRIMARY KEY,
-    first_name TEXT NOT NULL,
-    last_name TEXT,
-    username TEXT,
-    language_code TEXT,
-    photo_url TEXT,
-    phone_number TEXT,
-    email TEXT,
-    allows_write_to_pm BOOLEAN,
-    color_scheme TEXT,
-    is_premium BOOLEAN,
-    is_blocked BOOLEAN DEFAULT FALSE,
-    policy BOOLEAN NOT NULL DEFAULT FALSE,
-
-    -- Odoo integration
-    odoo_partner_id INTEGER,
-    odoo_name TEXT,
-    odoo_surname TEXT,
-
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_telegram_users_username ON telegram_users(username);
-
-DROP TRIGGER IF EXISTS set_telegram_users_updated_at ON telegram_users;
-CREATE TRIGGER set_telegram_users_updated_at
-    BEFORE UPDATE ON telegram_users
-    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+CREATE INDEX IF NOT EXISTS idx_telegram_group_members_role_label ON telegram_group_members(role_label) WHERE role_label IS NOT NULL;
 
 -- ======================
 -- MESSAGE_TEMPLATES

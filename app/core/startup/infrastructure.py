@@ -191,12 +191,12 @@ async def initialize_event_infrastructure(app: FastAPI) -> None:
 async def run_database_schemas() -> None:
     """Run database schemas for main and reference databases"""
     # Main database schema
-    main_schema_path = "database/pg/wellwon.sql"
+    main_schema_path = "database/pg/wellwon/wellwon.sql"
     try:
         await run_schema(main_schema_path)
         logger.info(f"Main database schema checked/applied.")
     except FileNotFoundError:
-        logger.warning(f"Main schema file not found, skipping schema run.")
+        logger.warning(f"Main schema file not found at {main_schema_path}, skipping schema run.")
     except Exception as schema_error:
         logger.error(f"Error running main schema: {schema_error}")
 
@@ -204,7 +204,7 @@ async def run_database_schemas() -> None:
     reference_dsn = os.getenv("POSTGRES_REFERENCE_DSN")
 
     if reference_dsn:
-        reference_schema_path = "database/pg/wellwon_reference.sql"
+        reference_schema_path = "database/pg/wellwon_reference/wellwon_reference.sql"
         logger.info(f"Applying reference database schema from {reference_schema_path}...")
         try:
             await run_schema_for_db(reference_schema_path, Database.REFERENCE)

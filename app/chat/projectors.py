@@ -55,7 +55,7 @@ class ChatProjector:
         PostgreSQL (METADATA ONLY):
             - chats table: name, type, last_message_* (preview)
             - chat_participants: roles, last_read_at
-            - telegram_supergroups, telegram_users
+            - telegram_supergroups, telegram_group_members
 
     Projection Pattern:
         SYNC: TelegramMessageReceived (Telegram polling reliability)

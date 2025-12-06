@@ -540,7 +540,9 @@ async def _register_telegram_chat_filter(app: FastAPI, telegram_adapter) -> None
         """Refresh the linked chats cache from database."""
         import time
         try:
+            logger.info("[CHAT-FILTER] Refreshing linked chats cache...")
             result = await app.state.query_bus.query(GetLinkedTelegramChatsQuery())
+            logger.info(f"[CHAT-FILTER] Query returned: {result} (type={type(result).__name__})")
             if result:
                 _linked_chats_cache.clear()
                 for chat in result:
@@ -555,9 +557,9 @@ async def _register_telegram_chat_filter(app: FastAPI, telegram_adapter) -> None
                 _cache_last_refresh[0] = time.time()
                 logger.info(f"[CHAT-FILTER] Cache refreshed with {len(_linked_chats_cache)} linked chats: {_linked_chats_cache}")
             else:
-                logger.info("[CHAT-FILTER] No linked chats found in database")
+                logger.warning("[CHAT-FILTER] No linked chats found in database (result is empty or None)")
         except Exception as e:
-            logger.warning(f"[CHAT-FILTER] Failed to refresh cache: {e}")
+            logger.error(f"[CHAT-FILTER] Failed to refresh cache: {e}", exc_info=True)
 
     def is_chat_linked(chat_id: int, topic_id) -> bool:
         """Check if chat is linked to WellWon (sync filter callback)."""

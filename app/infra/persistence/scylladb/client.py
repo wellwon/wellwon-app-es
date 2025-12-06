@@ -1,14 +1,14 @@
 # =============================================================================
 # File: app/infra/persistence/scylladb/client.py
-# Description: Async ScyllaDB/Cassandra client with circuit breaker, retry,
-#              shard-aware routing, and prepared statements cache.
+# Description: State-of-the-art async ScyllaDB client using scylla-driver
 # =============================================================================
-# • Production-ready async ScyllaDB client
-# • Uses cassandra-driver with asyncio integration
-# • Supports shard-aware routing for ScyllaDB
-# • Integrated with reliability infrastructure (circuit breaker, retry)
-# • Prepared statements cache for performance
-# • Health monitoring and metrics
+# • Native scylla-driver with shard awareness and tablet awareness
+# • True async with execute_async (no run_in_executor)
+# • Speculative execution for reduced tail latency
+# • Circuit breaker and retry integration
+# • Prepared statements cache with LRU eviction
+# • Connection pooling metrics and health monitoring
+# • RateLimitReached error handling (ScyllaDB 5.1+)
 # =============================================================================
 
 from __future__ import annotations
@@ -17,25 +17,26 @@ import asyncio
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union, TypeVar, Callable
 from contextlib import asynccontextmanager
-from functools import wraps, lru_cache
 from collections import OrderedDict
-import threading
 import logging
 
-# Cassandra driver imports
+# ScyllaDB driver imports (scylla-driver is a drop-in replacement for cassandra-driver)
 try:
     from cassandra.cluster import (
         Cluster,
         Session,
         ExecutionProfile,
         EXEC_PROFILE_DEFAULT,
+        ResponseFuture,
     )
     from cassandra.auth import PlainTextAuthProvider
     from cassandra.policies import (
         DCAwareRoundRobinPolicy,
         TokenAwarePolicy,
+        ConstantSpeculativeExecutionPolicy,
         RetryPolicy as CassandraRetryPolicy,
         ConstantReconnectionPolicy,
+        HostDistance,
     )
     from cassandra.query import (
         PreparedStatement,
@@ -43,30 +44,51 @@ try:
         ConsistencyLevel as CassandraConsistencyLevel,
         dict_factory,
     )
-    from cassandra import OperationTimedOut, Unavailable, ReadTimeout, WriteTimeout
+    from cassandra.pool import Host
+    from cassandra import (
+        OperationTimedOut,
+        Unavailable,
+        ReadTimeout,
+        WriteTimeout,
+    )
     from cassandra.io.asyncioreactor import AsyncioConnection
 
-    CASSANDRA_AVAILABLE = True
+    # ScyllaDB-specific: RateLimitReached error (ScyllaDB 5.1+)
+    try:
+        from cassandra import RateLimitReached
+
+        RATE_LIMIT_AVAILABLE = True
+    except ImportError:
+        RateLimitReached = Exception
+        RATE_LIMIT_AVAILABLE = False
+
+    SCYLLA_DRIVER_AVAILABLE = True
 except ImportError:
-    CASSANDRA_AVAILABLE = False
+    SCYLLA_DRIVER_AVAILABLE = False
     Cluster = None
     Session = None
     ExecutionProfile = None
     EXEC_PROFILE_DEFAULT = None
+    ResponseFuture = None
     PlainTextAuthProvider = None
     DCAwareRoundRobinPolicy = None
     TokenAwarePolicy = None
+    ConstantSpeculativeExecutionPolicy = None
     CassandraRetryPolicy = None
     ConstantReconnectionPolicy = None
+    HostDistance = None
     PreparedStatement = None
     SimpleStatement = None
     CassandraConsistencyLevel = None
     dict_factory = None
+    Host = None
     OperationTimedOut = Exception
     Unavailable = Exception
     ReadTimeout = Exception
     WriteTimeout = Exception
     AsyncioConnection = None
+    RateLimitReached = Exception
+    RATE_LIMIT_AVAILABLE = False
 
 # Import configuration
 try:
@@ -84,7 +106,6 @@ try:
     from app.config.reliability_config import (
         CircuitBreakerConfig,
         RetryConfig,
-        ReliabilityConfigs,
     )
     from app.infra.reliability.circuit_breaker import (
         CircuitBreaker,
@@ -98,7 +119,6 @@ except ImportError:
     RELIABILITY_AVAILABLE = False
     CircuitBreakerConfig = None
     RetryConfig = None
-    ReliabilityConfigs = None
     CircuitBreaker = None
     get_circuit_breaker = None
     CircuitBreakerOpenError = Exception
@@ -114,28 +134,16 @@ except ImportError:
 
 T = TypeVar('T')
 
+
 # =============================================================================
 # Consistency Level Mapping
 # =============================================================================
-CONSISTENCY_MAP = {
-    "ANY": 0,
-    "ONE": 1,
-    "TWO": 2,
-    "THREE": 3,
-    "QUORUM": 4,
-    "ALL": 5,
-    "LOCAL_QUORUM": 6,
-    "EACH_QUORUM": 7,
-    "LOCAL_ONE": 10,
-}
-
-
 def map_consistency_level(level: Union[str, ConsistencyLevel]) -> int:
     """Map ConsistencyLevel enum to cassandra-driver consistency level."""
-    if CASSANDRA_AVAILABLE and CassandraConsistencyLevel:
+    if SCYLLA_DRIVER_AVAILABLE and CassandraConsistencyLevel:
         level_str = level.value if hasattr(level, 'value') else str(level)
         return getattr(CassandraConsistencyLevel, level_str, CassandraConsistencyLevel.LOCAL_ONE)
-    return CONSISTENCY_MAP.get(str(level).upper(), 10)  # Default to LOCAL_ONE
+    return 10  # Default to LOCAL_ONE
 
 
 # =============================================================================
@@ -189,16 +197,14 @@ if not RELIABILITY_AVAILABLE:
             except Exception as e:
                 last_exception = e
                 if attempt >= config.max_attempts:
-                    log.warning(f"Retry exhausted for {context} after {attempt} attempts. Last error: {e}")
+                    log.warning(f"Retry exhausted for {context} after {attempt} attempts")
                     raise
 
                 delay_ms = min(
                     config.initial_delay_ms * (config.backoff_factor ** (attempt - 1)),
                     config.max_delay_ms
                 )
-                delay_seconds = delay_ms / 1000
-                log.info(f"Retry attempt {attempt}/{config.max_attempts} for {context}. Waiting {delay_seconds:.2f}s")
-                await asyncio.sleep(delay_seconds)
+                await asyncio.sleep(delay_ms / 1000)
 
         raise last_exception if last_exception else RuntimeError("Unexpected retry failure")
 
@@ -245,6 +251,10 @@ class ScyllaReliabilityConfigs:
         if error is None:
             return False
 
+        # Don't retry rate limit errors - back off instead
+        if RATE_LIMIT_AVAILABLE and isinstance(error, RateLimitReached):
+            return False
+
         error_str = str(error).lower()
 
         # Retry on timeout errors
@@ -267,20 +277,63 @@ class ScyllaReliabilityConfigs:
 
 
 # =============================================================================
+# Async Future Wrapper
+# =============================================================================
+class AsyncResultWrapper:
+    """
+    Wraps cassandra ResponseFuture for native async/await support.
+
+    This avoids run_in_executor overhead by using the driver's native async.
+    """
+
+    def __init__(self, future: ResponseFuture):
+        self._future = future
+        self._loop = asyncio.get_event_loop()
+
+    def __await__(self):
+        return self._get_result().__await__()
+
+    async def _get_result(self) -> List[Dict[str, Any]]:
+        """Wait for result using asyncio Event."""
+        event = asyncio.Event()
+        result_holder = {"result": None, "error": None}
+
+        def on_success(rows):
+            result_holder["result"] = rows
+            self._loop.call_soon_threadsafe(event.set)
+
+        def on_error(exc):
+            result_holder["error"] = exc
+            self._loop.call_soon_threadsafe(event.set)
+
+        self._future.add_callbacks(on_success, on_error)
+
+        await event.wait()
+
+        if result_holder["error"]:
+            raise result_holder["error"]
+
+        return list(result_holder["result"]) if result_holder["result"] else []
+
+
+# =============================================================================
 # ScyllaDB Client
 # =============================================================================
 class ScyllaClient:
     """
-    Async ScyllaDB client with circuit breaker, retry, and prepared statements.
+    State-of-the-art async ScyllaDB client with scylla-driver.
 
     Features:
-    - Async query execution with asyncio
-    - Prepared statements cache for performance
+    - Native async with execute_async (no thread pool overhead)
+    - Shard awareness - routes to correct shard within node
+    - Tablet awareness - intelligent routing for tablet-based tables
+    - Speculative execution - reduces tail latency
     - Circuit breaker for fault tolerance
     - Retry with exponential backoff
-    - Shard-aware routing (ScyllaDB specific)
-    - Token-aware load balancing
-    - Health monitoring
+    - Prepared statements cache with LRU eviction
+    - RateLimitReached error handling (ScyllaDB 5.1+)
+    - Connection pooling metrics
+    - Health monitoring with shard stats
     """
 
     def __init__(
@@ -297,10 +350,10 @@ class ScyllaClient:
             circuit_breaker: Optional circuit breaker instance
             retry_config: Optional retry configuration
         """
-        if not CASSANDRA_AVAILABLE:
+        if not SCYLLA_DRIVER_AVAILABLE:
             raise ImportError(
-                "cassandra-driver is not installed. "
-                "Install it with: pip install cassandra-driver"
+                "scylla-driver is not installed. "
+                "Install it with: pip install scylla-driver"
             )
 
         # Configuration
@@ -312,10 +365,10 @@ class ScyllaClient:
         self._cluster: Optional[Cluster] = None
         self._session: Optional[Session] = None
 
-        # Prepared statements cache with LRU eviction (max 1000 statements)
+        # Prepared statements cache with LRU eviction
         self._prepared_statements: OrderedDict[str, PreparedStatement] = OrderedDict()
         self._prepared_lock = asyncio.Lock()
-        self._max_prepared_statements = 1000  # Prevent unbounded memory growth
+        self._max_prepared_statements = 1000
 
         # Reliability components
         if circuit_breaker:
@@ -336,12 +389,17 @@ class ScyllaClient:
         # Metrics
         self._query_count = 0
         self._error_count = 0
+        self._rate_limit_count = 0
         self._slow_query_threshold_ms = self.config.slow_query_threshold_ms
+
+        # Shard awareness tracking
+        self._is_shard_aware = False
+        self._shard_stats: Dict[str, Any] = {}
 
         log.info(f"ScyllaClient initialized for keyspace: {self.config.keyspace}")
 
     async def connect(self) -> None:
-        """Connect to ScyllaDB cluster."""
+        """Connect to ScyllaDB cluster with shard awareness."""
         if self._session is not None:
             return
 
@@ -352,6 +410,11 @@ class ScyllaClient:
                 consistency_level=map_consistency_level(self.config.default_consistency_read),
                 request_timeout=self.config.request_timeout,
                 row_factory=dict_factory,
+                # Speculative execution for reads - reduces tail latency
+                speculative_execution_policy=ConstantSpeculativeExecutionPolicy(
+                    delay=0.05,  # 50ms delay before speculative retry
+                    max_attempts=2
+                ) if self.config.token_aware_enabled else None,
             )
 
             write_profile = ExecutionProfile(
@@ -367,10 +430,13 @@ class ScyllaClient:
                 'write': write_profile,
             }
 
+            # Choose port based on shard awareness setting
+            port = self.config.shard_aware_port if self.config.shard_aware_enabled else self.config.port
+
             # Build cluster options
             cluster_kwargs = {
                 'contact_points': self.config.get_contact_points_list(),
-                'port': self.config.port,
+                'port': port,
                 'execution_profiles': profiles,
                 'connect_timeout': self.config.connect_timeout,
                 'idle_heartbeat_interval': self.config.idle_heartbeat_interval,
@@ -380,7 +446,12 @@ class ScyllaClient:
                     max_attempts=self.config.retry_max_attempts
                 ),
                 'connection_class': AsyncioConnection,
+                'executor_threads': self.config.executor_threads,
             }
+
+            # Shard awareness - disable if needed (rare cases)
+            if not self.config.shard_aware_enabled:
+                cluster_kwargs['shard_aware_options'] = {'disable': True}
 
             # Authentication
             auth_kwargs = self.config.get_auth_provider_kwargs()
@@ -410,8 +481,19 @@ class ScyllaClient:
                 lambda: self._cluster.connect(self.config.keyspace)
             )
 
+            # Check shard awareness (ScyllaDB-specific feature)
+            self._is_shard_aware = self._cluster.is_shard_aware()
+            if self._is_shard_aware:
+                self._shard_stats = self._cluster.shard_aware_stats()
+                log.info(f"Shard awareness: ENABLED, stats: {self._shard_stats}")
+            else:
+                log.warning("Shard awareness: DISABLED (cluster may not support it)")
+
             self._circuit_breaker.record_success()
-            log.info(f"Connected to ScyllaDB cluster: {self.config.contact_points}")
+            log.info(
+                f"Connected to ScyllaDB cluster: {self.config.contact_points}:{port} "
+                f"(shard_aware={self._is_shard_aware})"
+            )
 
         except Exception as e:
             self._circuit_breaker.record_failure(str(e))
@@ -419,11 +501,11 @@ class ScyllaClient:
             raise
 
     def _create_load_balancing_policy(self):
-        """Create load balancing policy based on configuration."""
+        """Create load balancing policy with token awareness."""
         # Base policy - DC-aware round robin
         base_policy = DCAwareRoundRobinPolicy()
 
-        # Wrap with token-aware if enabled
+        # Wrap with token-aware for shard routing
         if self.config.token_aware_enabled:
             return TokenAwarePolicy(base_policy)
 
@@ -461,9 +543,10 @@ class ScyllaClient:
             consistency: Optional[str] = None,
             timeout: Optional[float] = None,
             execution_profile: str = EXEC_PROFILE_DEFAULT,
+            is_idempotent: bool = True,
     ) -> List[Dict[str, Any]]:
         """
-        Execute a CQL query with circuit breaker and retry.
+        Execute a CQL query with native async.
 
         Args:
             query: CQL query string
@@ -471,6 +554,7 @@ class ScyllaClient:
             consistency: Optional consistency level override
             timeout: Optional timeout override in seconds
             execution_profile: Execution profile name ('read', 'write', or default)
+            is_idempotent: Mark query as idempotent for speculative execution
 
         Returns:
             List of rows as dictionaries
@@ -490,38 +574,41 @@ class ScyllaClient:
 
             try:
                 # Build statement
-                statement = SimpleStatement(query)
+                statement = SimpleStatement(query, is_idempotent=is_idempotent)
 
                 # Apply consistency override if specified
                 if consistency:
                     statement.consistency_level = map_consistency_level(consistency)
 
-                # Execute query
-                loop = asyncio.get_event_loop()
+                # Execute with native async
                 if parameters:
-                    result = await loop.run_in_executor(
-                        None,
-                        lambda: self._session.execute(
-                            statement,
-                            parameters,
-                            timeout=timeout,
-                            execution_profile=execution_profile,
-                        )
+                    future = self._session.execute_async(
+                        statement,
+                        parameters,
+                        timeout=timeout,
+                        execution_profile=execution_profile,
                     )
                 else:
-                    result = await loop.run_in_executor(
-                        None,
-                        lambda: self._session.execute(
-                            statement,
-                            timeout=timeout,
-                            execution_profile=execution_profile,
-                        )
+                    future = self._session.execute_async(
+                        statement,
+                        timeout=timeout,
+                        execution_profile=execution_profile,
                     )
+
+                # Await result using native async wrapper
+                result = await AsyncResultWrapper(future)
 
                 self._query_count += 1
                 self._circuit_breaker.record_success()
 
-                return list(result) if result else []
+                return result
+
+            except RateLimitReached as e:
+                # ScyllaDB 5.1+ rate limiting
+                self._rate_limit_count += 1
+                self._error_count += 1
+                log.warning(f"Rate limit reached: {e}")
+                raise
 
             except Exception as e:
                 self._error_count += 1
@@ -561,9 +648,10 @@ class ScyllaClient:
             consistency: Optional[str] = None,
             timeout: Optional[float] = None,
             execution_profile: str = EXEC_PROFILE_DEFAULT,
+            is_idempotent: bool = True,
     ) -> List[Dict[str, Any]]:
         """
-        Execute a prepared statement with circuit breaker and retry.
+        Execute a prepared statement with native async.
 
         Prepared statements are cached for performance.
 
@@ -573,6 +661,7 @@ class ScyllaClient:
             consistency: Optional consistency level override
             timeout: Optional timeout override in seconds
             execution_profile: Execution profile name
+            is_idempotent: Mark query as idempotent for speculative execution
 
         Returns:
             List of rows as dictionaries
@@ -600,25 +689,33 @@ class ScyllaClient:
                 else:
                     bound = prepared.bind([])
 
+                # Set idempotent flag
+                bound.is_idempotent = is_idempotent
+
                 # Apply consistency override if specified
                 if consistency:
                     bound.consistency_level = map_consistency_level(consistency)
 
-                # Execute
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    None,
-                    lambda: self._session.execute(
-                        bound,
-                        timeout=timeout,
-                        execution_profile=execution_profile,
-                    )
+                # Execute with native async
+                future = self._session.execute_async(
+                    bound,
+                    timeout=timeout,
+                    execution_profile=execution_profile,
                 )
+
+                # Await result using native async wrapper
+                result = await AsyncResultWrapper(future)
 
                 self._query_count += 1
                 self._circuit_breaker.record_success()
 
-                return list(result) if result else []
+                return result
+
+            except RateLimitReached as e:
+                self._rate_limit_count += 1
+                self._error_count += 1
+                log.warning(f"Rate limit reached: {e}")
+                raise
 
             except Exception as e:
                 self._error_count += 1
@@ -677,7 +774,10 @@ class ScyllaClient:
                     log.debug(f"Evicted prepared statement (LRU): {oldest_query[:50]}...")
 
                 self._prepared_statements[query] = prepared
-                log.debug(f"Prepared statement cached ({len(self._prepared_statements)}/{self._max_prepared_statements}): {query[:50]}...")
+                log.debug(
+                    f"Prepared statement cached "
+                    f"({len(self._prepared_statements)}/{self._max_prepared_statements}): {query[:50]}..."
+                )
                 return prepared
 
             except Exception as e:
@@ -727,14 +827,17 @@ class ScyllaClient:
                     else:
                         batch.add(SimpleStatement(query))
 
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(
-                    None,
-                    lambda: self._session.execute(batch, timeout=timeout)
-                )
+                # Execute with native async
+                future = self._session.execute_async(batch, timeout=timeout)
+                await AsyncResultWrapper(future)
 
                 self._query_count += len(statements)
                 self._circuit_breaker.record_success()
+
+            except RateLimitReached as e:
+                self._rate_limit_count += 1
+                self._error_count += 1
+                raise
 
             except Exception as e:
                 self._error_count += 1
@@ -760,11 +863,13 @@ class ScyllaClient:
 
     async def health_check(self) -> Dict[str, Any]:
         """
-        Perform health check on ScyllaDB connection.
+        Perform comprehensive health check on ScyllaDB connection.
 
-        Returns:
-            Health status and metrics
+        Includes shard awareness status and connection pool stats.
         """
+        # noinspection SqlNoDataSourceInspection,SqlResolve
+        health_query = "SELECT now() FROM system.local"
+
         try:
             if self._session is None:
                 return {
@@ -775,17 +880,30 @@ class ScyllaClient:
 
             # Execute simple query to check connectivity
             start_time = time.time()
-            result = await self.execute("SELECT now() FROM system.local")
+            await self.execute(health_query)
             latency_ms = (time.time() - start_time) * 1000
+
+            # Update shard stats
+            if self._cluster:
+                self._is_shard_aware = self._cluster.is_shard_aware()
+                self._shard_stats = self._cluster.shard_aware_stats() if self._is_shard_aware else {}
+
+            # Get connection pool info
+            pool_stats = self._get_connection_pool_stats()
 
             return {
                 "is_healthy": True,
                 "latency_ms": round(latency_ms, 2),
                 "keyspace": self.config.keyspace,
                 "contact_points": self.config.get_contact_points_list(),
+                "port": self.config.shard_aware_port if self.config.shard_aware_enabled else self.config.port,
                 "query_count": self._query_count,
                 "error_count": self._error_count,
+                "rate_limit_count": self._rate_limit_count,
                 "prepared_statements_cached": len(self._prepared_statements),
+                "shard_aware": self._is_shard_aware,
+                "shard_stats": self._shard_stats,
+                "connection_pool": pool_stats,
                 "circuit_breaker": self._circuit_breaker.get_metrics(),
             }
 
@@ -797,15 +915,87 @@ class ScyllaClient:
                 "circuit_breaker": self._circuit_breaker.get_metrics(),
             }
 
+    def _get_connection_pool_stats(self) -> Dict[str, Any]:
+        """Get connection pool statistics."""
+        if not self._cluster:
+            return {}
+
+        stats = {
+            "hosts": [],
+            "total_connections": 0,
+            "total_in_flight": 0,
+        }
+
+        try:
+            metadata = self._cluster.metadata
+            if metadata and metadata.all_hosts():
+                for host in metadata.all_hosts():
+                    host_info = {
+                        "address": str(host.address),
+                        "datacenter": host.datacenter,
+                        "rack": host.rack,
+                        "is_up": host.is_up,
+                    }
+
+                    # Get pool for this host if available
+                    pool = self._session.get_pool_state() if self._session else None
+                    if pool:
+                        host_pool = pool.get(host)
+                        if host_pool:
+                            host_info["open_connections"] = host_pool.open_count
+                            host_info["in_flight"] = host_pool.in_flight
+                            stats["total_connections"] += host_pool.open_count
+                            stats["total_in_flight"] += host_pool.in_flight
+
+                    stats["hosts"].append(host_info)
+
+        except Exception as e:
+            log.debug(f"Could not get pool stats: {e}")
+
+        return stats
+
     def get_metrics(self) -> Dict[str, Any]:
         """Get client metrics."""
         return {
             "query_count": self._query_count,
             "error_count": self._error_count,
+            "rate_limit_count": self._rate_limit_count,
             "prepared_statements_cached": len(self._prepared_statements),
             "is_connected": self._session is not None,
+            "shard_aware": self._is_shard_aware,
+            "shard_stats": self._shard_stats,
             "circuit_breaker": self._circuit_breaker.get_metrics(),
         }
+
+    def is_shard_aware(self) -> bool:
+        """Check if cluster supports shard awareness."""
+        return self._is_shard_aware
+
+    def get_shard_stats(self) -> Dict[str, Any]:
+        """
+        Get shard awareness statistics.
+
+        Returns dict with host -> {shards_count, connected} mapping.
+        Use to verify all shards are connected.
+        """
+        if self._cluster and self._is_shard_aware:
+            self._shard_stats = self._cluster.shard_aware_stats()
+        return self._shard_stats
+
+    def verify_all_shards_connected(self) -> bool:
+        """
+        Verify all shards on all nodes are connected.
+
+        Returns True if connected to all shards of all ScyllaDB nodes.
+        """
+        stats = self.get_shard_stats()
+        if not stats:
+            return False
+
+        return all(
+            v.get("shards_count", 0) == v.get("connected", 0)
+            for v in stats.values()
+        )
 
 
 # =============================================================================
@@ -816,15 +1006,7 @@ _CLIENT_INIT_LOCK = asyncio.Lock()
 
 
 async def init_global_scylla_client(config: Optional[ScyllaConfig] = None) -> ScyllaClient:
-    """
-    Initialize global ScyllaDB client singleton.
-
-    Args:
-        config: Optional ScyllaDB configuration
-
-    Returns:
-        ScyllaClient instance
-    """
+    """Initialize global ScyllaDB client singleton."""
     global _GLOBAL_SCYLLA_CLIENT
 
     if _GLOBAL_SCYLLA_CLIENT is not None:
@@ -850,12 +1032,7 @@ async def close_global_scylla_client() -> None:
 
 
 def get_scylla_client() -> ScyllaClient:
-    """
-    Get global ScyllaDB client.
-
-    Raises:
-        RuntimeError: If client not initialized
-    """
+    """Get global ScyllaDB client."""
     if _GLOBAL_SCYLLA_CLIENT is None:
         raise RuntimeError(
             "ScyllaDB client not initialized. "
@@ -869,13 +1046,7 @@ def get_scylla_client() -> ScyllaClient:
 # =============================================================================
 @asynccontextmanager
 async def scylla_client_context(config: Optional[ScyllaConfig] = None):
-    """
-    Context manager for ScyllaDB client.
-
-    Usage:
-        async with scylla_client_context() as client:
-            result = await client.execute("SELECT * FROM messages")
-    """
+    """Context manager for ScyllaDB client."""
     client = ScyllaClient(config)
     try:
         await client.connect()
@@ -888,18 +1059,7 @@ async def scylla_client_context(config: Optional[ScyllaConfig] = None):
 # FastAPI Integration
 # =============================================================================
 async def init_app_scylla(app, config: Optional[ScyllaConfig] = None) -> ScyllaClient:
-    """
-    Initialize ScyllaDB client for FastAPI app.
-
-    Sets app.state.scylla_client.
-
-    Args:
-        app: FastAPI application
-        config: Optional ScyllaDB configuration
-
-    Returns:
-        ScyllaClient instance
-    """
+    """Initialize ScyllaDB client for FastAPI app."""
     if hasattr(app.state, 'scylla_client') and app.state.scylla_client is not None:
         return app.state.scylla_client
 

@@ -1112,6 +1112,121 @@ async def invite_to_group(
         )
 
 
+# =============================================================================
+# Group Members from Database (for @mentions)
+# =============================================================================
+
+
+class GroupMemberDBResponse(BaseModel):
+    """Telegram group member from database (for @mentions)"""
+    telegram_user_id: int
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    username: Optional[str] = None
+    role_label: Optional[str] = None
+    is_bot: bool = False
+    status: str = "member"
+
+
+class GroupMembersDBResponse(BaseModel):
+    """Response with group members from database"""
+    success: bool
+    members: List[GroupMemberDBResponse] = []
+    total_count: int = 0
+
+
+class UpdateRoleLabelRequest(BaseModel):
+    """Request to update member's role_label"""
+    role_label: Optional[str] = None  # None to clear
+
+
+class UpdateRoleLabelResponse(BaseModel):
+    """Response for role_label update"""
+    success: bool
+    error: Optional[str] = None
+
+
+@router.get("/groups/{group_id}/members/db", response_model=GroupMembersDBResponse)
+async def get_group_members_from_db(
+    group_id: int,
+    current_user: Annotated[dict, Depends(get_current_user)],
+) -> GroupMembersDBResponse:
+    """
+    Get group members from PostgreSQL database.
+
+    Used for @mentions dropdown - returns cached member list with role_labels.
+    This is faster than MTProto call and includes WellWon-specific role_labels.
+    """
+    from app.infra.read_repos.chat_read_repo import ChatReadRepo
+
+    try:
+        members = await ChatReadRepo.get_telegram_group_members(group_id)
+
+        return GroupMembersDBResponse(
+            success=True,
+            members=[
+                GroupMemberDBResponse(
+                    telegram_user_id=m["telegram_user_id"],
+                    first_name=m.get("first_name"),
+                    last_name=m.get("last_name"),
+                    username=m.get("username"),
+                    role_label=m.get("role_label"),
+                    is_bot=m.get("is_bot", False),
+                    status=m.get("status", "member"),
+                )
+                for m in members
+            ],
+            total_count=len(members),
+        )
+
+    except Exception as e:
+        log.error(f"Failed to get members from DB for group {group_id}: {e}", exc_info=True)
+        return GroupMembersDBResponse(
+            success=False,
+            members=[],
+            total_count=0,
+        )
+
+
+@router.patch("/groups/{group_id}/members/{telegram_user_id}/role-label", response_model=UpdateRoleLabelResponse)
+async def update_member_role_label(
+    group_id: int,
+    telegram_user_id: int,
+    request: UpdateRoleLabelRequest,
+    current_user: Annotated[dict, Depends(get_current_user)],
+) -> UpdateRoleLabelResponse:
+    """
+    Update a member's role_label in telegram_group_members table.
+
+    role_label is a display label for @mentions (e.g., "Директор", "Бухгалтер").
+    Set to null/None to clear the label.
+    """
+    from app.infra.read_repos.chat_read_repo import ChatReadRepo
+
+    try:
+        success = await ChatReadRepo.update_telegram_group_member_role(
+            supergroup_id=group_id,
+            telegram_user_id=telegram_user_id,
+            role_label=request.role_label,
+        )
+
+        if success:
+            log.info(f"Updated role_label for user {telegram_user_id} in group {group_id} to '{request.role_label}'")
+            return UpdateRoleLabelResponse(success=True)
+        else:
+            return UpdateRoleLabelResponse(
+                success=False,
+                error="Member not found in group"
+            )
+
+    except Exception as e:
+        log.error(f"Failed to update role_label for user {telegram_user_id} in group {group_id}: {e}", exc_info=True)
+        return UpdateRoleLabelResponse(
+            success=False,
+            error=str(e),
+        )
+
+
 @router.post("/groups/{group_id}/verify-topics", response_model=VerifyTopicsResponse)
 async def verify_group_topics(
     group_id: int,
