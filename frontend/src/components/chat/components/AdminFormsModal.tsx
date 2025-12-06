@@ -15,6 +15,7 @@ import { FormSection } from '@/components/design-system/FormSection';
 import { GlassCard, GlassButton } from '@/components/design-system';
 import * as companyApi from '@/api/company';
 import { inviteClient, getInviteLink } from '@/api/chat';
+import { inviteToGroup } from '@/api/telegram';
 import { useRealtimeChatContext } from '@/contexts/RealtimeChatContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { logger } from '@/utils/logger';
@@ -56,6 +57,12 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
   const [groupCreationResult, setGroupCreationResult] = useState<any>(null);
   const [createdCompanyData, setCreatedCompanyData] = useState<any>(null);
   const [foundDuplicateCompany, setFoundDuplicateCompany] = useState<companyApi.CompanyDetail | null>(null);
+  // State for auto-inviting client after group creation
+  const [pendingClientInvite, setPendingClientInvite] = useState<{
+    contact: string;
+    clientName: string;
+    companyId: string;
+  } | null>(null);
   const [telegramGroupData, setTelegramGroupData] = useState({
     title: '',
     description: 'Рабочая группа WellWon Logistics',
@@ -547,6 +554,21 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
       });
       setCreatedCompanyData(newCompany);
 
+      // Set pending client invite if contact was provided
+      const clientContact = telegramGroupData.clientPhone?.trim() || telegramGroupData.clientUsername?.trim();
+      if (clientContact) {
+        setPendingClientInvite({
+          contact: clientContact,
+          clientName: companyFormData.company_name,
+          companyId: createResponse.id
+        });
+        logger.info('Pending client invite set, waiting for WSE event', {
+          contact: clientContact,
+          companyId: createResponse.id,
+          component: 'AdminFormsModal'
+        });
+      }
+
       logger.info('Company creation process initiated successfully', {
         companyId: newCompany.id,
         sagaOrchestrated: true
@@ -605,6 +627,7 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
       setCurrentStep(0);
       setStepStatuses([]);
       setProcessError('');
+      setPendingClientInvite(null);
       setTelegramGroupData({
         title: '',
         description: 'Рабочая группа WellWon Logistics',
@@ -635,6 +658,68 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
       }
     }
   }, [isOpen, formType]);
+
+  // Listen for WSE groupCreationCompleted event to auto-invite client
+  useEffect(() => {
+    if (!pendingClientInvite) return;
+
+    const handleGroupCreated = async (event: CustomEvent) => {
+      const { telegram_group_id, telegram_invite_link, company_id } = event.detail;
+
+      // Only handle if this is the company we just created
+      if (company_id !== pendingClientInvite.companyId) return;
+      if (!telegram_group_id) return;
+
+      logger.info('WSE groupCreationCompleted received, inviting client', {
+        telegram_group_id,
+        contact: pendingClientInvite.contact,
+        component: 'AdminFormsModal'
+      });
+
+      // Update result with invite link from saga
+      setGroupCreationResult((prev: any) => ({
+        ...prev,
+        telegram_group_id,
+        invite_link: telegram_invite_link,
+        group_data: { ...prev?.group_data, invite_link: telegram_invite_link, group_id: telegram_group_id }
+      }));
+
+      // Try to invite client
+      updateStepStatus(4, 'loading');
+      try {
+        const result = await inviteToGroup(telegram_group_id, {
+          contact: pendingClientInvite.contact,
+          client_name: pendingClientInvite.clientName
+        });
+
+        if (result.success) {
+          updateStepStatus(4, 'success');
+          logger.info('Client invited successfully', {
+            telegram_group_id,
+            status: result.status,
+            component: 'AdminFormsModal'
+          });
+        } else {
+          updateStepStatus(4, 'error');
+          logger.warn('Client invitation failed, user can copy invite link', {
+            telegram_group_id,
+            status: result.status,
+            error: result.error,
+            component: 'AdminFormsModal'
+          });
+        }
+      } catch (error) {
+        updateStepStatus(4, 'error');
+        logger.error('Client invitation error', error, { component: 'AdminFormsModal' });
+      }
+
+      setPendingClientInvite(null);
+    };
+
+    window.addEventListener('groupCreationCompleted', handleGroupCreated as EventListener);
+    return () => window.removeEventListener('groupCreationCompleted', handleGroupCreated as EventListener);
+  }, [pendingClientInvite]);
+
   const getFormTitle = () => {
     switch (formType) {
       case 'company-registration':
