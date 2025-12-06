@@ -345,6 +345,41 @@ class ChatProjector:
                 # Non-critical - don't fail message persistence
                 log.warning(f"Failed to increment unread_count: {e}")
 
+        # -----------------------------------------------------------------
+        # 4. PostgreSQL - telegram_group_members upsert (for Telegram messages)
+        # Track Telegram users who send messages (for @mentions, participants list)
+        # -----------------------------------------------------------------
+        if source == 'telegram':
+            telegram_user_id = event_data.get('telegram_user_id')
+            telegram_chat_id = event_data.get('telegram_chat_id')
+            telegram_user_data = event_data.get('telegram_user_data') or {}
+
+            if telegram_user_id and telegram_chat_id:
+                try:
+                    # Extract user info from telegram_user_data
+                    first_name = telegram_user_data.get('first_name')
+                    last_name = telegram_user_data.get('last_name')
+                    username = telegram_user_data.get('username')
+                    is_bot = telegram_user_data.get('is_bot', False)
+
+                    # Skip bots
+                    if not is_bot:
+                        await self.chat_read_repo.upsert_telegram_group_member(
+                            supergroup_id=telegram_chat_id,
+                            telegram_user_id=telegram_user_id,
+                            first_name=first_name,
+                            last_name=last_name,
+                            username=username,
+                            status='member',
+                        )
+                        log.debug(
+                            f"telegram_group_members upsert: supergroup={telegram_chat_id}, "
+                            f"user={telegram_user_id}, username={username}"
+                        )
+                except Exception as e:
+                    # Non-critical - don't fail message projection
+                    log.warning(f"Failed to upsert telegram_group_member: {e}")
+
     @async_projection("MessageEdited")
     @monitor_projection
     async def on_message_edited(self, envelope: EventEnvelope) -> None:
@@ -676,6 +711,39 @@ class ChatProjector:
             if 'foreign key' in str(e).lower():
                 raise RetriableProjectionError(f"Chat {chat_id} not yet projected") from e
             raise
+
+        # -----------------------------------------------------------------
+        # 3. PostgreSQL - telegram_group_members upsert
+        # Track Telegram users who send messages (for @mentions, participants list)
+        # -----------------------------------------------------------------
+        telegram_user_id = event_data.get('telegram_user_id')
+        telegram_user_data = event_data.get('telegram_user_data') or {}
+
+        if telegram_user_id and telegram_chat_id:
+            try:
+                # Extract user info from telegram_user_data
+                first_name = telegram_user_data.get('first_name')
+                last_name = telegram_user_data.get('last_name')
+                username = telegram_user_data.get('username')
+                is_bot = telegram_user_data.get('is_bot', False)
+
+                # Skip bots
+                if not is_bot:
+                    await self.chat_read_repo.upsert_telegram_group_member(
+                        supergroup_id=telegram_chat_id,
+                        telegram_user_id=telegram_user_id,
+                        first_name=first_name,
+                        last_name=last_name,
+                        username=username,
+                        status='member',
+                    )
+                    log.debug(
+                        f"telegram_group_members upsert: supergroup={telegram_chat_id}, "
+                        f"user={telegram_user_id}, username={username}"
+                    )
+            except Exception as e:
+                # Non-critical - don't fail message projection
+                log.warning(f"Failed to upsert telegram_group_member: {e}")
 
     # =========================================================================
     # Client Invitation Projections (PostgreSQL - telegram_group_members)

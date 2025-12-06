@@ -171,6 +171,7 @@ class MessageSent(BaseEvent):
     participant_ids: Optional[List[uuid.UUID]] = None
     # Telegram integration
     telegram_message_id: Optional[int] = None
+    telegram_chat_id: Optional[int] = None  # Telegram supergroup ID (for group_members tracking)
     telegram_user_id: Optional[int] = None  # Telegram user ID (for unmapped users)
     telegram_user_data: Optional[Dict[str, Any]] = None  # {first_name, last_name, username, is_bot}
     telegram_forward_data: Optional[Dict[str, Any]] = None  # Forward info if forwarded

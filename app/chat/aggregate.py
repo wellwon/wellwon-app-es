@@ -383,6 +383,7 @@ class ChatAggregate:
             source=source,
             participant_ids=participant_ids,
             telegram_message_id=telegram_message_id,
+            telegram_chat_id=self.state.telegram_chat_id,  # For group_members tracking
             telegram_user_id=telegram_user_id,
             telegram_user_data=telegram_user_data,
             telegram_forward_data=telegram_forward_data,
@@ -442,6 +443,7 @@ class ChatAggregate:
             source=source,
             participant_ids=participant_ids,
             telegram_message_id=telegram_message_id,
+            telegram_chat_id=self.state.telegram_chat_id,  # For group_members tracking
             telegram_user_id=telegram_user_id,
             telegram_user_data=telegram_user_data,
             telegram_forward_data=telegram_forward_data,
