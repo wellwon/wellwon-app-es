@@ -128,7 +128,7 @@ export async function removeWebhook(): Promise<{ ok: boolean; message?: string }
 
 export async function getGroupInfo(groupId: number): Promise<TelegramSupergroup | null> {
   try {
-    const { data } = await API.get<TelegramSupergroup>(`/telegram/groups/${groupId}`);
+    const { data } = await API.get<TelegramSupergroup>(`/telegram/group/${groupId}`);
     return data;
   } catch {
     return null;
