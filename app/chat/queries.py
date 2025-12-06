@@ -44,6 +44,17 @@ class GetChatByTelegramIdQuery(Query):
     telegram_topic_id: Optional[int] = None
 
 
+class GetChatsByTelegramSupergroupQuery(Query):
+    """
+    Get all chats for a Telegram supergroup.
+
+    Used by GroupDeletionSaga to find ALL chats linked to a supergroup,
+    regardless of whether they have company_id set.
+    """
+    telegram_supergroup_id: int
+    include_archived: bool = True  # Default true for deletion purposes
+
+
 class GetLinkedTelegramChatsQuery(Query):
     """Get all chats that have a linked Telegram supergroup (for polling)"""
     active_only: bool = True

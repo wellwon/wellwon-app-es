@@ -370,6 +370,40 @@ class ChatReadRepo:
         return [ChatReadModel(**dict(row)) for row in rows]
 
     @staticmethod
+    async def get_chats_by_telegram_supergroup(
+        telegram_supergroup_id: int,
+        include_archived: bool = True,
+    ) -> List[ChatReadModel]:
+        """
+        Get all chats linked to a Telegram supergroup.
+
+        Used by GroupDeletionSaga to find ALL chats for deletion,
+        regardless of whether they have company_id set.
+
+        This is more reliable than get_chats_by_company because it finds:
+        - Chats with telegram_supergroup_id = X (even if company_id is NULL)
+        - All topics in a supergroup
+        """
+        active_filter = "" if include_archived else "AND c.is_active = true"
+
+        rows = await pg_client.fetch(
+            f"""
+            SELECT
+                c.id, c.name, c.type as chat_type, c.company_id, c.created_by, c.created_at,
+                c.updated_at, c.is_active, c.participant_count, c.last_message_at,
+                c.last_message_content, c.last_message_sender_id,
+                c.telegram_supergroup_id as telegram_chat_id, c.telegram_topic_id,
+                c.metadata, c.version
+            FROM chats c
+            WHERE c.telegram_supergroup_id = $1 {active_filter}
+            ORDER BY c.telegram_topic_id ASC NULLS FIRST
+            """,
+            telegram_supergroup_id
+        )
+
+        return [ChatReadModel(**dict(row)) for row in rows]
+
+    @staticmethod
     async def search_chats(
         user_id: uuid.UUID,
         search_term: str,

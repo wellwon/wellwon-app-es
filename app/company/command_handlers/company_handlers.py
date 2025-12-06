@@ -22,7 +22,7 @@ from app.company.aggregate import CompanyAggregate
 from app.company.events import CompanyDeleteRequested
 # Queries only for Saga enrichment (RequestCompanyDeletionHandler)
 from app.company.queries import GetCompanyByIdQuery, GetCompanyTelegramSupergroupsQuery
-from app.chat.queries import GetChatsByCompanyQuery
+from app.chat.queries import GetChatsByCompanyQuery, GetChatsByTelegramSupergroupQuery
 from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
 
@@ -353,17 +353,41 @@ class RequestCompanyDeletionHandler(BaseCommandHandler):
             telegram_group_id = telegram_supergroups[0].telegram_group_id
 
         # 3. Get all chats for this company
-        chats = await self.query_bus.query(
+        # FIX: Use both queries to find ALL chats:
+        #   - GetChatsByCompanyQuery: finds chats by company_id or via telegram_supergroups.company_id
+        #   - GetChatsByTelegramSupergroupQuery: finds chats by telegram_supergroup_id directly
+        # This ensures we catch chats created without company_id (e.g., manual topic creation)
+        chat_ids_set = set()
+        telegram_chats = []  # Initialize for logging
+
+        # 3a. Get chats by company_id
+        company_chats = await self.query_bus.query(
             GetChatsByCompanyQuery(
                 company_id=command.company_id,
                 include_archived=True  # Include archived chats for deletion
             )
         )
-        chat_ids = [chat.id for chat in chats] if chats else []
+        if company_chats:
+            chat_ids_set.update(chat.id for chat in company_chats)
+
+        # 3b. Get chats by telegram_supergroup_id (catches chats with NULL company_id)
+        if telegram_group_id:
+            telegram_chats = await self.query_bus.query(
+                GetChatsByTelegramSupergroupQuery(
+                    telegram_supergroup_id=telegram_group_id,
+                    include_archived=True
+                )
+            )
+            if telegram_chats:
+                chat_ids_set.update(chat.id for chat in telegram_chats)
+
+        chat_ids = list(chat_ids_set)
 
         log.info(
             f"Company deletion request enriched: company={company.name}, "
-            f"telegram_group_id={telegram_group_id}, chat_count={len(chat_ids)}"
+            f"telegram_group_id={telegram_group_id}, chat_count={len(chat_ids)} "
+            f"(company_chats={len(company_chats) if company_chats else 0}, "
+            f"telegram_chats={len(telegram_chats) if telegram_chats else 0})"
         )
 
         # -----------------------------------------------------------------

@@ -788,19 +788,38 @@ const SidebarChat: React.FC = () => {
                     
                   </div>
                 ) : filteredConversations.length === 0 ? (
-                  <div className="space-y-2 pb-4">
+                  <div className="text-center py-12">
                     {selectedSupergroupId && showNoChatsHint ? (
-                      <div className="text-center py-4">
-                        <p className="text-gray-500 text-xs">
-                          Нет чатов в выбранной группе
+                      <>
+                        <Briefcase size={32} className="mx-auto text-gray-500 mb-3" />
+                        <p className="text-gray-400 text-sm">
+                          Нет тем в группе
                         </p>
-                      </div>
+                        <p className="text-gray-500 text-xs mt-1">
+                          Нажмите + чтобы создать
+                        </p>
+                      </>
+                    ) : activeMode === 'personal' ? (
+                      <>
+                        <Briefcase size={32} className="mx-auto text-gray-500 mb-3" />
+                        <p className="text-gray-400 text-sm">
+                          Нет личных чатов
+                        </p>
+                      </>
                     ) : !user?.id ? (
-                      <div className="text-center py-4">
-                        <p className="text-gray-500 text-xs">
-                          Войдите в систему для создания чатов
+                      <>
+                        <Briefcase size={32} className="mx-auto text-gray-500 mb-3" />
+                        <p className="text-gray-400 text-sm">
+                          Войдите в систему
                         </p>
-                      </div>
+                      </>
+                    ) : selectedSupergroupId === null ? (
+                      <>
+                        <Briefcase size={32} className="mx-auto text-gray-500 mb-3" />
+                        <p className="text-gray-400 text-sm">
+                          Выберите группу
+                        </p>
+                      </>
                     ) : null}
                   </div>
                 ) : (

@@ -15,6 +15,7 @@ from app.chat.queries import (
     GetChatsByUserQuery,
     GetChatsByCompanyQuery,
     GetChatByTelegramIdQuery,
+    GetChatsByTelegramSupergroupQuery,
     GetLinkedTelegramChatsQuery,
     SearchChatsQuery,
     GetChatParticipantsQuery,
@@ -129,6 +130,43 @@ class GetChatsByCompanyQueryHandler(BaseQueryHandler[GetChatsByCompanyQuery, Lis
                 last_message_at=chat.last_message_at,
                 last_message_content=chat.last_message_content,
                 is_active=chat.is_active,
+            )
+            for chat in chats
+        ]
+
+
+@query_handler(GetChatsByTelegramSupergroupQuery)
+class GetChatsByTelegramSupergroupQueryHandler(BaseQueryHandler[GetChatsByTelegramSupergroupQuery, List[ChatSummary]]):
+    """
+    Get all chats for a Telegram supergroup.
+
+    Used by GroupDeletionSaga to find ALL chats linked to a supergroup,
+    even if company_id is NULL on the chat record.
+    """
+
+    def __init__(self, deps: 'HandlerDependencies'):
+        super().__init__()
+        self.chat_read_repo: 'ChatReadRepo' = deps.chat_read_repo
+
+    async def handle(self, query: GetChatsByTelegramSupergroupQuery) -> List[ChatSummary]:
+        """Fetch supergroup's chats from read model"""
+        chats = await self.chat_read_repo.get_chats_by_telegram_supergroup(
+            telegram_supergroup_id=query.telegram_supergroup_id,
+            include_archived=query.include_archived,
+        )
+
+        return [
+            ChatSummary(
+                id=chat.id,
+                name=chat.name,
+                chat_type=chat.chat_type,
+                participant_count=chat.participant_count,
+                last_message_at=chat.last_message_at,
+                last_message_content=chat.last_message_content,
+                is_active=chat.is_active,
+                company_id=chat.company_id,
+                telegram_supergroup_id=chat.telegram_chat_id,
+                telegram_topic_id=chat.telegram_topic_id,
             )
             for chat in chats
         ]
