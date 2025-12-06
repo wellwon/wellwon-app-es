@@ -25,7 +25,7 @@ from app.common.base.base_command_handler import BaseCommandHandler
 
 if TYPE_CHECKING:
     from app.infra.cqrs.handler_dependencies import HandlerDependencies
-    from app.infra.telegram.adapter import TelegramAdapter
+    from app.chat.ports.telegram_messaging_port import TelegramMessagingPort
 
 log = logging.getLogger("wellwon.chat.handlers.chat")
 
@@ -48,7 +48,8 @@ class CreateChatHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
+        # Port injection: telegram_adapter implements TelegramMessagingPort
+        self._telegram: Optional['TelegramMessagingPort'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: CreateChatCommand) -> uuid.UUID:
         log.info(f"Creating {command.chat_type} chat by user {command.created_by}")
@@ -59,8 +60,8 @@ class CreateChatHandler(BaseCommandHandler):
         company_id = command.company_id
 
         # If we have a supergroup and no topic_id yet, create a Telegram topic
-        # (telegram_adapter is infrastructure, not a query - this is allowed)
-        if telegram_supergroup_id and not telegram_topic_id and self.telegram_adapter:
+        # (telegram port is infrastructure, not a query - this is allowed)
+        if telegram_supergroup_id and not telegram_topic_id and self._telegram:
             telegram_topic_id = await self._create_telegram_topic(
                 telegram_supergroup_id,
                 command.name or "Новый чат",
@@ -102,6 +103,13 @@ class CreateChatHandler(BaseCommandHandler):
             command=command
         )
 
+        # Notify adapter to update chat filter cache if Telegram linked
+        if telegram_supergroup_id and self._telegram:
+            await self._telegram.notify_chat_linked(
+                chat_id=telegram_supergroup_id,
+                topic_id=telegram_topic_id
+            )
+
         log.info(f"Chat created: {command.chat_id} with {len(command.participant_ids) + 1} participants, telegram_topic_id={telegram_topic_id}")
         return command.chat_id
 
@@ -111,13 +119,13 @@ class CreateChatHandler(BaseCommandHandler):
         chat_name: str,
     ) -> Optional[int]:
         """
-        Create a Telegram topic in the supergroup.
+        Create a Telegram topic in the supergroup via port.
         This is infrastructure operation (not a query).
         """
         try:
             log.info(f"Creating Telegram topic '{chat_name}' in supergroup {supergroup_id}")
 
-            topic_info = await self.telegram_adapter.create_chat_topic(
+            topic_info = await self._telegram.create_chat_topic(
                 group_id=supergroup_id,
                 topic_name=chat_name,
             )
@@ -191,7 +199,8 @@ class ArchiveChatHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
+        # Port injection: telegram_adapter implements TelegramMessagingPort
+        self._telegram: Optional['TelegramMessagingPort'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: ArchiveChatCommand) -> uuid.UUID:
         log.info(f"Archiving chat {command.chat_id}")
@@ -227,18 +236,18 @@ class ArchiveChatHandler(BaseCommandHandler):
         )
 
         # Bidirectional sync: Close topic in Telegram (preserves messages, prevents new ones)
-        if telegram_supergroup_id and telegram_topic_id and self.telegram_adapter:
+        if telegram_supergroup_id and telegram_topic_id and self._telegram:
             await self._sync_archive_to_telegram(telegram_supergroup_id, telegram_topic_id)
 
         log.info(f"Chat archived: {command.chat_id}, telegram_topic_id={telegram_topic_id}")
         return command.chat_id
 
     async def _sync_archive_to_telegram(self, group_id: int, topic_id: int) -> None:
-        """Sync chat archive to Telegram by closing the topic"""
+        """Sync chat archive to Telegram by closing the topic via port"""
         try:
             log.info(f"Closing Telegram topic: group_id={group_id}, topic_id={topic_id}")
 
-            success = await self.telegram_adapter.close_topic(
+            success = await self._telegram.close_topic(
                 group_id=group_id,
                 topic_id=topic_id,
                 closed=True
@@ -264,7 +273,8 @@ class RestoreChatHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
+        # Port injection: telegram_adapter implements TelegramMessagingPort
+        self._telegram: Optional['TelegramMessagingPort'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: RestoreChatCommand) -> uuid.UUID:
         log.info(f"Restoring chat {command.chat_id}")
@@ -285,18 +295,18 @@ class RestoreChatHandler(BaseCommandHandler):
         )
 
         # Bidirectional sync: Reopen topic in Telegram
-        if telegram_supergroup_id and telegram_topic_id and self.telegram_adapter:
+        if telegram_supergroup_id and telegram_topic_id and self._telegram:
             await self._sync_restore_to_telegram(telegram_supergroup_id, telegram_topic_id)
 
         log.info(f"Chat restored: {command.chat_id}, telegram_topic_id={telegram_topic_id}")
         return command.chat_id
 
     async def _sync_restore_to_telegram(self, group_id: int, topic_id: int) -> None:
-        """Sync chat restore to Telegram by reopening the topic"""
+        """Sync chat restore to Telegram by reopening the topic via port"""
         try:
             log.info(f"Reopening Telegram topic: group_id={group_id}, topic_id={topic_id}")
 
-            success = await self.telegram_adapter.close_topic(
+            success = await self._telegram.close_topic(
                 group_id=group_id,
                 topic_id=topic_id,
                 closed=False  # Reopen
@@ -322,7 +332,8 @@ class DeleteChatHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
+        # Port injection: telegram_adapter implements TelegramMessagingPort
+        self._telegram: Optional['TelegramMessagingPort'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: DeleteChatCommand) -> uuid.UUID:
         log.info(f"Hard deleting chat {command.chat_id}")

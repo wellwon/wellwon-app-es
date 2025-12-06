@@ -203,12 +203,12 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
       }
       
       setEditingGroupId(supergroupId);
-      setEditingCompanyId(companyId || 0);
+      setEditingCompanyId(companyId ?? null);
     } catch (error) {
       logger.error('Failed to preload data', error);
       // Fallback к обычному открытию без предзагрузки
       setEditingGroupId(supergroupId);
-      setEditingCompanyId(companyId || 0);
+      setEditingCompanyId(companyId ?? null);
       setPreloadedCompanyData(null);
       setPreloadedSupergroupData(null);
     }
@@ -805,7 +805,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
           </div>
         </div>
         
-        {editingGroupId && editingCompanyId && (
+        {editingGroupId !== null && (
           <EditCompanyGroupModal
             isOpen={!!editingGroupId}
             onClose={() => {
@@ -815,7 +815,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
               setPreloadedSupergroupData(null);
             }}
             supergroupId={editingGroupId}
-            companyId={editingCompanyId}
+            companyId={editingCompanyId ?? undefined}
             onSuccess={handleEditSuccess}
             initialCompanyType={preloadedCompanyType}
             preloadedCompanyData={preloadedCompanyData}
@@ -1188,7 +1188,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
         onSuccess={handleCreateCompanySuccess}
       />
 
-        {editingGroupId && (
+        {editingGroupId !== null && (
         <EditCompanyGroupModal
           isOpen={!!editingGroupId}
           onClose={() => {
@@ -1198,7 +1198,7 @@ export const GroupsPanel: React.FC<GroupsPanelProps> = ({
             setPreloadedSupergroupData(null);
           }}
           supergroupId={editingGroupId}
-          companyId={editingCompanyId}
+          companyId={editingCompanyId ?? undefined}
           onSuccess={handleEditSuccess}
           initialCompanyType={preloadedCompanyType}
           preloadedCompanyData={preloadedCompanyData}

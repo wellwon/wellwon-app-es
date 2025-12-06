@@ -25,7 +25,7 @@ class CompanyCreated(BaseEvent):
     event_type: Literal["CompanyCreated"] = "CompanyCreated"
     company_id: uuid.UUID
     name: str
-    company_type: str = "company"  # company, project, individual
+    client_type: str = "company"  # company, project
     created_by: uuid.UUID
 
     # Legal info (Russian business)
@@ -72,7 +72,7 @@ class CompanyUpdated(BaseEvent):
 
     # Only include changed fields
     name: Optional[str] = None
-    company_type: Optional[str] = None
+    client_type: Optional[str] = None
     vat: Optional[str] = None
     ogrn: Optional[str] = None
     kpp: Optional[str] = None

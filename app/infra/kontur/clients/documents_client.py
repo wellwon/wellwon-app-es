@@ -30,8 +30,8 @@ class DocumentsClient(BaseClient):
     - Copy document data from DT
     """
 
-    def __init__(self, http_client, config):
-        super().__init__(http_client, config, category="documents")
+    def __init__(self, http_client, config, session_refresh_callback=None):
+        super().__init__(http_client, config, category="documents", session_refresh_callback=session_refresh_callback)
 
     async def list_documents(self, docflow_id: str) -> List[DocumentRowDto]:
         """

@@ -791,7 +791,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 CREATE TABLE IF NOT EXISTS companies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
-    company_type TEXT NOT NULL DEFAULT 'company',
+    client_type TEXT NOT NULL DEFAULT 'company',
     created_by UUID NOT NULL REFERENCES user_accounts(id),
 
     -- Legal info (Russian business)
@@ -846,7 +846,7 @@ CREATE TABLE IF NOT EXISTS companies (
 
 CREATE INDEX IF NOT EXISTS idx_companies_vat ON companies(vat);
 CREATE INDEX IF NOT EXISTS idx_companies_email ON companies(email);
-CREATE INDEX IF NOT EXISTS idx_companies_company_type ON companies(company_type);
+CREATE INDEX IF NOT EXISTS idx_companies_client_type ON companies(client_type);
 CREATE INDEX IF NOT EXISTS idx_companies_assigned_manager ON companies(assigned_manager_id);
 CREATE INDEX IF NOT EXISTS idx_companies_status ON companies(status);
 CREATE INDEX IF NOT EXISTS idx_companies_created_by ON companies(created_by);

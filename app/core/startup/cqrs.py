@@ -135,7 +135,12 @@ async def create_saga_service_instance(app: FastAPI) -> None:
         return
 
     try:
-        # Create saga service with projection rebuilder
+        # Get ports from app.state for Clean Architecture
+        # TelegramAdapter implements both TelegramMessagingPort and TelegramGroupsPort
+        telegram_groups_port = getattr(app.state, 'telegram_adapter', None)
+        kontur_port = getattr(app.state, 'kontur_adapter', None)
+
+        # Create saga service with projection rebuilder and ports
         app.state.saga_service = create_saga_service(
             event_bus=app.state.event_bus,
             command_bus=app.state.command_bus,
@@ -143,7 +148,10 @@ async def create_saga_service_instance(app: FastAPI) -> None:
             event_store=app.state.event_store,
             instance_id=os.getenv('INSTANCE_ID', 'default'),
             lock_manager=app.state.lock_manager,
-            projection_rebuilder=app.state.projection_rebuilder if hasattr(app.state, 'projection_rebuilder') else None
+            projection_rebuilder=app.state.projection_rebuilder if hasattr(app.state, 'projection_rebuilder') else None,
+            # Port injection for Clean Architecture
+            telegram_groups_port=telegram_groups_port,
+            kontur_port=kontur_port,
         )
 
         logger.info("Saga Service created (not initialized yet)")

@@ -1,7 +1,7 @@
 # Command Handler Implementation Guide
 
 **WellWon Platform - CQRS Write Side**
-**Last Updated:** 2025-12-02
+**Last Updated:** 2025-12-06
 **Status:** Production Reference
 
 ---
@@ -580,6 +580,93 @@ await self.publish_and_commit_events(
 3. Saga context added to metadata
 4. Aggregate version incremented
 5. Uncommitted events cleared
+
+---
+
+### Step 7: Port Injection for External APIs (Optional)
+
+If your handler needs to call external APIs (Kontur, Telegram, DaData, etc.), use **Port Injection** via `HandlerDependencies`.
+
+**See:** [PORTS_AND_ADAPTERS_GUIDE.md](./PORTS_AND_ADAPTERS_GUIDE.md) for full details.
+
+**Pattern:**
+
+```python
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.customs.ports.kontur_declarant_port import KonturDeclarantPort
+    from app.infra.cqrs.handler_dependencies import HandlerDependencies
+
+@command_handler(SubmitToKonturCommand)
+class SubmitToKonturHandler(BaseCommandHandler):
+    """
+    Handle SubmitToKonturCommand
+
+    Submits declaration to Kontur API via KonturDeclarantPort.
+    Uses Port Injection (Clean Architecture).
+    """
+
+    def __init__(self, deps: 'HandlerDependencies'):
+        super().__init__(
+            event_bus=deps.event_bus,
+            transport_topic="transport.customs-events",
+            event_store=deps.event_store
+        )
+        # Port injection - handler uses interface, not concrete adapter
+        self._kontur: 'KonturDeclarantPort' = deps.kontur_port
+
+    async def handle(self, command: SubmitToKonturCommand) -> UUID:
+        log.info(f"Submitting declaration {command.declaration_id} to Kontur")
+
+        # Load aggregate
+        declaration = await self.load_aggregate(
+            command.declaration_id,
+            "Declaration",
+            DeclarationAggregate
+        )
+
+        # Call external API via port (Clean Architecture)
+        request = CreateDocflowRequest(
+            declaration_type=declaration.state.declaration_type,
+            org_id=declaration.state.organization_id,
+        )
+
+        docflow = await self._kontur.create_docflow(request)
+
+        if not docflow:
+            raise KonturSubmissionError("Failed to create docflow")
+
+        # Update aggregate with external reference
+        declaration.mark_submitted(
+            docflow_id=docflow.id,
+            submitted_at=datetime.now(UTC)
+        )
+
+        await self.publish_and_commit_events(
+            aggregate=declaration,
+            aggregate_type="Declaration",
+            expected_version=declaration.version - 1
+        )
+
+        return declaration.id
+```
+
+**Key Points:**
+- Port is defined in **domain** (`app/{domain}/ports/{service}_port.py`)
+- Handler receives port via **HandlerDependencies**
+- Use **TYPE_CHECKING** imports to avoid circular dependencies
+- Handler uses port interface, doesn't know about concrete adapter
+
+**When to Use Port Injection:**
+- Calling external REST APIs (Kontur, DaData, etc.)
+- Calling messaging APIs (Telegram)
+- Any infrastructure call the domain needs
+
+**When NOT to Use:**
+- Internal queries (use QueryBus or load_aggregate)
+- Database access (use repositories)
+- Event publishing (use EventBus from BaseCommandHandler)
 
 ---
 

@@ -80,7 +80,7 @@ class CompanyAggregateState(BaseModel):
     """In-memory state for Company aggregate"""
     company_id: Optional[uuid.UUID] = None
     name: Optional[str] = None
-    company_type: str = "company"  # company, project, individual
+    client_type: str = "company"  # company, project
     created_by: Optional[uuid.UUID] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -169,7 +169,7 @@ class CompanyAggregate:
     def create_company(
         self,
         name: str,
-        company_type: str,
+        client_type: str,
         created_by: uuid.UUID,
         vat: Optional[str] = None,
         ogrn: Optional[str] = None,
@@ -201,7 +201,7 @@ class CompanyAggregate:
         event = CompanyCreated(
             company_id=self.id,
             name=name,
-            company_type=company_type,
+            client_type=client_type,
             created_by=created_by,
             vat=vat,
             ogrn=ogrn,
@@ -232,7 +232,7 @@ class CompanyAggregate:
         self,
         updated_by: uuid.UUID,
         name: Optional[str] = None,
-        company_type: Optional[str] = None,
+        client_type: Optional[str] = None,
         vat: Optional[str] = None,
         ogrn: Optional[str] = None,
         kpp: Optional[str] = None,
@@ -258,7 +258,7 @@ class CompanyAggregate:
             company_id=self.id,
             updated_by=updated_by,
             name=name,
-            company_type=company_type,
+            client_type=client_type,
             vat=vat,
             ogrn=ogrn,
             kpp=kpp,
@@ -605,7 +605,7 @@ class CompanyAggregate:
     def _on_company_created(self, event: CompanyCreated) -> None:
         self.state.company_id = event.company_id
         self.state.name = event.name
-        self.state.company_type = event.company_type
+        self.state.client_type = event.client_type
         self.state.created_by = event.created_by
         self.state.created_at = event.timestamp
         self.state.is_active = True
@@ -637,8 +637,8 @@ class CompanyAggregate:
     def _on_company_updated(self, event: CompanyUpdated) -> None:
         if event.name is not None:
             self.state.name = event.name
-        if event.company_type is not None:
-            self.state.company_type = event.company_type
+        if event.client_type is not None:
+            self.state.client_type = event.client_type
         if event.vat is not None:
             self.state.vat = event.vat
         if event.ogrn is not None:
@@ -757,7 +757,7 @@ class CompanyAggregate:
         return {
             "company_id": str(self.state.company_id) if self.state.company_id else None,
             "name": self.state.name,
-            "company_type": self.state.company_type,
+            "client_type": self.state.client_type,
             "created_by": str(self.state.created_by) if self.state.created_by else None,
             "created_at": self.state.created_at.isoformat() if self.state.created_at else None,
             "updated_at": self.state.updated_at.isoformat() if self.state.updated_at else None,
@@ -809,7 +809,7 @@ class CompanyAggregate:
         """Restore state from a snapshot"""
         self.state.company_id = uuid.UUID(snapshot_data["company_id"]) if snapshot_data.get("company_id") else None
         self.state.name = snapshot_data.get("name")
-        self.state.company_type = snapshot_data.get("company_type", "company")
+        self.state.client_type = snapshot_data.get("client_type", "company")
         self.state.created_by = uuid.UUID(snapshot_data["created_by"]) if snapshot_data.get("created_by") else None
         self.state.is_active = snapshot_data.get("is_active", True)
         self.state.is_deleted = snapshot_data.get("is_deleted", False)

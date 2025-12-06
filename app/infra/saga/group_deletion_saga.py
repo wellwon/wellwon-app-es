@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import uuid
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from datetime import datetime, timezone, timedelta
 
 from app.infra.saga.saga_manager import BaseSaga, SagaStep
 from app.config.saga_config import saga_config
+
+if TYPE_CHECKING:
+    from app.company.ports.telegram_groups_port import TelegramGroupsPort
 
 log = logging.getLogger("wellwon.saga.group_deletion")
 
@@ -194,18 +197,18 @@ class GroupDeletionSaga(BaseSaga):
         log.info(f"Saga {self.saga_id}: Deleting Telegram supergroup {telegram_group_id}")
 
         # Step 2a: Actually leave/delete the group from Telegram
+        # Clean Architecture: Use port from context, NOT direct adapter import
         telegram_left = False
         try:
-            from app.api.dependencies.adapter_deps import get_telegram_adapter
-            adapter = await get_telegram_adapter()
-            if adapter:
-                telegram_left = await adapter.leave_group(telegram_group_id)
+            telegram_port: 'TelegramGroupsPort' = context.get('telegram_groups_port')
+            if telegram_port:
+                telegram_left = await telegram_port.leave_group(telegram_group_id)
                 if telegram_left:
                     log.info(f"Saga {self.saga_id}: Left/deleted Telegram group {telegram_group_id}")
                 else:
                     log.warning(f"Saga {self.saga_id}: Failed to leave Telegram group {telegram_group_id}")
             else:
-                log.warning(f"Saga {self.saga_id}: TelegramAdapter not available")
+                log.warning(f"Saga {self.saga_id}: telegram_groups_port not provided in saga context")
         except Exception as e:
             log.warning(f"Saga {self.saga_id}: Error leaving Telegram group: {e}")
 

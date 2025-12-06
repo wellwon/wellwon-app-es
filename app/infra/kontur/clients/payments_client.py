@@ -25,8 +25,8 @@ class PaymentsClient(BaseClient):
     Future: May expand to cover general goods duty calculations.
     """
 
-    def __init__(self, http_client, config):
-        super().__init__(http_client, config, category="payments")
+    def __init__(self, http_client, config, session_refresh_callback=None):
+        super().__init__(http_client, config, category="payments", session_refresh_callback=session_refresh_callback)
 
     async def calculate_vehicle_payments(
         self,

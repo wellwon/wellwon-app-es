@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Loader2, Building, Edit3, Copy, X, XCircle } from 'lucide-react';
+import { Loader2, Building, Edit3, Copy, X, XCircle, UserPlus, Phone, AtSign, RefreshCw } from 'lucide-react';
 import AppConfirmDialog from '@/components/shared/AppConfirmDialog';
 import { CompanyFormData, SupergroupFormData, FormValidationErrors } from '@/types/company-form';
 import { CompanyInfoFields } from './forms/CompanyInfoFields';
@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { TelegramIcon } from '@/components/ui/TelegramIcon';
 import * as companyApi from '@/api/company';
 import * as telegramApi from '@/api/telegram';
+import { generateInviteLink, inviteToGroup } from '@/api/telegram';
 import { CompanyLogoUploader } from './CompanyLogoUploader';
 import { toast } from '@/hooks/use-toast';
 import { logger } from '@/utils/logger';
@@ -27,6 +28,7 @@ interface EditCompanyGroupModalProps {
   onClose: () => void;
   supergroupId: number;
   companyId?: number;
+  chatId?: string;  // For inviting clients to chat's telegram group
   onSuccess?: () => void;
   initialCompanyType?: string;
   preloadedCompanyData?: CompanyFormData;
@@ -38,6 +40,7 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
   onClose,
   supergroupId,
   companyId,
+  chatId,
   onSuccess,
   initialCompanyType,
   preloadedCompanyData,
@@ -91,6 +94,12 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
   const [originalIsProject, setOriginalIsProject] = useState<boolean>(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+
+  // Состояние для приглашения клиента
+  const [invitePhone, setInvitePhone] = useState('');
+  const [inviteUsername, setInviteUsername] = useState('');
+  const [isInviting, setIsInviting] = useState(false);
+  const [isGeneratingLink, setIsGeneratingLink] = useState(false);
 
   // Загрузка данных при открытии модала (только если данные не предзагружены)
   useEffect(() => {
@@ -464,6 +473,128 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
         description: "Не удалось скопировать ссылку",
         variant: "error"
       });
+    }
+  };
+
+  // Генерация новой ссылки приглашения
+  const handleGenerateInviteLink = async () => {
+    if (!supergroupId) return;
+
+    setIsGeneratingLink(true);
+    try {
+      const result = await generateInviteLink(supergroupId);
+
+      if (result.success && result.invite_link) {
+        // Обновляем локальное состояние
+        setSupergroupFormData(prev => ({
+          ...prev,
+          invite_link: result.invite_link || ''
+        }));
+
+        toast({
+          title: "Ссылка сгенерирована",
+          description: "Новая ссылка приглашения создана",
+          variant: "success"
+        });
+      } else {
+        toast({
+          title: "Ошибка генерации",
+          description: result.error || "Не удалось создать ссылку",
+          variant: "error"
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to generate invite link', error, { component: 'EditCompanyGroupModal' });
+      toast({
+        title: "Ошибка",
+        description: "Не удалось сгенерировать ссылку",
+        variant: "error"
+      });
+    } finally {
+      setIsGeneratingLink(false);
+    }
+  };
+
+  // Приглашение клиента по телефону или username
+  const handleInviteClient = async () => {
+    if (!supergroupId) {
+      toast({
+        title: "Ошибка",
+        description: "ID группы не указан",
+        variant: "error"
+      });
+      return;
+    }
+
+    const contact = invitePhone.trim() || inviteUsername.trim();
+    if (!contact) {
+      toast({
+        title: "Ошибка",
+        description: "Укажите телефон или @username клиента",
+        variant: "error"
+      });
+      return;
+    }
+
+    // Используем название компании/проекта как имя клиента для ImportContactsRequest
+    const clientName = companyFormData.company_name || supergroupFormData.title || 'Client';
+
+    setIsInviting(true);
+    try {
+      const result = await inviteToGroup(supergroupId, {
+        contact,
+        client_name: clientName
+      });
+
+      if (result.success) {
+        toast({
+          title: "Клиент приглашен",
+          description: result.status === 'already_member'
+            ? `${clientName} уже в группе`
+            : `${clientName} добавлен в группу`,
+          variant: "success"
+        });
+
+        // Очищаем поля после успешного приглашения
+        setInvitePhone('');
+        setInviteUsername('');
+      } else {
+        // Обработка ошибок
+        if (result.status === 'not_found') {
+          toast({
+            title: "Пользователь не найден",
+            description: "Контакт не найден в Telegram. Используйте ссылку приглашения.",
+            variant: "error"
+          });
+        } else if (result.status === 'privacy_restricted') {
+          toast({
+            title: "Ограничение приватности",
+            description: "Пользователь запретил добавление. Отправьте ссылку приглашения.",
+            variant: "error"
+          });
+        } else if (result.status === 'rate_limit') {
+          toast({
+            title: "Лимит запросов",
+            description: "Превышен лимит Telegram. Используйте ссылку приглашения.",
+            variant: "error"
+          });
+        } else {
+          toast({
+            title: "Ошибка приглашения",
+            description: result.error || "Не удалось пригласить клиента",
+            variant: "error"
+          });
+        }
+      }
+    } catch (error: any) {
+      logger.error('Failed to invite client', error, { component: 'EditCompanyGroupModal' });
+      toast({
+        title: "Ошибка приглашения",
+        description: "Не удалось пригласить клиента",
+        variant: "error"
+      });
+    } finally {
+      setIsInviting(false);
     }
   };
 
@@ -876,31 +1007,92 @@ export const EditCompanyGroupModal: React.FC<EditCompanyGroupModalProps> = ({
                 {/* Остальные поля во всю ширину */}
 
                 <div className="grid grid-cols-2 gap-4">
-                  <GlassInput 
-                    label="ID группы" 
-                    value={supergroupId ? `-100${Math.abs(supergroupId)}` : ''} 
-                    readOnly 
+                  <GlassInput
+                    label="ID группы"
+                    value={supergroupId ? `-100${Math.abs(supergroupId)}` : ''}
+                    readOnly
                     placeholder="ID группы"
                   />
 
                   <div className="relative">
-                    <GlassInput 
-                      label="Ссылка приглашения" 
-                      value={supergroupFormData.invite_link || ''} 
-                      placeholder="https://t.me/..." 
-                      readOnly 
+                    <GlassInput
+                      label="Ссылка приглашения"
+                      value={supergroupFormData.invite_link || ''}
+                      placeholder="https://t.me/..."
+                      readOnly
                     />
-                    {supergroupFormData.invite_link && (
-                      <button 
-                        type="button" 
-                        onClick={copyInviteLink} 
-                        className="absolute right-3 top-[50%] -translate-y-1/2 p-1 text-text-muted hover:text-text-white transition-colors z-10" 
-                        title="Копировать ссылку" 
-                        style={{ top: 'calc(50% + 16px)' }}
+                    <div className="absolute right-3 top-[50%] -translate-y-1/2 flex gap-1 z-10" style={{ top: 'calc(50% + 16px)' }}>
+                      {supergroupFormData.invite_link && (
+                        <button
+                          type="button"
+                          onClick={copyInviteLink}
+                          className="p-1 text-text-muted hover:text-text-white transition-colors"
+                          title="Копировать ссылку"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleGenerateInviteLink}
+                        disabled={isGeneratingLink}
+                        className="p-1 text-text-muted hover:text-accent-blue transition-colors disabled:opacity-50"
+                        title="Сгенерировать новую ссылку"
                       >
-                        <Copy className="h-4 w-4" />
+                        <RefreshCw className={`h-4 w-4 ${isGeneratingLink ? 'animate-spin' : ''}`} />
                       </button>
-                    )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Секция приглашения клиента */}
+                <div className="pt-4 border-t border-glass-border">
+                  <h4 className="text-text-white font-medium text-sm mb-3 flex items-center gap-2">
+                    <UserPlus className="w-4 h-4 text-accent-green" />
+                    Пригласить клиента
+                  </h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="relative">
+                      <GlassInput
+                        label="Телефон Telegram"
+                        value={invitePhone}
+                        onChange={(e) => setInvitePhone(e.target.value)}
+                        placeholder="+79001234567"
+                        disabled={isInviting}
+                      />
+                      {invitePhone && (
+                        <Phone className="absolute right-3 top-9 h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                    <div className="relative">
+                      <GlassInput
+                        label="Username Telegram"
+                        value={inviteUsername}
+                        onChange={(e) => setInviteUsername(e.target.value)}
+                        placeholder="@username"
+                        disabled={isInviting}
+                      />
+                      {inviteUsername && (
+                        <AtSign className="absolute right-3 top-9 h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between mt-3">
+                    <p className="text-xs text-muted-foreground">
+                      Укажите телефон или @username для автоматического приглашения
+                    </p>
+                    <GlassButton
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      onClick={handleInviteClient}
+                      disabled={isInviting || (!invitePhone.trim() && !inviteUsername.trim())}
+                      loading={isInviting}
+                      className="bg-accent-green hover:bg-accent-green/90"
+                    >
+                      <UserPlus className="w-4 h-4 mr-1" />
+                      Пригласить
+                    </GlassButton>
                   </div>
                 </div>
               </div>

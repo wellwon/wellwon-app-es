@@ -84,7 +84,8 @@ export function useChatList(options: UseChatListOptions = {}) {
           const optimisticMap = new Map(optimisticEntries.map(o => [o.id, o]));
 
           // Placeholder names that should NOT overwrite real names
-          const PLACEHOLDER_NAMES = ['Чат компании', 'Chat Company', 'General', 'Новый чат', 'New chat', ''];
+          // NOTE: "Чат компании" is the REAL name for company chats, not a placeholder!
+          const PLACEHOLDER_NAMES = ['Chat Company', 'General', 'Новый чат', 'New chat', ''];
 
           // Merge API data with optimistic entries, preserving telegram_supergroup_id and real names
           const mergedApiChats = apiChats.map(apiChat => {
@@ -238,7 +239,8 @@ export function useChatList(options: UseChatListOptions = {}) {
             const fullChat = await chatApi.getChatById(chatId);
             if (fullChat && !abortController.signal.aborted) {
               // Placeholder names that should NOT overwrite real names
-              const PLACEHOLDER_NAMES = ['Чат компании', 'Chat Company', 'General', 'Новый чат', 'New chat', ''];
+              // NOTE: "Чат компании" is the REAL name for company chats, not a placeholder!
+              const PLACEHOLDER_NAMES = ['Chat Company', 'General', 'Новый чат', 'New chat', ''];
 
               queryClient.setQueryData(
                 chatKeys.list({ includeArchived, limit }),
@@ -302,7 +304,8 @@ export function useChatList(options: UseChatListOptions = {}) {
       logger.debug('WSE: Chat updated', { chatId, newName: updatedChat.name });
 
       // Placeholder names that should NOT overwrite real names
-      const PLACEHOLDER_NAMES = ['Чат компании', 'Chat Company', 'General', 'Новый чат', 'New chat', ''];
+      // NOTE: "Чат компании" is the REAL name for company chats, not a placeholder!
+      const PLACEHOLDER_NAMES = ['Chat Company', 'General', 'Новый чат', 'New chat', ''];
 
       queryClient.setQueryData(
         chatKeys.list({ includeArchived, limit }),
@@ -620,9 +623,10 @@ export function useChatList(options: UseChatListOptions = {}) {
       // Create chat entry from saga completion data
       // CRITICAL: Keep _isOptimistic: true until the chat appears in API response
       // Otherwise queryFn will drop it on refetch since it only preserves _isOptimistic entries
+      // NOTE: Chat name is ALWAYS "Чат компании" - NOT the company name!
       const newChat: OptimisticChatListItem = {
         id: chatId,
-        name: data.company_name || 'General',
+        name: 'Чат компании',
         chat_type: 'company',
         is_active: true,
         created_at: data.timestamp || new Date().toISOString(),

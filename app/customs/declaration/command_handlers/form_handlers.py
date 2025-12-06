@@ -30,11 +30,11 @@ from app.customs.exceptions import (
 from app.customs.enums import DocflowStatus
 from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
-from app.infra.kontur.adapter import get_kontur_adapter
 from app.infra.kontur.models import CreateDocumentRequest, DistributionItem
 
 if TYPE_CHECKING:
     from app.infra.cqrs.handler_dependencies import HandlerDependencies
+    from app.customs.ports.kontur_declarant_port import KonturDeclarantPort
 
 log = get_logger("wellwon.customs.declaration.form_handlers")
 
@@ -60,6 +60,8 @@ class UpdateFormDataHandler(BaseCommandHandler):
             transport_topic=CUSTOMS_TRANSPORT_TOPIC,
             event_store=deps.event_store
         )
+        # Port injection: kontur_adapter implements KonturDeclarantPort
+        self._kontur: 'KonturDeclarantPort' = deps.kontur_adapter
 
     async def handle(self, command: UpdateFormDataCommand) -> uuid.UUID:
         log.info(f"Updating form data for declaration {command.declaration_id}")
@@ -83,11 +85,10 @@ class UpdateFormDataHandler(BaseCommandHandler):
             form_data=command.form_data,
         )
 
-        # If submitted to Kontur, sync form data
+        # If submitted to Kontur, sync form data via port
         if declaration.state.kontur_docflow_id:
-            adapter = await get_kontur_adapter()
             try:
-                success = await adapter.import_form_json(
+                success = await self._kontur.import_form_json(
                     docflow_id=declaration.state.kontur_docflow_id,
                     form_id="dt",
                     data=command.form_data,
@@ -135,6 +136,8 @@ class ImportGoodsHandler(BaseCommandHandler):
             transport_topic=CUSTOMS_TRANSPORT_TOPIC,
             event_store=deps.event_store
         )
+        # Port injection: kontur_adapter implements KonturDeclarantPort
+        self._kontur: 'KonturDeclarantPort' = deps.kontur_adapter
 
     async def handle(self, command: ImportGoodsCommand) -> uuid.UUID:
         log.info(
@@ -162,11 +165,10 @@ class ImportGoodsHandler(BaseCommandHandler):
             replace_existing=command.replace_existing,
         )
 
-        # If submitted to Kontur, sync goods
+        # If submitted to Kontur, sync goods via port
         if declaration.state.kontur_docflow_id:
-            adapter = await get_kontur_adapter()
             try:
-                success = await adapter.import_goods_data(
+                success = await self._kontur.import_goods_data(
                     docflow_id=declaration.state.kontur_docflow_id,
                     form_id="dt",
                     goods=command.goods,
@@ -215,6 +217,8 @@ class SetOrganizationHandler(BaseCommandHandler):
             transport_topic=CUSTOMS_TRANSPORT_TOPIC,
             event_store=deps.event_store
         )
+        # Port injection: kontur_adapter implements KonturDeclarantPort
+        self._kontur: 'KonturDeclarantPort' = deps.kontur_adapter
 
     async def handle(self, command: SetOrganizationCommand) -> uuid.UUID:
         log.info(
@@ -242,11 +246,10 @@ class SetOrganizationHandler(BaseCommandHandler):
             grafa=command.grafa,
         )
 
-        # If submitted to Kontur, sync organization
+        # If submitted to Kontur, sync organization via port
         if declaration.state.kontur_docflow_id:
-            adapter = await get_kontur_adapter()
             try:
-                success = await adapter.set_form_contractor(
+                success = await self._kontur.set_form_contractor(
                     docflow_id=declaration.state.kontur_docflow_id,
                     form_id="dt",
                     org_id=command.organization_id,
@@ -349,6 +352,8 @@ class AttachDocumentHandler(BaseCommandHandler):
             transport_topic=CUSTOMS_TRANSPORT_TOPIC,
             event_store=deps.event_store
         )
+        # Port injection: kontur_adapter implements KonturDeclarantPort
+        self._kontur: 'KonturDeclarantPort' = deps.kontur_adapter
 
     async def handle(self, command: AttachDocumentCommand) -> uuid.UUID:
         log.info(
@@ -381,9 +386,8 @@ class AttachDocumentHandler(BaseCommandHandler):
             file_id=command.file_id,
         )
 
-        # If submitted to Kontur, sync document
+        # If submitted to Kontur, sync document via port
         if declaration.state.kontur_docflow_id:
-            adapter = await get_kontur_adapter()
             try:
                 doc_request = CreateDocumentRequest(
                     name=command.name,
@@ -393,7 +397,7 @@ class AttachDocumentHandler(BaseCommandHandler):
                     grafa44_code=command.grafa44_code,
                     belongs_to_all_goods=command.belongs_to_all_goods,
                 )
-                result = await adapter.create_documents(
+                result = await self._kontur.create_documents(
                     docflow_id=declaration.state.kontur_docflow_id,
                     documents=[doc_request],
                 )
@@ -494,6 +498,8 @@ class CreateDtsHandler(BaseCommandHandler):
             transport_topic=CUSTOMS_TRANSPORT_TOPIC,
             event_store=deps.event_store
         )
+        # Port injection: kontur_adapter implements KonturDeclarantPort
+        self._kontur: 'KonturDeclarantPort' = deps.kontur_adapter
 
     async def handle(self, command: CreateDtsCommand) -> str:
         log.info(
@@ -520,9 +526,6 @@ class CreateDtsHandler(BaseCommandHandler):
                 "before creating DTS"
             )
 
-        # Get Kontur adapter
-        adapter = await get_kontur_adapter()
-
         # Convert distribution items to Kontur model
         distribution_items = [
             DistributionItem(
@@ -536,9 +539,9 @@ class CreateDtsHandler(BaseCommandHandler):
             for item in command.distribution_items
         ]
 
-        # Create DTS via Kontur calculator
+        # Create DTS via Kontur calculator (via port)
         try:
-            dts_doc = await adapter.create_dts_with_calculator(
+            dts_doc = await self._kontur.create_dts_with_calculator(
                 docflow_id=declaration.state.kontur_docflow_id,
                 dts_type=command.dts_type.value,
                 items=distribution_items,

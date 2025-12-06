@@ -33,6 +33,11 @@ class KonturAuthenticationError(KonturClientError):
     pass
 
 
+class KonturSessionExpiredError(KonturClientError):
+    """401 Unauthorized - Session expired (can retry with re-auth)"""
+    pass
+
+
 class KonturAuthorizationError(KonturClientError):
     """403 Forbidden - Valid API key but access denied to resource"""
     pass

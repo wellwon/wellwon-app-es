@@ -298,7 +298,7 @@ class EventTransformer:
             'id': str(event.get('company_id', event.get('aggregate_id', ''))),  # alias for frontend
             'name': event.get('name'),
             'company_name': event.get('name'),  # alias for frontend
-            'company_type': event.get('company_type', 'company'),
+            'client_type': event.get('client_type', 'company'),
             'description': event.get('description'),
             'owner_id': str(event.get('owner_id', '')) if event.get('owner_id') else None,
             'created_by': str(event.get('created_by', '')) if event.get('created_by') else None,

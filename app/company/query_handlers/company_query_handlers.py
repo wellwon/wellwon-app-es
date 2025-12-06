@@ -68,7 +68,7 @@ class GetCompanyByIdQueryHandler(BaseQueryHandler[GetCompanyByIdQuery, CompanyDe
         return CompanyDetail(
             id=company.id,
             name=company.name,
-            company_type=company.company_type,
+            client_type=company.client_type,
             created_by=company.created_by,
             created_at=company.created_at,
             updated_at=company.updated_at,
@@ -114,7 +114,7 @@ class GetCompaniesQueryHandler(BaseQueryHandler[GetCompaniesQuery, List[CompanyS
             CompanySummary(
                 id=c.id,
                 name=c.name,
-                company_type=c.company_type,
+                client_type=c.client_type,
                 vat=c.vat,
                 city=c.city,
                 user_count=c.user_count,
@@ -149,7 +149,7 @@ class GetCompaniesByUserQueryHandler(BaseQueryHandler[GetCompaniesByUserQuery, L
                 joined_at=uc.joined_at,
                 is_active=uc.is_active,
                 company_name=uc.company_name,
-                company_type=uc.company_type,
+                client_type=uc.client_type,
             )
             for uc in user_companies
         ]
@@ -173,7 +173,7 @@ class SearchCompaniesQueryHandler(BaseQueryHandler[SearchCompaniesQuery, List[Co
             CompanySummary(
                 id=c.id,
                 name=c.name,
-                company_type=c.company_type,
+                client_type=c.client_type,
                 vat=c.vat,
                 city=c.city,
                 user_count=c.user_count,
@@ -201,7 +201,7 @@ class GetCompanyByVatQueryHandler(BaseQueryHandler[GetCompanyByVatQuery, Optiona
         return CompanyDetail(
             id=company.id,
             name=company.name,
-            company_type=company.company_type,
+            client_type=company.client_type,
             created_by=company.created_by,
             created_at=company.created_at,
             updated_at=company.updated_at,
@@ -336,7 +336,7 @@ class GetCompanyByTelegramGroupQueryHandler(BaseQueryHandler[GetCompanyByTelegra
         return CompanyDetail(
             id=company.id,
             name=company.name,
-            company_type=company.company_type,
+            client_type=company.client_type,
             created_by=company.created_by,
             created_at=company.created_at,
             updated_at=company.updated_at,

@@ -23,7 +23,7 @@ class CreateCompanyCommand(Command):
     """Create a new company"""
     company_id: UUID = Field(default_factory=generate_uuid)
     name: str = Field(..., min_length=1, max_length=255)
-    company_type: str = Field(default="company", description="company, project, or individual")
+    client_type: str = Field(default="company", description="company or project")
     created_by: UUID
 
     # Legal info (Russian business)
@@ -60,12 +60,12 @@ class CreateCompanyCommand(Command):
     # If provided, saga will link this existing chat to the company
     link_chat_id: Optional[UUID] = Field(None, description="Existing chat ID to link to company")
 
-    @field_validator('company_type')
+    @field_validator('client_type')
     @classmethod
-    def validate_company_type(cls, v: str) -> str:
+    def validate_client_type(cls, v: str) -> str:
         valid_types = [t.value for t in CompanyType]
         if v not in valid_types:
-            raise ValueError(f"company_type must be one of {valid_types}")
+            raise ValueError(f"client_type must be one of {valid_types}")
         return v
 
 
@@ -76,7 +76,7 @@ class UpdateCompanyCommand(Command):
 
     # Only include changed fields
     name: Optional[str] = Field(None, max_length=255)
-    company_type: Optional[str] = None
+    client_type: Optional[str] = None
     vat: Optional[str] = Field(None, max_length=20)
     ogrn: Optional[str] = Field(None, max_length=20)
     kpp: Optional[str] = Field(None, max_length=20)
@@ -94,14 +94,14 @@ class UpdateCompanyCommand(Command):
     tg_manager_3: Optional[str] = Field(None, max_length=100)
     tg_support: Optional[str] = Field(None, max_length=100)
 
-    @field_validator('company_type')
+    @field_validator('client_type')
     @classmethod
-    def validate_company_type(cls, v: Optional[str]) -> Optional[str]:
+    def validate_client_type(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return v
         valid_types = [t.value for t in CompanyType]
         if v not in valid_types:
-            raise ValueError(f"company_type must be one of {valid_types}")
+            raise ValueError(f"client_type must be one of {valid_types}")
         return v
 
 

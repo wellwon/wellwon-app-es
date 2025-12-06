@@ -115,6 +115,21 @@ class GetCustomsOfficesQuery(Query):
     country_code: str = "RU"
 
 
+class GetKonturOrganizationsQuery(Query):
+    """Get organizations from Kontur API"""
+    pass
+
+
+class GetKonturEmployeesQuery(Query):
+    """Get employees for organization from Kontur API"""
+    organization_id: str
+
+
+class GetKonturDeclarationTypesQuery(Query):
+    """Get declaration types from Kontur API"""
+    pass
+
+
 # =============================================================================
 # Query Result Types
 # =============================================================================

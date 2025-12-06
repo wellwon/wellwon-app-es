@@ -429,7 +429,7 @@ class ChatProjector:
         This enables bidirectional delivery tracking:
         - Single checkmark: Message sent to WellWon server
         - Double checkmark: Message delivered to Telegram (this event)
-        - Blue double checkmark: Message read on Telegram (MessagesMarkedAsRead)
+        - Blue double checkmark: Message read on Telegram (UpdateReadChannelDiscussionOutbox)
         """
         event_data = envelope.event_data
         chat_id = uuid.UUID(event_data['chat_id']) if isinstance(event_data['chat_id'], str) else event_data['chat_id']
@@ -655,3 +655,73 @@ class ChatProjector:
             if 'foreign key' in str(e).lower():
                 raise RetriableProjectionError(f"Chat {chat_id} not yet projected") from e
             raise
+
+    # =========================================================================
+    # Client Invitation Projections (PostgreSQL - telegram_group_members)
+    # =========================================================================
+
+    @async_projection("ClientInvited")
+    @monitor_projection
+    async def on_client_invited(self, envelope: EventEnvelope) -> None:
+        """
+        Project ClientInvited event to telegram_group_members table.
+
+        Records successfully invited external clients for tracking.
+        """
+        event_data = envelope.event_data
+        chat_id = envelope.aggregate_id
+
+        log.info(f"Projecting ClientInvited: chat_id={chat_id}, telegram_user_id={event_data.get('telegram_user_id')}")
+
+        # Only project successful invitations
+        if event_data.get('status') not in ('success', 'already_member'):
+            log.debug(f"Skipping ClientInvited projection - status={event_data.get('status')}")
+            return
+
+        telegram_user_id = event_data.get('telegram_user_id')
+        if not telegram_user_id:
+            log.warning("ClientInvited event missing telegram_user_id")
+            return
+
+        # Get supergroup_id from chat
+        chat = await self.chat_read_repo.get_chat_by_id(chat_id)
+        if not chat or not chat.telegram_supergroup_id:
+            log.warning(f"Chat {chat_id} not found or not linked to Telegram supergroup")
+            return
+
+        # Parse name
+        client_name = event_data.get('client_name', '')
+        names = client_name.split(' ', 1) if client_name else ['', '']
+        first_name = names[0]
+        last_name = names[1] if len(names) > 1 else None
+
+        try:
+            await self.chat_read_repo.upsert_telegram_group_member(
+                supergroup_id=chat.telegram_supergroup_id,
+                telegram_user_id=telegram_user_id,
+                first_name=first_name,
+                last_name=last_name,
+                status='member',
+                joined_at=envelope.stored_at,
+            )
+            log.info(f"ClientInvited projection SUCCESS: user={telegram_user_id} in group={chat.telegram_supergroup_id}")
+        except Exception as e:
+            log.error(f"ClientInvited projection FAILED: {e}", exc_info=True)
+            raise
+
+    @async_projection("ClientInvitationFailed")
+    async def on_client_invitation_failed(self, envelope: EventEnvelope) -> None:
+        """
+        Handle ClientInvitationFailed event.
+
+        No database update needed - failures are logged but not persisted.
+        This handler exists to acknowledge the event and prevent errors.
+        """
+        event_data = envelope.event_data
+        chat_id = envelope.aggregate_id
+
+        log.warning(
+            f"ClientInvitationFailed: chat_id={chat_id}, "
+            f"contact={event_data.get('contact_value')}, "
+            f"reason={event_data.get('reason')}"
+        )

@@ -349,6 +349,45 @@ class TelegramMessageReceived(BaseEvent):
 
 
 # =============================================================================
+# Client Invitation Events
+# =============================================================================
+
+@domain_event(category="domain")
+class ClientInvited(BaseEvent):
+    """
+    Event emitted when a client is invited to Telegram group.
+
+    Used for tracking invitations and populating telegram_group_members table.
+    """
+    event_type: Literal["ClientInvited"] = "ClientInvited"
+    chat_id: uuid.UUID
+    contact_type: str  # 'phone' or 'username'
+    contact_value: str  # Phone number or @username
+    telegram_user_id: int  # Resolved Telegram user ID
+    client_name: str  # Client name for display
+    invited_by: uuid.UUID
+    status: str = "success"  # 'success', 'already_member'
+
+
+@domain_event(category="domain")
+class ClientInvitationFailed(BaseEvent):
+    """
+    Event emitted when client invitation fails.
+
+    Reasons:
+    - user_not_found: User not on Telegram or number not registered
+    - privacy_restricted: User blocked invitations from unknown users
+    - rate_limit: Telegram API rate limit hit
+    - already_member: User is already in the group (not really a failure)
+    """
+    event_type: Literal["ClientInvitationFailed"] = "ClientInvitationFailed"
+    chat_id: uuid.UUID
+    contact_value: str  # Phone number or @username that failed
+    reason: str  # 'user_not_found', 'privacy_restricted', 'rate_limit', etc.
+    invited_by: uuid.UUID
+
+
+# =============================================================================
 # Event Type Registry (for deserialization)
 # =============================================================================
 
@@ -377,4 +416,6 @@ CHAT_EVENT_TYPES = {
     "TelegramChatLinked": TelegramChatLinked,
     "TelegramChatUnlinked": TelegramChatUnlinked,
     "TelegramMessageReceived": TelegramMessageReceived,
+    "ClientInvited": ClientInvited,
+    "ClientInvitationFailed": ClientInvitationFailed,
 }

@@ -322,3 +322,26 @@ class UpdateMessageFileUrlCommand(Command):
     file_name: Optional[str] = None
     file_size: Optional[int] = None
     file_type: Optional[str] = None
+
+
+# =============================================================================
+# Client Invitation Commands
+# =============================================================================
+
+class InviteClientCommand(Command):
+    """
+    Invite external client to chat's Telegram group.
+
+    Auto-resolves contact (phone or @username) to telegram_user_id via MTProto
+    and invites them to the group.
+
+    Args:
+        chat_id: Chat whose Telegram group to invite client to
+        contact: Phone (+79001234567) or username (@username or username)
+        client_name: Client's name for contact import (e.g., "Ivan Petrov")
+        invited_by: User who initiated the invitation
+    """
+    chat_id: UUID
+    contact: str = Field(..., min_length=1, max_length=100, description="Phone (+79001234567) or @username")
+    client_name: str = Field(..., min_length=1, max_length=255, description="Client name for contact import")
+    invited_by: UUID

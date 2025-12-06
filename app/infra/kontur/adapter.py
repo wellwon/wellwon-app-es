@@ -4,12 +4,15 @@
 # Endpoints: 32 (delegated to 8 specialized clients)
 # =============================================================================
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from functools import lru_cache
 import httpx
 
 from app.config.kontur_config import get_kontur_config, KonturConfig
 from app.config.logging_config import get_logger
+
+if TYPE_CHECKING:
+    from app.infra.persistence.cache_manager import CacheManager
 from app.infra.kontur.models import (
     CommonOrg,
     DocflowDto,
@@ -65,15 +68,26 @@ class KonturAdapter:
     - Request/response logging
     """
 
-    def __init__(self, config: Optional[KonturConfig] = None):
+    # Cache key for Kontur session ID
+    CACHE_KEY_SESSION = "wellwon:kontur:session_id"
+    SESSION_TTL_SECONDS = 86400  # 24 hours - long-lived, we refresh on 401 error
+
+    def __init__(
+        self,
+        config: Optional[KonturConfig] = None,
+        cache_manager: Optional['CacheManager'] = None
+    ):
         """
         Initialize Kontur adapter.
 
         Args:
             config: Optional KonturConfig (uses get_kontur_config() if not provided)
+            cache_manager: Optional CacheManager for session caching (recommended)
         """
         self.config = config or get_kontur_config()
+        self._cache_manager = cache_manager
         self._http_client: Optional[httpx.AsyncClient] = None
+        self._session_id: Optional[str] = None  # In-memory fallback
 
         # Lazy-initialized sub-clients
         self._organizations_client: Optional[OrganizationsClient] = None
@@ -87,18 +101,142 @@ class KonturAdapter:
 
         # Initialization logged by startup/adapters.py
 
+    async def _refresh_session(self) -> None:
+        """Refresh session - called by sub-clients on 401 error."""
+        log.info("Refreshing Kontur session due to 401 error")
+        await self.invalidate_session()
+        await self.authenticate(force=True)
+
     def _get_http_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client (lazy initialization)."""
         if self._http_client is None:
+            headers = {
+                "X-Kontur-ApiKey": self.config.get_api_key(),
+                "Content-Type": "application/json"
+            }
+            # Add session ID if available
+            if self._session_id:
+                headers["Authorization"] = self._session_id
+
             self._http_client = httpx.AsyncClient(
-                headers={
-                    "X-Kontur-ApiKey": self.config.api_key.get_secret_value(),
-                    "Content-Type": "application/json"
-                },
+                headers=headers,
                 timeout=self.config.timeout_seconds
             )
             log.debug("HTTP client initialized")
         return self._http_client
+
+    async def _get_cached_session(self) -> Optional[str]:
+        """Get session ID from cache."""
+        if self._cache_manager:
+            try:
+                return await self._cache_manager.get(self.CACHE_KEY_SESSION)
+            except Exception as e:
+                log.warning(f"Failed to get session from cache: {e}")
+        return None
+
+    async def _set_cached_session(self, session_id: str) -> None:
+        """Store session ID in cache."""
+        if self._cache_manager:
+            try:
+                await self._cache_manager.set(
+                    self.CACHE_KEY_SESSION,
+                    session_id,
+                    ttl=self.SESSION_TTL_SECONDS
+                )
+            except Exception as e:
+                log.warning(f"Failed to cache session: {e}")
+
+    async def _clear_cached_session(self) -> None:
+        """Clear session ID from cache."""
+        if self._cache_manager:
+            try:
+                await self._cache_manager.delete(self.CACHE_KEY_SESSION)
+            except Exception as e:
+                log.warning(f"Failed to clear cached session: {e}")
+
+    async def authenticate(self, force: bool = False) -> str:
+        """
+        Authenticate with Kontur API and obtain session ID.
+
+        Calls POST /auth/v1/authenticate with login, password, and API key.
+        The returned session ID is stored in cache and used for subsequent requests.
+
+        Args:
+            force: If True, skip cache and always get new session
+
+        Returns:
+            Session ID string
+
+        Raises:
+            ValueError: If credentials not configured
+            PermissionError: If authentication fails (403)
+            RuntimeError: If authentication fails for other reasons
+        """
+        # Try cache first (unless forced)
+        if not force:
+            cached_session = await self._get_cached_session()
+            if cached_session:
+                self._session_id = cached_session
+                log.debug("Using cached Kontur session")
+                return cached_session
+
+        if not self.config.has_credentials():
+            raise ValueError(
+                "Kontur credentials not configured. "
+                "Set KONTUR_API_KEY, KONTUR_LOGIN, and KONTUR_PASSWORD in .env"
+            )
+
+        auth_url = f"{self.config.base_url}/auth/v1/authenticate"
+
+        async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
+            response = await client.post(
+                auth_url,
+                params={
+                    "login": self.config.login,
+                    "pass": self.config.get_password(),
+                },
+                headers={
+                    "X-Kontur-ApiKey": self.config.get_api_key(),
+                    "Content-Type": "application/json"
+                },
+                content="{}"  # Empty JSON body required
+            )
+
+            if response.status_code == 200:
+                self._session_id = response.text.strip().strip('"')
+                # Cache the session
+                await self._set_cached_session(self._session_id)
+                # Reset HTTP client to pick up new session ID
+                if self._http_client:
+                    await self._http_client.aclose()
+                    self._http_client = None
+                log.info("Kontur authentication successful")
+                return self._session_id
+            elif response.status_code == 403:
+                log.error("Kontur authentication failed: invalid credentials or API key")
+                raise PermissionError("Kontur authentication failed: invalid login, password, or API key")
+            else:
+                log.error(f"Kontur authentication failed: HTTP {response.status_code}")
+                raise RuntimeError(f"Kontur authentication failed: HTTP {response.status_code}")
+
+    @property
+    def is_authenticated(self) -> bool:
+        """Check if we have a valid session ID in memory."""
+        return self._session_id is not None
+
+    async def ensure_authenticated(self) -> None:
+        """Ensure we have a valid session ID, authenticating if needed."""
+        if not self._session_id:
+            await self.authenticate()
+
+    async def invalidate_session(self) -> None:
+        """Invalidate current session and clear cache."""
+        self._session_id = None
+        await self._clear_cached_session()
+        if self._http_client:
+            await self._http_client.aclose()
+            self._http_client = None
+        log.info("Kontur session invalidated")
 
     async def close(self):
         """Close HTTP client and cleanup resources."""
@@ -117,7 +255,8 @@ class KonturAdapter:
         if self._organizations_client is None:
             self._organizations_client = OrganizationsClient(
                 self._get_http_client(),
-                self.config
+                self.config,
+                session_refresh_callback=self._refresh_session
             )
         return self._organizations_client
 
@@ -157,7 +296,8 @@ class KonturAdapter:
         if self._docflows_client is None:
             self._docflows_client = DocflowsClient(
                 self._get_http_client(),
-                self.config
+                self.config,
+                session_refresh_callback=self._refresh_session
             )
         return self._docflows_client
 
@@ -239,7 +379,8 @@ class KonturAdapter:
         if self._documents_client is None:
             self._documents_client = DocumentsClient(
                 self._get_http_client(),
-                self.config
+                self.config,
+                session_refresh_callback=self._refresh_session
             )
         return self._documents_client
 
@@ -287,7 +428,8 @@ class KonturAdapter:
         if self._forms_client is None:
             self._forms_client = FormsClient(
                 self._get_http_client(),
-                self.config
+                self.config,
+                session_refresh_callback=self._refresh_session
             )
         return self._forms_client
 
@@ -363,7 +505,8 @@ class KonturAdapter:
         if self._templates_client is None:
             self._templates_client = TemplatesClient(
                 self._get_http_client(),
-                self.config
+                self.config,
+                session_refresh_callback=self._refresh_session
             )
         return self._templates_client
 
@@ -385,7 +528,8 @@ class KonturAdapter:
         if self._options_client is None:
             self._options_client = OptionsClient(
                 self._get_http_client(),
-                self.config
+                self.config,
+                session_refresh_callback=self._refresh_session
             )
         return self._options_client
 
@@ -427,7 +571,8 @@ class KonturAdapter:
         if self._print_client is None:
             self._print_client = PrintClient(
                 self._get_http_client(),
-                self.config
+                self.config,
+                session_refresh_callback=self._refresh_session
             )
         return self._print_client
 
@@ -457,7 +602,8 @@ class KonturAdapter:
         if self._payments_client is None:
             self._payments_client = PaymentsClient(
                 self._get_http_client(),
-                self.config
+                self.config,
+                session_refresh_callback=self._refresh_session
             )
         return self._payments_client
 
@@ -476,16 +622,43 @@ class KonturAdapter:
 _kontur_adapter_instance: Optional[KonturAdapter] = None
 
 
-@lru_cache(maxsize=1)
-def get_kontur_adapter() -> KonturAdapter:
+def get_kontur_adapter(cache_manager: Optional['CacheManager'] = None) -> KonturAdapter:
     """
     Get Kontur adapter singleton.
+
+    Args:
+        cache_manager: Optional CacheManager for session caching.
+                      Only used on first call to create the singleton.
 
     Returns:
         Global KonturAdapter instance
     """
     global _kontur_adapter_instance
     if _kontur_adapter_instance is None:
-        _kontur_adapter_instance = KonturAdapter()
+        _kontur_adapter_instance = KonturAdapter(cache_manager=cache_manager)
         # Instance creation logged by startup/adapters.py
     return _kontur_adapter_instance
+
+
+async def get_kontur_adapter_async(cache_manager: Optional['CacheManager'] = None) -> KonturAdapter:
+    """
+    Get Kontur adapter singleton with pre-authentication.
+
+    Use this at startup to ensure the adapter is authenticated.
+
+    Args:
+        cache_manager: Optional CacheManager for session caching.
+
+    Returns:
+        Authenticated KonturAdapter instance
+    """
+    adapter = get_kontur_adapter(cache_manager)
+    if adapter.config.has_credentials():
+        await adapter.authenticate()
+    return adapter
+
+
+def reset_kontur_adapter() -> None:
+    """Reset adapter singleton (for testing)."""
+    global _kontur_adapter_instance
+    _kontur_adapter_instance = None

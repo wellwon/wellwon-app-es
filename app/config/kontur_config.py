@@ -26,6 +26,14 @@ class KonturConfig(BaseConfig):
         default=SecretStr(""),
         description="Kontur API key (X-Kontur-ApiKey header)"
     )
+    login: str = Field(
+        default="",
+        description="Kontur account login (email)"
+    )
+    password: SecretStr = Field(
+        default=SecretStr(""),
+        description="Kontur account password"
+    )
 
     # Environment
     environment: str = Field(
@@ -100,9 +108,17 @@ class KonturConfig(BaseConfig):
         """Get API key as plain string"""
         return self.api_key.get_secret_value()
 
+    def get_password(self) -> str:
+        """Get password as plain string"""
+        return self.password.get_secret_value()
+
     def is_configured(self) -> bool:
         """Check if Kontur is properly configured"""
         return bool(self.get_api_key())
+
+    def has_credentials(self) -> bool:
+        """Check if login credentials are configured for auto-auth"""
+        return bool(self.get_api_key() and self.login and self.get_password())
 
 
 @lru_cache(maxsize=1)

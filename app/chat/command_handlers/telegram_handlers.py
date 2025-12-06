@@ -22,6 +22,7 @@ from app.infra.persistence.scylladb import generate_snowflake_id
 
 if TYPE_CHECKING:
     from app.infra.cqrs.handler_dependencies import HandlerDependencies
+    from app.chat.ports.telegram_messaging_port import TelegramMessagingPort
 
 log = logging.getLogger("wellwon.chat.handlers.telegram")
 
@@ -212,7 +213,8 @@ class LinkChatToTelegramHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.telegram_adapter = deps.telegram_adapter
+        # Port injection: telegram_adapter implements TelegramMessagingPort
+        self._telegram: 'TelegramMessagingPort' = deps.telegram_adapter
 
     async def handle(self, command: LinkChatToTelegramCommand) -> uuid.UUID:
         log.info(
@@ -232,11 +234,11 @@ class LinkChatToTelegramHandler(BaseCommandHandler):
         log.info(f"Creating Telegram topic '{chat_name}' in supergroup {command.telegram_supergroup_id}")
 
         try:
-            if not self.telegram_adapter:
+            if not self._telegram:
                 log.warning("TelegramAdapter not available, skipping topic creation")
             else:
-                # Use TelegramAdapter.create_chat_topic() which returns TopicInfo
-                topic_info = await self.telegram_adapter.create_chat_topic(
+                # Use TelegramMessagingPort.create_chat_topic() which returns TopicInfo
+                topic_info = await self._telegram.create_chat_topic(
                     group_id=command.telegram_supergroup_id,
                     topic_name=chat_name,
                     emoji="📝",  # Default emoji for chat topics
@@ -267,6 +269,13 @@ class LinkChatToTelegramHandler(BaseCommandHandler):
             aggregate_id=command.chat_id,
             command=command
         )
+
+        # Notify adapter to update chat filter cache
+        if self._telegram:
+            await self._telegram.notify_chat_linked(
+                chat_id=command.telegram_supergroup_id,
+                topic_id=telegram_topic_id
+            )
 
         log.info(
             f"Chat {command.chat_id} linked to Telegram: "

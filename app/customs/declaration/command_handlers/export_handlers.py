@@ -25,10 +25,10 @@ from app.customs.exceptions import (
 )
 from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
-from app.infra.kontur.adapter import get_kontur_adapter
 
 if TYPE_CHECKING:
     from app.infra.cqrs.handler_dependencies import HandlerDependencies
+    from app.customs.ports.kontur_declarant_port import KonturDeclarantPort
 
 log = get_logger("wellwon.customs.declaration.export_handlers")
 
@@ -54,6 +54,8 @@ class ExportDeclarationPdfHandler(BaseCommandHandler):
             transport_topic=CUSTOMS_TRANSPORT_TOPIC,
             event_store=deps.event_store
         )
+        # Port injection: kontur_adapter implements KonturDeclarantPort
+        self._kontur: 'KonturDeclarantPort' = deps.kontur_adapter
 
     async def handle(self, command: ExportDeclarationPdfCommand) -> bytes:
         log.info(
@@ -81,12 +83,9 @@ class ExportDeclarationPdfHandler(BaseCommandHandler):
                 "before exporting PDF"
             )
 
-        # Get Kontur adapter
-        adapter = await get_kontur_adapter()
-
-        # Export PDF from Kontur
+        # Export PDF from Kontur via port
         try:
-            pdf_bytes = await adapter.print_pdf(
+            pdf_bytes = await self._kontur.print_pdf(
                 docflow_id=declaration.state.kontur_docflow_id,
                 form_id=command.form_id,
             )
@@ -123,6 +122,8 @@ class ExportDeclarationXmlHandler(BaseCommandHandler):
             transport_topic=CUSTOMS_TRANSPORT_TOPIC,
             event_store=deps.event_store
         )
+        # Port injection: kontur_adapter implements KonturDeclarantPort
+        self._kontur: 'KonturDeclarantPort' = deps.kontur_adapter
 
     async def handle(self, command: ExportDeclarationXmlCommand) -> bytes:
         log.info(
@@ -150,12 +151,9 @@ class ExportDeclarationXmlHandler(BaseCommandHandler):
                 "before exporting XML"
             )
 
-        # Get Kontur adapter
-        adapter = await get_kontur_adapter()
-
-        # Export XML from Kontur
+        # Export XML from Kontur via port
         try:
-            xml_bytes = await adapter.get_form_xml(
+            xml_bytes = await self._kontur.get_form_xml(
                 docflow_id=declaration.state.kontur_docflow_id,
                 form_id=command.form_id,
             )
@@ -192,6 +190,8 @@ class ImportDeclarationXmlHandler(BaseCommandHandler):
             transport_topic=CUSTOMS_TRANSPORT_TOPIC,
             event_store=deps.event_store
         )
+        # Port injection: kontur_adapter implements KonturDeclarantPort
+        self._kontur: 'KonturDeclarantPort' = deps.kontur_adapter
 
     async def handle(self, command: ImportDeclarationXmlCommand) -> uuid.UUID:
         log.info(
@@ -219,12 +219,9 @@ class ImportDeclarationXmlHandler(BaseCommandHandler):
                 "before importing XML"
             )
 
-        # Get Kontur adapter
-        adapter = await get_kontur_adapter()
-
-        # Import XML into Kontur
+        # Import XML into Kontur via port
         try:
-            success = await adapter.upload_form_file(
+            success = await self._kontur.upload_form_file(
                 docflow_id=declaration.state.kontur_docflow_id,
                 form_id="dt",
                 file_bytes=command.xml_content,

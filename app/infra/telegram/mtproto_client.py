@@ -477,17 +477,21 @@ class TelegramMTProtoClient:
 
             self._handlers_registered = True
 
+            # CRITICAL: Pre-populate entity cache BEFORE starting update loop
+            # This ensures Telegram knows we're interested in these dialogs and will send
+            # updates (like UpdateReadChannelDiscussionOutbox) for them.
+            # Without this, read receipts may not arrive until after first incoming message.
+            cache_on_connect = getattr(self.config, 'cache_dialogs_on_connect', True)
+            if cache_on_connect and not self._entity_cache_populated:
+                await self._populate_entity_cache()
+                log.info("Entity cache populated BEFORE update loop - updates should now work")
+                print("[MTPROTO] Entity cache populated - Telegram will send updates for all dialogs")
+
             # Start the update loop in a background task
             # This is required for Telethon to actually receive new messages
             self._update_task = asyncio.create_task(self._run_update_loop())
             log.info("MTProto update loop started in background")
             print("[MTPROTO] Update loop started - ready to receive messages")
-
-            # Pre-populate entity cache if configured (Telethon best practice)
-            # This avoids ResolveUsernameRequest calls for entities in our dialogs
-            cache_on_connect = getattr(self.config, 'cache_dialogs_on_connect', True)
-            if cache_on_connect and not self._entity_cache_populated:
-                asyncio.create_task(self._populate_entity_cache())
 
             self._connected = True
             return True
@@ -1076,6 +1080,11 @@ class TelegramMTProtoClient:
             UpdateReadChannelOutbox,  # Channels/supergroups (non-forum)
         )
 
+        # DEBUG: Log ALL read-related updates to understand Telegram's behavior
+        update_type = type(update).__name__
+        if 'Read' in update_type:
+            log.info(f"[RAW-UPDATE] Received {update_type}: {update}")
+
         try:
             update_type = type(update).__name__
 
@@ -1086,13 +1095,22 @@ class TelegramMTProtoClient:
                 topic_id = update.top_msg_id  # Forum topic ID
                 max_id = update.read_max_id
 
+                log.info(
+                    f"[READ-DEBUG] UpdateReadChannelDiscussionOutbox BEFORE filter: "
+                    f"channel={channel_id}, topic={topic_id}, max_id={max_id}, "
+                    f"filter_active={self._is_chat_linked is not None}"
+                )
+
                 # EARLY FILTER: Check if this chat+topic is linked
                 if self._is_chat_linked is not None:
-                    if not self._is_chat_linked(channel_id, topic_id):
+                    is_linked = self._is_chat_linked(channel_id, topic_id)
+                    log.info(f"[READ-DEBUG] is_chat_linked({channel_id}, {topic_id}) = {is_linked}")
+                    if not is_linked:
+                        log.info(f"[READ-DEBUG] Chat NOT linked, skipping read receipt")
                         return  # Not linked - skip silently
 
                 log.info(
-                    f"[READ-DEBUG] Raw UpdateReadChannelDiscussionOutbox: "
+                    f"[READ-DEBUG] Raw UpdateReadChannelDiscussionOutbox PASSED filter: "
                     f"channel={channel_id}, topic={topic_id}, max_id={max_id}"
                 )
 
@@ -1295,6 +1313,13 @@ class TelegramMTProtoClient:
 
             group = result.chats[0]
             log.info(f"Supergroup created: {title} (ID: {group.id})")
+
+            # CRITICAL: Add new group to entity cache immediately
+            # This ensures Telegram will send updates (like read receipts) for this group
+            # Without this, UpdateReadChannelDiscussionOutbox won't arrive until next connect
+            current_time = time.time()
+            self._entity_cache[group.id] = (group, current_time)
+            log.info(f"New supergroup {group.id} added to entity cache for immediate update reception")
 
             return GroupInfo(
                 group_id=group.id,
@@ -1513,6 +1538,12 @@ class TelegramMTProtoClient:
             peer_id = TelegramMTProtoClient._to_telegram_peer_id(group_id)
             log.debug(f"Converting group_id {group_id} to peer_id {peer_id}")
             group = await self._client.get_entity(peer_id)  # type: ignore[union-attr]
+
+            # CRITICAL: Ensure group is in entity cache for update reception
+            # This is needed for read receipts (UpdateReadChannelDiscussionOutbox) to work
+            current_time = time.time()
+            self._entity_cache[group_id] = (group, current_time)
+            log.debug(f"Group {group_id} refreshed in entity cache")
 
             # Convert emoji to ID (only works with Telegram Premium)
             icon_emoji_id = EMOJI_MAP.get(icon_emoji) if icon_emoji else None
@@ -1862,6 +1893,128 @@ class TelegramMTProtoClient:
         except Exception as e:
             log.error(f"Failed to invite user: {e}", exc_info=True)
             return False
+
+    async def resolve_and_invite_by_contact(
+        self,
+        group_id: int,
+        contact: str,
+        client_name: str
+    ) -> Tuple[bool, Optional[int], str]:
+        """
+        Resolve contact (phone or @username) to telegram_user_id and invite to group.
+
+        This method supports both phone numbers and usernames:
+        - Phone: Uses ImportContactsRequest to resolve phone -> user_id
+        - Username: Uses get_entity to resolve username -> user_id
+
+        Args:
+            group_id: Telegram supergroup ID to invite user to
+            contact: Phone (+79001234567) or username (@username or just username)
+            client_name: Client's name for contact import (e.g., "Ivan Petrov")
+
+        Returns:
+            Tuple of (success, telegram_user_id, status)
+            Status values:
+            - 'success': User successfully invited
+            - 'already_member': User already in the group
+            - 'user_not_found': User not registered on Telegram
+            - 'privacy_restricted': User blocked invitations from strangers
+            - 'rate_limit': Telegram rate limit hit
+            - Other error messages
+        """
+        if not await self._ensure_connected():
+            return (False, None, "client_not_connected")
+
+        # Import necessary types
+        from telethon.tl.functions.contacts import ImportContactsRequest
+        from telethon.tl.types import InputPhoneContact
+        from telethon.errors import (
+            UserPrivacyRestrictedError,
+            UserAlreadyParticipantError,
+            FloodWaitError,
+            UserNotMutualContactError,
+            ChatWriteForbiddenError,
+        )
+
+        # Determine contact type
+        contact = contact.strip()
+        is_phone = contact.startswith('+') or contact[0].isdigit()
+        user_id = None
+
+        try:
+            if is_phone:
+                # Phone number: resolve via ImportContactsRequest
+                names = client_name.strip().split(' ', 1)
+                first_name = names[0]
+                last_name = names[1] if len(names) > 1 else ""
+
+                log.info(f"Resolving phone {contact} for contact import")
+
+                result = await self._client(ImportContactsRequest(
+                    contacts=[InputPhoneContact(
+                        client_id=random.randint(0, 9999999),
+                        phone=contact,
+                        first_name=first_name,
+                        last_name=last_name
+                    )]
+                ))
+
+                if not result.imported:
+                    # Phone not registered on Telegram
+                    log.warning(f"Phone {contact} not registered on Telegram")
+                    return (False, None, "user_not_found")
+
+                user_id = result.imported[0].user_id
+                log.info(f"Phone {contact} resolved to user_id={user_id}")
+
+            else:
+                # Username: resolve via get_entity
+                username = contact.lstrip('@')
+                try:
+                    log.info(f"Resolving username @{username}")
+                    user = await self._client.get_entity(username)
+                    user_id = user.id
+                    log.info(f"Username @{username} resolved to user_id={user_id}")
+                except ValueError:
+                    log.warning(f"Username @{username} not found")
+                    return (False, None, "user_not_found")
+
+            # Now invite to group
+            group = await self._client.get_entity(
+                TelegramMTProtoClient._to_telegram_peer_id(group_id)
+            )
+            await self._client(InviteToChannelRequest(
+                channel=group,
+                users=[user_id]
+            ))
+
+            log.info(f"User {user_id} ({contact}) successfully invited to group {group_id}")
+            return (True, user_id, "success")
+
+        except UserAlreadyParticipantError:
+            log.info(f"User {contact} already a member of group {group_id}")
+            return (True, user_id, "already_member")
+
+        except UserPrivacyRestrictedError:
+            log.warning(f"User {contact} has privacy restrictions - cannot invite")
+            return (False, user_id, "privacy_restricted")
+
+        except UserNotMutualContactError:
+            log.warning(f"User {contact} requires mutual contact for invitation")
+            return (False, user_id, "privacy_restricted")
+
+        except ChatWriteForbiddenError:
+            log.error(f"Bot/user doesn't have permission to invite to group {group_id}")
+            return (False, user_id, "permission_denied")
+
+        except FloodWaitError as e:
+            log.warning(f"Rate limited: must wait {e.seconds}s before inviting")
+            return (False, user_id, "rate_limit")
+
+        except Exception as e:
+            error_msg = str(e)
+            log.error(f"Failed to invite {contact} to group {group_id}: {error_msg}", exc_info=True)
+            return (False, user_id, error_msg)
 
     async def remove_user(self, group_id: int, username: str) -> bool:
         """Remove a user from the group"""

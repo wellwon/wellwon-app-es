@@ -23,6 +23,7 @@ from app.common.base.base_command_handler import BaseCommandHandler
 
 if TYPE_CHECKING:
     from app.infra.cqrs.handler_dependencies import HandlerDependencies
+    from app.customs.ports.kontur_declarant_port import KonturDeclarantPort
 
 log = get_logger("wellwon.customs.organization.handlers")
 
@@ -49,6 +50,8 @@ class CreateCommonOrgHandler(BaseCommandHandler):
             transport_topic=CUSTOMS_TRANSPORT_TOPIC,
             event_store=deps.event_store
         )
+        # Port injection: kontur_adapter implements KonturDeclarantPort
+        self._kontur: 'KonturDeclarantPort' = deps.kontur_adapter
 
     async def handle(self, command: CreateCommonOrgCommand) -> uuid.UUID:
         log.info(f"Creating organization: {command.org_name} (INN: {command.inn})")
@@ -95,12 +98,9 @@ class CreateCommonOrgHandler(BaseCommandHandler):
         return command.org_id
 
     async def _fetch_from_registry(self, inn: str) -> Optional[Dict[str, Any]]:
-        """Fetch organization data from EGRUL via Kontur."""
+        """Fetch organization data from EGRUL via Kontur port."""
         try:
-            from app.infra.kontur.adapter import get_kontur_adapter
-
-            adapter = await get_kontur_adapter()
-            kontur_org = await adapter.get_or_create_org_by_inn(inn)
+            kontur_org = await self._kontur.get_or_create_org_by_inn(inn)
 
             if kontur_org:
                 return {
@@ -198,6 +198,8 @@ class SyncOrgFromRegistryHandler(BaseCommandHandler):
             transport_topic=CUSTOMS_TRANSPORT_TOPIC,
             event_store=deps.event_store
         )
+        # Port injection: kontur_adapter implements KonturDeclarantPort
+        self._kontur: 'KonturDeclarantPort' = deps.kontur_adapter
 
     async def handle(self, command: SyncOrgFromRegistryCommand) -> uuid.UUID:
         log.info(f"Syncing organization {command.org_id} from registry (INN: {command.inn})")
@@ -211,12 +213,9 @@ class SyncOrgFromRegistryHandler(BaseCommandHandler):
         if org.version == 0:
             raise OrganizationNotFoundError(f"Organization {command.org_id} not found")
 
-        # Fetch from registry
+        # Fetch from registry via port
         try:
-            from app.infra.kontur.adapter import get_kontur_adapter
-
-            adapter = await get_kontur_adapter()
-            kontur_org = await adapter.get_or_create_common_org_by_inn(command.inn)
+            kontur_org = await self._kontur.get_or_create_common_org_by_inn(command.inn)
 
             if not kontur_org:
                 raise KonturSyncError(f"Organization with INN {command.inn} not found in registry")

@@ -34,6 +34,8 @@ class CacheDomain(Enum):
     CHAT = "chat"
     SHIPMENT = "shipment"
     DOCUMENT = "document"
+    # External integrations
+    KONTUR = "kontur"
 
 
 class CacheMetrics:

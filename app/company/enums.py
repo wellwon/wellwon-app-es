@@ -7,10 +7,9 @@ from enum import Enum
 
 
 class CompanyType(str, Enum):
-    """Types of companies"""
-    COMPANY = "company"
-    PROJECT = "project"
-    INDIVIDUAL = "individual"
+    """Client types - both companies and projects are clients"""
+    COMPANY = "company"      # Legal entity with VAT/OGRN/KPP
+    PROJECT = "project"      # Individual/no legal requirements
 
 
 class UserCompanyRelationship(str, Enum):

@@ -16,7 +16,7 @@ class CompanyReadModel(BaseModel):
     """Read model for company details (PostgreSQL table: companies)"""
     id: uuid.UUID
     name: str
-    company_type: str  # company, project, individual
+    client_type: str  # company, project
     created_by: uuid.UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -172,7 +172,7 @@ class CompanyListItemReadModel(BaseModel):
     """Company item for list views with aggregated data"""
     id: uuid.UUID
     name: str
-    company_type: str
+    client_type: str  # company, project
     vat: Optional[str] = None
     city: Optional[str] = None
     user_count: int = 0
@@ -195,7 +195,7 @@ class UserCompanyListItemReadModel(BaseModel):
     id: uuid.UUID
     company_id: uuid.UUID
     company_name: str
-    company_type: str
+    client_type: str  # company, project
     relationship_type: str
     joined_at: datetime
     is_active: bool = True

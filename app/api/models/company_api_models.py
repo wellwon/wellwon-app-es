@@ -19,7 +19,7 @@ from decimal import Decimal
 class CreateCompanyRequest(BaseModel):
     """Request to create a new company"""
     name: str = Field(..., min_length=1, max_length=255)
-    company_type: str = Field(default="company", description="company, project, or individual")
+    client_type: str = Field(default="company", description="company, project, or individual")
 
     # Legal info (Russian business)
     vat: Optional[str] = Field(None, max_length=20, description="INN")
@@ -59,7 +59,7 @@ class CreateCompanyRequest(BaseModel):
 class UpdateCompanyRequest(BaseModel):
     """Request to update company details"""
     name: Optional[str] = Field(None, max_length=255)
-    company_type: Optional[str] = None
+    client_type: Optional[str] = None
     vat: Optional[str] = Field(None, max_length=20)
     ogrn: Optional[str] = Field(None, max_length=20)
     kpp: Optional[str] = Field(None, max_length=20)
@@ -139,7 +139,7 @@ class CompanyDetailResponse(BaseModel):
     """Full company details response"""
     id: uuid.UUID
     name: str
-    company_type: str
+    client_type: str
     created_by: uuid.UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -187,7 +187,7 @@ class CompanySummaryResponse(BaseModel):
     """Company summary for list views"""
     id: uuid.UUID
     name: str
-    company_type: str
+    client_type: str
     vat: Optional[str] = None
     city: Optional[str] = None
     user_count: int = 0
@@ -209,7 +209,7 @@ class UserCompanyResponse(BaseModel):
     """User's company relationship"""
     company_id: uuid.UUID
     company_name: str
-    company_type: str
+    client_type: str
     relationship_type: str
     joined_at: datetime
     is_active: bool = True

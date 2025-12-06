@@ -25,11 +25,11 @@ from app.customs.exceptions import (
 from app.customs.enums import DocflowStatus
 from app.infra.cqrs.cqrs_decorators import command_handler
 from app.common.base.base_command_handler import BaseCommandHandler
-from app.infra.kontur.adapter import get_kontur_adapter
 from app.infra.kontur.models import CreateDocflowRequest
 
 if TYPE_CHECKING:
     from app.infra.cqrs.handler_dependencies import HandlerDependencies
+    from app.customs.ports.kontur_declarant_port import KonturDeclarantPort
 
 log = get_logger("wellwon.customs.declaration.submission_handlers")
 
@@ -59,6 +59,8 @@ class SubmitToKonturHandler(BaseCommandHandler):
             transport_topic=CUSTOMS_TRANSPORT_TOPIC,
             event_store=deps.event_store
         )
+        # Port injection: kontur_adapter implements KonturDeclarantPort
+        self._kontur: 'KonturDeclarantPort' = deps.kontur_adapter
 
     async def handle(self, command: SubmitToKonturCommand) -> uuid.UUID:
         log.info(f"Submitting declaration {command.declaration_id} to Kontur")
@@ -100,9 +102,6 @@ class SubmitToKonturHandler(BaseCommandHandler):
                 "Employee ID is required to submit declaration to Kontur"
             )
 
-        # Get Kontur adapter
-        adapter = await get_kontur_adapter()
-
         # Create docflow request
         create_request = CreateDocflowRequest(
             type=declaration.state.declaration_type.value,
@@ -113,9 +112,9 @@ class SubmitToKonturHandler(BaseCommandHandler):
             name=declaration.state.name,
         )
 
-        # Call Kontur API
+        # Call Kontur API via port
         try:
-            docflow = await adapter.create_docflow(create_request)
+            docflow = await self._kontur.create_docflow(create_request)
             if not docflow:
                 raise KonturSyncError("Kontur returned empty docflow response")
         except Exception as e:
@@ -243,6 +242,8 @@ class RefreshStatusFromKonturHandler(BaseCommandHandler):
             transport_topic=CUSTOMS_TRANSPORT_TOPIC,
             event_store=deps.event_store
         )
+        # Port injection: kontur_adapter implements KonturDeclarantPort
+        self._kontur: 'KonturDeclarantPort' = deps.kontur_adapter
 
     async def handle(self, command: RefreshStatusFromKonturCommand) -> uuid.UUID:
         log.info(f"Refreshing status from Kontur for declaration {command.declaration_id}")
@@ -266,12 +267,9 @@ class RefreshStatusFromKonturHandler(BaseCommandHandler):
                 f"Declaration {command.declaration_id} has not been submitted to Kontur"
             )
 
-        # Get Kontur adapter
-        adapter = await get_kontur_adapter()
-
-        # Fetch current docflow from Kontur
+        # Fetch current docflow from Kontur via port
         try:
-            docflow = await adapter.get_docflow(declaration.state.kontur_docflow_id)
+            docflow = await self._kontur.get_docflow(declaration.state.kontur_docflow_id)
             if not docflow:
                 raise KonturSyncError(
                     f"Docflow {declaration.state.kontur_docflow_id} not found in Kontur"

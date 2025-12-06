@@ -10,12 +10,15 @@ import uuid
 from uuid import UUID
 import asyncio
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from datetime import datetime, timezone, timedelta
 
 from app.infra.saga.saga_manager import BaseSaga, SagaStep
 from app.config.saga_config import saga_config
 from app.utils.uuid_utils import generate_uuid, generate_event_id
+
+if TYPE_CHECKING:
+    from app.company.ports.telegram_groups_port import TelegramGroupsPort
 
 log = logging.getLogger("wellwon.saga.group_creation")
 
@@ -215,11 +218,12 @@ class GroupCreationSaga(BaseSaga):
         log.info(f"Saga {self.saga_id}: Creating Telegram group for company {company_name}")
 
         try:
-            # Get Telegram adapter
-            from app.infra.telegram.adapter import get_telegram_adapter
+            # Get Telegram port from context (injected at saga start)
+            telegram_port: 'TelegramGroupsPort' = context.get('telegram_groups_port')
+            if not telegram_port:
+                raise RuntimeError("telegram_groups_port not provided in saga context")
 
-            adapter = await get_telegram_adapter()
-            result = await adapter.create_company_group(
+            result = await telegram_port.create_company_group(
                 company_name=telegram_group_title,
                 description=telegram_group_description,
                 setup_bots=True,
@@ -259,12 +263,15 @@ class GroupCreationSaga(BaseSaga):
         )
 
         try:
-            from app.infra.telegram.adapter import get_telegram_adapter
+            # Get Telegram port from context (injected at saga start)
+            telegram_port: 'TelegramGroupsPort' = context.get('telegram_groups_port')
+            if not telegram_port:
+                log.warning(f"Saga {self.saga_id}: telegram_groups_port not in context, cannot compensate")
+                return
 
-            adapter = await get_telegram_adapter()
             # Note: Telegram doesn't allow deleting supergroups, only leaving them
             # We can leave the group and it will be orphaned
-            await adapter.leave_group(self._telegram_group_id)
+            await telegram_port.leave_group(self._telegram_group_id)
 
             log.info(f"Saga {self.saga_id}: Left Telegram group {self._telegram_group_id}")
         except Exception as e:

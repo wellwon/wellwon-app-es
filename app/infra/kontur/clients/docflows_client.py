@@ -34,8 +34,8 @@ class DocflowsClient(BaseClient):
     - Mark as viewed
     """
 
-    def __init__(self, http_client, config):
-        super().__init__(http_client, config, category="docflows")
+    def __init__(self, http_client, config, session_refresh_callback=None):
+        super().__init__(http_client, config, category="docflows", session_refresh_callback=session_refresh_callback)
 
     async def list(
         self,

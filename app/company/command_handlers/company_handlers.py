@@ -60,7 +60,7 @@ class CreateCompanyHandler(BaseCommandHandler):
         # The event will be enriched with saga orchestration context
         company_aggregate.create_company(
             name=command.name,
-            company_type=command.company_type,
+            client_type=command.client_type,
             created_by=command.created_by,
             vat=command.vat,
             ogrn=command.ogrn,
@@ -136,7 +136,7 @@ class UpdateCompanyHandler(BaseCommandHandler):
         company_aggregate.update_company(
             updated_by=command.updated_by,
             name=command.name,
-            company_type=command.company_type,
+            client_type=command.client_type,
             vat=command.vat,
             ogrn=command.ogrn,
             kpp=command.kpp,

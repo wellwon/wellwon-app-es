@@ -39,7 +39,7 @@ class CompanyReadRepo:
     async def insert_company(
         company_id: uuid.UUID,
         name: str,
-        company_type: str,
+        client_type: str,
         created_by: uuid.UUID,
         created_at: datetime,
         vat: Optional[str] = None,
@@ -63,7 +63,7 @@ class CompanyReadRepo:
         await pg_client.execute(
             """
             INSERT INTO companies (
-                id, name, company_type, created_by, created_at,
+                id, name, client_type, created_by, created_at,
                 vat, ogrn, kpp, postal_code, country_id, city, street,
                 director, email, phone,
                 tg_dir, tg_accountant, tg_manager_1, tg_manager_2, tg_manager_3, tg_support,
@@ -77,7 +77,7 @@ class CompanyReadRepo:
             )
             ON CONFLICT (id) DO NOTHING
             """,
-            company_id, name, company_type, created_by, created_at,
+            company_id, name, client_type, created_by, created_at,
             vat, ogrn, kpp, postal_code, country_id, city, street,
             director, email, phone,
             tg_dir, tg_accountant, tg_manager_1, tg_manager_2, tg_manager_3, tg_support,
@@ -87,7 +87,7 @@ class CompanyReadRepo:
     async def update_company(
         company_id: uuid.UUID,
         name: Optional[str] = None,
-        company_type: Optional[str] = None,
+        client_type: Optional[str] = None,
         vat: Optional[str] = None,
         ogrn: Optional[str] = None,
         kpp: Optional[str] = None,
@@ -113,7 +113,7 @@ class CompanyReadRepo:
 
         field_mappings = [
             ("name", name),
-            ("company_type", company_type),
+            ("client_type", client_type),
             ("vat", vat),
             ("ogrn", ogrn),
             ("kpp", kpp),
@@ -264,7 +264,7 @@ class CompanyReadRepo:
     @staticmethod
     async def get_company_by_name(
         name: str,
-        company_type: Optional[str] = None,
+        client_type: Optional[str] = None,
         exact_match: bool = True,
     ) -> Optional[CompanyReadModel]:
         """
@@ -272,20 +272,20 @@ class CompanyReadRepo:
 
         Args:
             name: Company name to search
-            company_type: Optional type filter ('company', 'project', 'individual')
+            client_type: Optional type filter ('company', 'project')
             exact_match: If True, use exact match (case-insensitive). If False, use ILIKE.
 
         Returns:
             CompanyReadModel if found, None otherwise
         """
         if exact_match:
-            if company_type:
+            if client_type:
                 row = await pg_client.fetchrow(
                     """
                     SELECT * FROM companies
-                    WHERE LOWER(name) = LOWER($1) AND company_type = $2 AND is_deleted = false
+                    WHERE LOWER(name) = LOWER($1) AND client_type = $2 AND is_deleted = false
                     """,
-                    name, company_type
+                    name, client_type
                 )
             else:
                 row = await pg_client.fetchrow(
@@ -296,13 +296,13 @@ class CompanyReadRepo:
                     name
                 )
         else:
-            if company_type:
+            if client_type:
                 row = await pg_client.fetchrow(
                     """
                     SELECT * FROM companies
-                    WHERE name ILIKE $1 AND company_type = $2 AND is_deleted = false
+                    WHERE name ILIKE $1 AND client_type = $2 AND is_deleted = false
                     """,
-                    f"%{name}%", company_type
+                    f"%{name}%", client_type
                 )
             else:
                 row = await pg_client.fetchrow(
@@ -335,7 +335,7 @@ class CompanyReadRepo:
 
         rows = await pg_client.fetch(
             f"""
-            SELECT id, name, company_type, vat, city, user_count, balance, is_active, created_at
+            SELECT id, name, client_type, vat, city, user_count, balance, is_active, created_at
             FROM companies
             {where_clause}
             ORDER BY created_at DESC
@@ -354,7 +354,7 @@ class CompanyReadRepo:
         """Search companies by name or VAT"""
         rows = await pg_client.fetch(
             """
-            SELECT id, name, company_type, vat, city, user_count, balance, is_active, created_at
+            SELECT id, name, client_type, vat, city, user_count, balance, is_active, created_at
             FROM companies
             WHERE (name ILIKE $1 OR vat ILIKE $1) AND is_deleted = false AND is_active = true
             ORDER BY name
@@ -432,7 +432,7 @@ class CompanyReadRepo:
         rows = await pg_client.fetch(
             f"""
             SELECT
-                uc.id, uc.company_id, c.name as company_name, c.company_type,
+                uc.id, uc.company_id, c.name as company_name, c.client_type,
                 uc.relationship_type, uc.assigned_at as joined_at, uc.is_active
             FROM user_companies uc
             INNER JOIN companies c ON uc.company_id = c.id

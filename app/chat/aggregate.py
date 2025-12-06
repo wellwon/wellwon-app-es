@@ -31,6 +31,8 @@ from app.chat.events import (
     MessagesMarkedAsRead,
     TelegramChatLinked,
     TelegramChatUnlinked,
+    ClientInvited,
+    ClientInvitationFailed,
 )
 from app.chat.exceptions import (
     ChatAlreadyExistsError,
@@ -727,6 +729,8 @@ class ChatAggregate:
             MessagesMarkedAsRead: self._on_messages_marked_as_read,
             TelegramChatLinked: self._on_telegram_chat_linked,
             TelegramChatUnlinked: self._on_telegram_chat_unlinked,
+            ClientInvited: self._on_client_invited,
+            ClientInvitationFailed: self._on_client_invitation_failed,
         }
 
         handler = handlers.get(type(event))
@@ -834,6 +838,17 @@ class ChatAggregate:
     def _on_telegram_chat_unlinked(self, event: TelegramChatUnlinked) -> None:
         self.state.telegram_chat_id = None
         self.state.telegram_topic_id = None
+
+    def _on_client_invited(self, event: ClientInvited) -> None:
+        """Handle client invitation - no state change needed in aggregate"""
+        # Client invitations are tracked via telegram_group_members projector
+        # Aggregate state doesn't need to track external Telegram users
+        pass
+
+    def _on_client_invitation_failed(self, event: ClientInvitationFailed) -> None:
+        """Handle failed client invitation - no state change needed in aggregate"""
+        # Failed invitations are logged but don't affect aggregate state
+        pass
 
     def _prune_recent_messages(self) -> None:
         """Keep only most recent messages in aggregate state"""

@@ -6,12 +6,15 @@
 from __future__ import annotations
 
 import uuid
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from datetime import datetime, timezone, timedelta
 
 from app.config.logging_config import get_logger
 from app.config.saga_config import saga_config
 from app.infra.saga.saga_manager import BaseSaga, SagaStep
+
+if TYPE_CHECKING:
+    from app.customs.ports.kontur_declarant_port import KonturDeclarantPort
 
 log = get_logger("wellwon.saga.declaration_submission")
 
@@ -114,13 +117,15 @@ class DeclarationSubmissionSaga(BaseSaga):
         log.info(f"Saga {self.saga_id}: Importing form data to Kontur docflow {kontur_docflow_id}")
 
         try:
-            from app.infra.kontur.adapter import get_kontur_adapter
+            # Get Kontur port from context (injected at saga start)
+            kontur_port: 'KonturDeclarantPort' = context.get('kontur_port')
+            if not kontur_port:
+                raise RuntimeError("kontur_port not provided in saga context")
 
-            adapter = await get_kontur_adapter()
-            await adapter.import_form_json(
+            await kontur_port.import_form_json(
                 docflow_id=kontur_docflow_id,
                 form_id="dt",  # Declaration for goods
-                form_data=form_data
+                data=form_data
             )
 
             self._form_imported = True
@@ -151,15 +156,17 @@ class DeclarationSubmissionSaga(BaseSaga):
         log.info(f"Saga {self.saga_id}: Uploading {len(documents)} documents to Kontur")
 
         try:
-            from app.infra.kontur.adapter import get_kontur_adapter
+            # Get Kontur port from context (injected at saga start)
+            kontur_port: 'KonturDeclarantPort' = context.get('kontur_port')
+            if not kontur_port:
+                raise RuntimeError("kontur_port not provided in saga context")
 
-            adapter = await get_kontur_adapter()
             uploaded_count = 0
 
             for doc in documents:
                 try:
                     # Create document metadata in Kontur
-                    await adapter.create_documents(
+                    await kontur_port.create_documents(
                         docflow_id=kontur_docflow_id,
                         documents=[{
                             "name": doc.get("name", "Document"),
@@ -211,16 +218,17 @@ class DeclarationSubmissionSaga(BaseSaga):
         )
 
         try:
-            from app.infra.kontur.adapter import get_kontur_adapter
-
-            adapter = await get_kontur_adapter()
+            # Get Kontur port from context (injected at saga start)
+            kontur_port: 'KonturDeclarantPort' = context.get('kontur_port')
+            if not kontur_port:
+                raise RuntimeError("kontur_port not provided in saga context")
 
             # Set organization on Grafa 8 (consignee)
-            await adapter.set_form_contractor(
+            await kontur_port.set_form_contractor(
                 docflow_id=kontur_docflow_id,
                 form_id="dt",
                 org_id=organization_id,
-                grafa="8"
+                graph_number="8"
             )
 
             log.info(f"Saga {self.saga_id}: Organization set successfully")
@@ -287,11 +295,15 @@ class DeclarationSubmissionSaga(BaseSaga):
 # Context Builder
 # =============================================================================
 
-def declaration_submission_context_builder(event_data: Dict[str, Any]) -> Dict[str, Any]:
+def declaration_submission_context_builder(
+    event_data: Dict[str, Any],
+    kontur_port: Optional['KonturDeclarantPort'] = None
+) -> Dict[str, Any]:
     """
     Build saga context from CustomsDeclarationSubmitted event.
 
     TRUE SAGA: All data extracted from enriched event.
+    Port injection: kontur_port must be provided by caller (SagaManager).
     """
     return {
         "declaration_id": event_data['declaration_id'],
@@ -301,6 +313,8 @@ def declaration_submission_context_builder(event_data: Dict[str, Any]) -> Dict[s
         "organization_id": event_data.get('organization_id'),
         "organization_inn": event_data.get('organization_inn'),
         "user_id": event_data.get('user_id'),
+        # Port injection for clean architecture
+        "kontur_port": kontur_port,
     }
 
 

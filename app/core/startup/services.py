@@ -310,62 +310,9 @@ async def initialize_telegram_event_listener(app: FastAPI) -> None:
             telegram_adapter.set_read_status_handler(incoming_handler.handle_read_event)
             logger.info("MTProto read status handler registered (via TelegramIncomingHandler)")
 
-            # Register chat filter to only process messages from WellWon-linked chats
-            # This prevents "garbage" from user's other Telegram groups in logs
-            from app.chat.queries import GetAllLinkedTelegramChatsQuery
-
-            # Cache linked chat IDs to avoid DB queries on every message
-            # Cache format: Set of (telegram_chat_id, telegram_topic_id) tuples
-            _linked_chats_cache: set = set()
-            _cache_last_refresh: list = [0.0]  # Use list for mutable in closure
-            _cache_ttl = 60.0  # Refresh cache every 60 seconds
-
-            async def _refresh_linked_chats_cache():
-                """Refresh the linked chats cache from database."""
-                import time
-                try:
-                    result = await app.state.query_bus.query(GetAllLinkedTelegramChatsQuery())
-                    if result:
-                        _linked_chats_cache.clear()
-                        for chat in result:
-                            # Add both (chat_id, topic_id) and (chat_id, None) for flexibility
-                            _linked_chats_cache.add((chat.telegram_chat_id, chat.telegram_topic_id))
-                            if chat.telegram_topic_id:
-                                # Also allow matching without topic_id for general chat lookup
-                                _linked_chats_cache.add((chat.telegram_chat_id, None))
-                        _cache_last_refresh[0] = time.time()
-                        logger.debug(f"[CHAT-FILTER] Cache refreshed with {len(_linked_chats_cache)} linked chats")
-                except Exception as e:
-                    logger.warning(f"[CHAT-FILTER] Failed to refresh cache: {e}")
-
-            def is_chat_linked(chat_id: int, topic_id) -> bool:
-                """Check if chat is linked to WellWon (sync filter callback)."""
-                import time
-                import asyncio
-
-                # Refresh cache if stale
-                if time.time() - _cache_last_refresh[0] > _cache_ttl:
-                    # Schedule async refresh in background
-                    try:
-                        loop = asyncio.get_running_loop()
-                        loop.create_task(_refresh_linked_chats_cache())
-                    except RuntimeError:
-                        pass  # No running loop - skip refresh
-
-                # Check cache
-                # First check exact match (chat_id, topic_id)
-                if (chat_id, topic_id) in _linked_chats_cache:
-                    return True
-                # For forum topics, also check if the group itself is linked (topic_id=None)
-                if topic_id is not None and (chat_id, None) in _linked_chats_cache:
-                    return True
-                return False
-
-            # Initial cache population
-            await _refresh_linked_chats_cache()
-
-            telegram_adapter.set_chat_filter(is_chat_linked)
-            logger.info(f"MTProto chat filter registered - {len(_linked_chats_cache)} linked chats cached")
+            # NOTE: Chat filter is registered in Phase 11 (start_telegram_event_listener)
+            # because it requires CQRS handlers to be registered first (Phase 7)
+            logger.info("MTProto handlers registered (chat filter deferred to Phase 11)")
 
             # NOTE: Event listener setup is deferred to after CQRS handlers are registered
             # See start_telegram_event_listener() which is called from lifespan.py Phase 11
@@ -555,13 +502,96 @@ async def start_telegram_event_listener(app: FastAPI) -> None:
     Start Telegram Event Listener for bidirectional sync.
 
     Incoming messages are received via Telethon's event-driven system.
-    This just sets up the listener for WellWon -> Telegram sync.
+    This sets up:
+    1. Chat filter for filtering messages from WellWon-linked chats only
+    2. Event listener for WellWon -> Telegram sync
+
+    Called in Phase 11 AFTER CQRS handlers are registered (Phase 7).
     """
     if not hasattr(app.state, 'telegram_adapter') or not app.state.telegram_adapter:
         logger.debug("Telegram adapter not available, skipping event listener setup")
         return
 
-    await _setup_telegram_event_listener(app, app.state.telegram_adapter)
+    telegram_adapter = app.state.telegram_adapter
+
+    # Register chat filter (requires CQRS handlers to be registered)
+    await _register_telegram_chat_filter(app, telegram_adapter)
+
+    # Setup WellWon -> Telegram event listener
+    await _setup_telegram_event_listener(app, telegram_adapter)
+
+
+async def _register_telegram_chat_filter(app: FastAPI, telegram_adapter) -> None:
+    """
+    Register chat filter to only process messages from WellWon-linked chats.
+
+    This prevents "garbage" from user's other Telegram groups in logs.
+    Uses GetLinkedTelegramChatsQuery which requires CQRS handlers.
+    """
+    from app.chat.queries import GetLinkedTelegramChatsQuery
+
+    # Cache linked chat IDs to avoid DB queries on every message
+    # Cache format: Set of (telegram_chat_id, telegram_topic_id) tuples
+    _linked_chats_cache: set = set()
+    _cache_last_refresh: list = [0.0]  # Use list for mutable in closure
+    _cache_ttl = 60.0  # Refresh cache every 60 seconds
+
+    async def _refresh_linked_chats_cache():
+        """Refresh the linked chats cache from database."""
+        import time
+        try:
+            result = await app.state.query_bus.query(GetLinkedTelegramChatsQuery())
+            if result:
+                _linked_chats_cache.clear()
+                for chat in result:
+                    # LinkedTelegramChat has telegram_supergroup_id field
+                    tg_chat_id = chat.telegram_supergroup_id
+                    tg_topic_id = chat.telegram_topic_id
+                    # Add both (chat_id, topic_id) and (chat_id, None) for flexibility
+                    _linked_chats_cache.add((tg_chat_id, tg_topic_id))
+                    if tg_topic_id:
+                        # Also allow matching without topic_id for general chat lookup
+                        _linked_chats_cache.add((tg_chat_id, None))
+                _cache_last_refresh[0] = time.time()
+                logger.info(f"[CHAT-FILTER] Cache refreshed with {len(_linked_chats_cache)} linked chats: {_linked_chats_cache}")
+            else:
+                logger.info("[CHAT-FILTER] No linked chats found in database")
+        except Exception as e:
+            logger.warning(f"[CHAT-FILTER] Failed to refresh cache: {e}")
+
+    def is_chat_linked(chat_id: int, topic_id) -> bool:
+        """Check if chat is linked to WellWon (sync filter callback)."""
+        import time
+        import asyncio
+
+        # Check if cache needs refresh
+        if time.time() - _cache_last_refresh[0] > _cache_ttl:
+            # Schedule async refresh in background
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(_refresh_linked_chats_cache())
+            except RuntimeError:
+                pass  # No running loop - skip refresh
+
+        # Check cache
+        # First check exact match (chat_id, topic_id)
+        if (chat_id, topic_id) in _linked_chats_cache:
+            return True
+        # For forum topics, also check if the group itself is linked (topic_id=None)
+        if topic_id is not None and (chat_id, None) in _linked_chats_cache:
+            return True
+        return False
+
+    # Populate cache immediately (CQRS handlers are now registered)
+    await _refresh_linked_chats_cache()
+
+    # Register filter
+    telegram_adapter.set_chat_filter(is_chat_linked)
+
+    # Register cache update callback for when new chats are linked
+    telegram_adapter.set_chat_filter_cache_update_callback(_refresh_linked_chats_cache)
+
+    logger.info("[CHAT-FILTER] MTProto chat filter registered and cache populated")
 
 
 # =============================================================================

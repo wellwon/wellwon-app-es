@@ -159,6 +159,37 @@ class TelegramAdapter:
         else:
             log.warning("Cannot set chat filter - MTProto client not available")
 
+    def set_chat_filter_cache_update_callback(self, callback: callable) -> None:
+        """
+        Set callback to refresh chat filter cache.
+
+        Called when a new chat is linked to Telegram so the filter cache
+        is updated immediately without waiting for TTL expiry.
+
+        Args:
+            callback: Async callable that refreshes the linked chats cache.
+        """
+        self._chat_filter_cache_update_callback = callback
+        log.info("Chat filter cache update callback registered")
+
+    async def notify_chat_linked(self, chat_id: int, topic_id: Optional[int] = None) -> None:
+        """
+        Notify that a new chat has been linked to Telegram.
+
+        Triggers cache refresh so new chats are immediately recognized
+        by the filter.
+
+        Args:
+            chat_id: Telegram chat/supergroup ID
+            topic_id: Optional Telegram topic ID for forum topics
+        """
+        if hasattr(self, '_chat_filter_cache_update_callback') and self._chat_filter_cache_update_callback:
+            try:
+                await self._chat_filter_cache_update_callback()
+                log.info(f"Chat filter cache updated for new linked chat {chat_id}/{topic_id}")
+            except Exception as e:
+                log.warning(f"Failed to update chat filter cache: {e}")
+
     # =========================================================================
     # MESSAGING (Bot API)
     # =========================================================================
@@ -734,6 +765,34 @@ class TelegramAdapter:
             return False
 
         return await self._mtproto_client.invite_user(group_id, username)
+
+    async def resolve_and_invite_by_contact(
+        self,
+        group_id: int,
+        contact: str,
+        client_name: str
+    ) -> tuple[bool, int | None, str]:
+        """
+        Resolve contact (phone or @username) to telegram_user_id and invite to group.
+
+        Args:
+            group_id: Telegram supergroup ID to invite user to
+            contact: Phone (+79001234567) or username (@username or just username)
+            client_name: Client's name for contact import
+
+        Returns:
+            Tuple of (success, telegram_user_id, status)
+            Status: 'success', 'already_member', 'user_not_found',
+                    'privacy_restricted', 'rate_limit', etc.
+        """
+        if not self._mtproto_client:
+            return (False, None, "mtproto_not_available")
+
+        return await self._mtproto_client.resolve_and_invite_by_contact(
+            group_id=group_id,
+            contact=contact,
+            client_name=client_name
+        )
 
     async def remove_user_from_group(self, group_id: int, username: str) -> bool:
         """Remove a user from a group"""

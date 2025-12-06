@@ -533,6 +533,56 @@ async def get_group_info(
     )
 
 
+class GenerateInviteLinkResponse(PydanticBaseModel):
+    """Response for generating new invite link"""
+    success: bool
+    invite_link: Optional[str] = None
+    error: Optional[str] = None
+
+
+@router.post("/group/{group_id}/generate-invite-link", response_model=GenerateInviteLinkResponse)
+async def generate_invite_link(
+    group_id: int,
+    adapter: TelegramAdapter = Depends(get_adapter),
+) -> GenerateInviteLinkResponse:
+    """
+    Generate a new invite link for a Telegram group.
+
+    This creates a new invite link using MTProto ExportChatInviteRequest.
+    The old links remain valid unless explicitly revoked.
+    """
+    try:
+        invite_link = await adapter.get_invite_link(group_id)
+
+        if not invite_link:
+            return GenerateInviteLinkResponse(
+                success=False,
+                error="Failed to generate invite link"
+            )
+
+        # Update invite_link in telegram_supergroups table
+        from app.infra.persistence.pg_client import pg_client
+        await pg_client.execute(
+            """
+            UPDATE telegram_supergroups
+            SET invite_link = $1, updated_at = NOW()
+            WHERE id = $2
+            """,
+            invite_link, group_id
+        )
+
+        return GenerateInviteLinkResponse(
+            success=True,
+            invite_link=invite_link
+        )
+    except Exception as e:
+        log.error(f"Failed to generate invite link for group {group_id}: {e}")
+        return GenerateInviteLinkResponse(
+            success=False,
+            error=str(e)
+        )
+
+
 @router.get("/group/{group_id}/topics", response_model=TopicsListResponse)
 async def get_group_topics(
     group_id: int,
@@ -680,7 +730,7 @@ class SupergroupResponse(BaseModel):
 class SupergroupWithChatCountResponse(BaseModel):
     """Telegram supergroup with chat count"""
     id: int
-    company_id: Optional[uuid_module.UUID] = None  # FK to companies.id (UUID)
+    company_id: Optional[UUID] = None  # FK to companies.id (UUID)
     company_name: str = ""
     title: str
     username: Optional[str] = None
@@ -991,6 +1041,73 @@ async def update_member_role(
         log.error(f"Failed to update role for user {user_id} in group {group_id}: {e}", exc_info=True)
         return UpdateMemberRoleResponse(
             success=False,
+            error=str(e),
+        )
+
+
+class InviteToGroupRequest(BaseModel):
+    """Request to invite a client to a Telegram group"""
+    contact: str  # Phone (+79001234567) or @username
+    client_name: str  # For ImportContactsRequest
+
+
+class InviteToGroupResponse(BaseModel):
+    """Response for client invitation"""
+    success: bool
+    status: str  # 'success', 'already_member', 'not_found', 'privacy_restricted', 'rate_limit'
+    telegram_user_id: Optional[int] = None
+    error: Optional[str] = None
+
+
+@router.post("/groups/{group_id}/invite", response_model=InviteToGroupResponse)
+async def invite_to_group(
+    group_id: int,
+    request: InviteToGroupRequest,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    adapter: TelegramAdapter = Depends(get_adapter),
+) -> InviteToGroupResponse:
+    """
+    Invite external client to Telegram group by phone or @username.
+
+    Uses MTProto to:
+    1. Resolve contact (phone/@username) to telegram_user_id
+    2. Invite user to the group
+
+    Returns status:
+    - success: User added to group
+    - already_member: User is already in the group
+    - not_found: Contact not registered on Telegram
+    - privacy_restricted: User blocked invitations
+    - rate_limit: Telegram rate limit hit
+    """
+    try:
+        success, telegram_user_id, status = await adapter.resolve_and_invite_by_contact(
+            group_id=group_id,
+            contact=request.contact,
+            client_name=request.client_name
+        )
+
+        if success:
+            log.info(f"Invited user {telegram_user_id} to group {group_id} (contact: {request.contact})")
+            return InviteToGroupResponse(
+                success=True,
+                status=status,
+                telegram_user_id=telegram_user_id,
+            )
+        else:
+            log.warning(f"Failed to invite {request.contact} to group {group_id}: {status}")
+            return InviteToGroupResponse(
+                success=False,
+                status=status,
+                telegram_user_id=telegram_user_id,
+                error=status,
+            )
+
+    except Exception as e:
+        log.error(f"Error inviting {request.contact} to group {group_id}: {e}", exc_info=True)
+        return InviteToGroupResponse(
+            success=False,
+            status="error",
             error=str(e),
         )
 

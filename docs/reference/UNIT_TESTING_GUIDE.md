@@ -1,6 +1,6 @@
-# Unit Testing Guide - TradeCore v0.5
+# Unit Testing Guide - WellWon Platform
 
-**Last Updated**: 2025-11-10
+**Last Updated**: 2025-12-06
 **Purpose**: Comprehensive guide to writing unit tests for TradeCore domains, handlers, and projectors
 
 ---
@@ -622,6 +622,165 @@ def mock_alpaca_adapter():
     })
     return adapter
 ```
+
+### 5. Fake Adapters for Ports (Recommended)
+
+Instead of using `AsyncMock`, use **Fake Adapters** that implement port interfaces. Fakes provide better behavior testing than mocks.
+
+**See:** [PORTS_AND_ADAPTERS_GUIDE.md](./PORTS_AND_ADAPTERS_GUIDE.md) for full Ports & Adapters pattern.
+
+**Location:** `tests/fakes/`
+
+**Example: FakeTelegramAdapter**
+
+```python
+# tests/fakes/fake_telegram_adapter.py
+from typing import Optional, List, Dict, Any, Callable
+from dataclasses import dataclass
+
+@dataclass
+class CallRecord:
+    """Record of a method call for verification."""
+    method: str
+    args: tuple
+    kwargs: Dict[str, Any]
+    result: Any = None
+
+class FakeTelegramAdapter:
+    """
+    Fake adapter implementing TelegramMessagingPort + TelegramGroupsPort.
+
+    Stores data in memory and tracks all method calls for verification.
+    """
+
+    def __init__(self):
+        self.messages: List[Dict] = []
+        self.topics: Dict[str, Dict] = {}
+        self._calls: List[CallRecord] = []
+        self._should_fail: Dict[str, str] = {}
+        self._next_message_id = 1
+
+    # === Test Setup Methods ===
+
+    def configure_failure(self, method: str, error_message: str) -> None:
+        """Configure a method to fail with an error."""
+        self._should_fail[method] = error_message
+
+    def clear(self) -> None:
+        """Reset state between tests."""
+        self.messages.clear()
+        self.topics.clear()
+        self._calls.clear()
+        self._should_fail.clear()
+
+    # === Test Verification Methods ===
+
+    def was_called(self, method: str) -> bool:
+        """Check if a method was called."""
+        return any(c.method == method for c in self._calls)
+
+    def get_call_count(self, method: str) -> int:
+        """Get number of times a method was called."""
+        return sum(1 for c in self._calls if c.method == method)
+
+    def get_calls(self, method: str) -> List[CallRecord]:
+        """Get all calls to a specific method."""
+        return [c for c in self._calls if c.method == method]
+
+    # === Port Implementation ===
+
+    async def send_message(self, chat_id: int, text: str, **kwargs) -> Dict:
+        """Send message - stores in memory."""
+        self._calls.append(CallRecord("send_message", (chat_id, text), kwargs))
+
+        if "send_message" in self._should_fail:
+            raise Exception(self._should_fail["send_message"])
+
+        msg_id = self._next_message_id
+        self._next_message_id += 1
+        self.messages.append({
+            "message_id": msg_id, "chat_id": chat_id, "text": text
+        })
+        return {"success": True, "message_id": msg_id}
+
+    async def leave_group(self, group_id: int) -> bool:
+        """Leave group - returns True."""
+        self._calls.append(CallRecord("leave_group", (group_id,), {}))
+
+        if "leave_group" in self._should_fail:
+            raise Exception(self._should_fail["leave_group"])
+
+        return True
+```
+
+**Using Fake in Tests:**
+
+```python
+# tests/unit/customs/test_submit_handler.py
+import pytest
+from tests.fakes.fake_kontur_adapter import FakeKonturAdapter
+from tests.fakes.fake_event_bus import FakeEventBus
+
+@pytest.fixture
+def fake_kontur():
+    return FakeKonturAdapter()
+
+@pytest.fixture
+def fake_event_bus():
+    return FakeEventBus()
+
+@pytest.fixture
+def handler(fake_kontur, fake_event_bus):
+    deps = HandlerDependencies(
+        event_bus=fake_event_bus,
+        kontur_port=fake_kontur,  # Inject fake port
+    )
+    return SubmitToKonturHandler(deps)
+
+class TestSubmitToKonturHandler:
+
+    @pytest.mark.asyncio
+    async def test_submit_creates_docflow(self, handler, fake_kontur):
+        """Test successful docflow creation."""
+        command = SubmitToKonturCommand(
+            declaration_id=uuid4(),
+            user_id=uuid4(),
+        )
+
+        result = await handler.handle(command)
+
+        # Verify fake was called
+        assert fake_kontur.was_called('create_docflow')
+        assert fake_kontur.get_call_count('create_docflow') == 1
+
+    @pytest.mark.asyncio
+    async def test_submit_handles_failure(self, handler, fake_kontur):
+        """Test handling of API failure."""
+        fake_kontur.configure_failure('create_docflow', 'API Error')
+
+        command = SubmitToKonturCommand(declaration_id=uuid4(), user_id=uuid4())
+
+        with pytest.raises(KonturSubmissionError):
+            await handler.handle(command)
+```
+
+**Available Fake Adapters in `tests/fakes/`:**
+
+| Fake Adapter | Implements Port | Domain |
+|--------------|-----------------|--------|
+| `FakeKonturAdapter` | `KonturDeclarantPort` | Customs |
+| `FakeTelegramAdapter` | `TelegramMessagingPort`, `TelegramGroupsPort` | Chat, Company |
+| `FakeDaDataAdapter` | `CompanyEnrichmentPort` | Company |
+
+**Fake vs Mock:**
+
+| Aspect | Fake Adapter | AsyncMock |
+|--------|--------------|-----------|
+| Behavior | Real implementation in memory | Stub returns |
+| State | Stores data, tracks calls | No state |
+| Verification | Call history, stored data | Basic call checks |
+| Complexity | More code, but reusable | Less code, per-test |
+| Recommended | For ports with complex behavior | For simple stubs |
 
 ---
 

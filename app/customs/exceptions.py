@@ -82,6 +82,11 @@ class KonturConnectionError(CustomsError):
     pass
 
 
+class KonturServiceUnavailableError(CustomsError):
+    """Raised when Kontur service is not configured or unavailable."""
+    pass
+
+
 # Document Errors
 class DocumentNotFoundError(CustomsError):
     """Raised when a document is not found."""

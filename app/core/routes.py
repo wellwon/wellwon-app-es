@@ -17,6 +17,7 @@ from app.api.routers.company_router import router as company_router
 from app.api.routers.chat_router import router as chat_router
 from app.api.routers.telegram_router import router as telegram_router
 from app.api.routers.admin_router import router as admin_router
+from app.api.routers.customs_router import router as customs_router
 
 # Import health endpoints
 from app.core.health import register_health_endpoints
@@ -49,6 +50,7 @@ def register_core_routers(app: FastAPI) -> None:
     app.include_router(chat_router, tags=["Chat"])
     app.include_router(telegram_router, tags=["Telegram"])
     app.include_router(admin_router, tags=["Admin"])
+    app.include_router(customs_router, tags=["Customs"])
 
     logger.info("Core routers registered")
 

@@ -125,7 +125,7 @@ async def create_company(
         command = CreateCompanyCommand(
             company_id=company_id,
             name=request.name,
-            company_type=request.company_type,
+            client_type=request.client_type,
             created_by=current_user["user_id"],
             vat=request.vat,
             ogrn=request.ogrn,
@@ -343,7 +343,7 @@ async def update_company(
             company_id=company_id,
             updated_by=current_user["user_id"],
             name=request.name,
-            company_type=request.company_type,
+            client_type=request.client_type,
             vat=request.vat,
             ogrn=request.ogrn,
             kpp=request.kpp,
@@ -597,7 +597,7 @@ async def get_user_company_relationship(
     return UserCompanyResponse(
         company_id=company_id,
         company_name=result.company_name or "",
-        company_type=result.company_type or "company",
+        client_type=result.client_type or "company",
         relationship_type=result.relationship_type,
         joined_at=result.joined_at,
         is_active=result.is_member,

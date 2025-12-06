@@ -9,10 +9,11 @@
 3. [Event Enrichment Pattern](#event-enrichment-pattern)
 4. [Step-by-Step Creation](#step-by-step-creation)
 5. [Context Builder Critical Pattern](#context-builder-critical-pattern)
-6. [Compensation Patterns](#compensation-patterns)
-7. [Performance Optimization](#performance-optimization)
-8. [Monitoring & Metrics](#monitoring--metrics)
-9. [Troubleshooting](#troubleshooting)
+6. [Port Injection for Sagas](#port-injection-for-sagas-clean-architecture)
+7. [Compensation Patterns](#compensation-patterns)
+8. [Performance Optimization](#performance-optimization)
+9. [Monitoring & Metrics](#monitoring--metrics)
+10. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -605,6 +606,239 @@ async def _validate_disconnection(self, **context) -> Dict[str, Any]:
 
     # If these are empty, context_builder is missing fields!
 ```
+
+---
+
+## Port Injection for Sagas (Clean Architecture)
+
+### Overview
+
+When sagas need to call external APIs (Telegram, Kontur, etc.), they should receive **ports** through context, NOT import adapters directly.
+
+**See:** [PORTS_AND_ADAPTERS_GUIDE.md](./PORTS_AND_ADAPTERS_GUIDE.md) for full details on Ports & Adapters pattern.
+
+### Why Port Injection?
+
+**Problem: Direct Adapter Import (Anti-Pattern)**
+
+```python
+# ❌ ANTI-PATTERN: Saga imports adapter directly
+# app/infra/saga/group_deletion_saga.py
+from app.infra.telegram.adapter import get_telegram_adapter  # BAD!
+
+async def _delete_telegram_supergroup(context: Dict[str, Any]) -> Dict[str, Any]:
+    adapter = await get_telegram_adapter()  # BAD: Infrastructure dependency
+    await adapter.leave_group(context['telegram_group_id'])
+```
+
+**Issues:**
+- Saga depends on infrastructure (violates Clean Architecture)
+- Cannot test without real adapter
+- Hard to mock for unit tests
+- Circular import potential
+
+**Solution: Port Injection via Context**
+
+```python
+# ✅ CORRECT: Saga receives port from context
+# app/infra/saga/group_deletion_saga.py
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.company.ports.telegram_groups_port import TelegramGroupsPort
+
+async def _delete_telegram_supergroup(context: Dict[str, Any]) -> Dict[str, Any]:
+    # Port injected via context (Clean Architecture)
+    telegram_port: 'TelegramGroupsPort' = context.get('telegram_groups_port')
+
+    if not telegram_port:
+        log.warning("No telegram_groups_port in context, skipping")
+        return {'telegram_deleted': False}
+
+    result = await telegram_port.leave_group(context['telegram_group_id'])
+    return {'telegram_deleted': result}
+```
+
+### Implementation Pattern
+
+**Step 1: SagaService holds ports**
+
+```python
+# app/services/infrastructure/saga_service.py
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.company.ports.telegram_groups_port import TelegramGroupsPort
+    from app.customs.ports.kontur_declarant_port import KonturDeclarantPort
+
+class SagaService:
+    def __init__(
+        self,
+        event_bus: EventBus,
+        command_bus: 'CommandBus',
+        query_bus: 'QueryBus',
+        # Ports for saga context injection
+        telegram_groups_port: Optional['TelegramGroupsPort'] = None,
+        kontur_port: Optional['KonturDeclarantPort'] = None,
+    ):
+        self.event_bus = event_bus
+        self.command_bus = command_bus
+        self.query_bus = query_bus
+        # Store ports for context injection
+        self._telegram_groups_port = telegram_groups_port
+        self._kontur_port = kontur_port
+```
+
+**Step 2: Context builder injects ports**
+
+```python
+# app/services/infrastructure/saga_service.py
+def _build_group_creation_context(self, event: Dict[str, Any]) -> Dict[str, Any]:
+    """Build context for GroupCreationSaga with ports."""
+    return {
+        # Event data
+        'company_id': event.get('company_id'),
+        'company_name': event.get('company_name'),
+        'user_id': event.get('user_id'),
+        # CQRS dependencies
+        'event_bus': self.event_bus,
+        'command_bus': self.command_bus,
+        # PORT INJECTION - saga uses this
+        'telegram_groups_port': self._telegram_groups_port,
+    }
+
+def _build_declaration_saga_context(self, event: Dict[str, Any]) -> Dict[str, Any]:
+    """Build context for DeclarationSubmissionSaga with ports."""
+    return {
+        'declaration_id': event.get('declaration_id'),
+        'user_id': event.get('user_id'),
+        'event_bus': self.event_bus,
+        # PORT INJECTION
+        'kontur_port': self._kontur_port,
+    }
+```
+
+**Step 3: Initialize SagaService with ports in startup**
+
+```python
+# app/core/startup/cqrs.py
+async def create_saga_service_instance(app: FastAPI) -> None:
+    """Create SagaService with port injection."""
+    # Get adapters from app state (they implement ports)
+    telegram_groups_port = getattr(app.state, 'telegram_adapter', None)
+    kontur_port = getattr(app.state, 'kontur_adapter', None)
+
+    app.state.saga_service = create_saga_service(
+        event_bus=app.state.event_bus,
+        command_bus=app.state.command_bus,
+        query_bus=app.state.query_bus,
+        # Port injection
+        telegram_groups_port=telegram_groups_port,
+        kontur_port=kontur_port,
+    )
+```
+
+**Step 4: Saga step uses port from context**
+
+```python
+# app/infra/saga/group_deletion_saga.py
+from typing import TYPE_CHECKING, Dict, Any
+
+if TYPE_CHECKING:
+    from app.company.ports.telegram_groups_port import TelegramGroupsPort
+
+log = get_logger("wellwon.saga.group_deletion")
+
+async def _delete_telegram_supergroup(context: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Step: Delete Telegram supergroup.
+
+    Uses TelegramGroupsPort from context (NOT direct adapter import).
+    """
+    telegram_group_id = context.get('telegram_group_id')
+    if not telegram_group_id:
+        context['telegram_deleted'] = False
+        return context
+
+    # Get port from context (Clean Architecture)
+    telegram_port: 'TelegramGroupsPort' = context.get('telegram_groups_port')
+    if not telegram_port:
+        log.warning("No telegram_groups_port in context, skipping deletion")
+        context['telegram_deleted'] = False
+        return context
+
+    try:
+        telegram_left = await telegram_port.leave_group(telegram_group_id)
+        context['telegram_deleted'] = telegram_left
+        log.info(f"Left Telegram group {telegram_group_id}: {telegram_left}")
+    except Exception as e:
+        log.error(f"Failed to leave Telegram group: {e}")
+        context['telegram_deleted'] = False
+
+    return context
+```
+
+### Testing Sagas with Fake Ports
+
+```python
+# tests/unit/saga/test_group_deletion_saga.py
+import pytest
+from tests.fakes.fake_telegram_adapter import FakeTelegramAdapter
+
+@pytest.fixture
+def fake_telegram():
+    return FakeTelegramAdapter()
+
+@pytest.mark.asyncio
+async def test_delete_telegram_group_success(fake_telegram):
+    """Test saga step deletes Telegram group via port."""
+    # Build context with fake port
+    context = {
+        'telegram_group_id': 123,
+        'telegram_groups_port': fake_telegram,  # Inject fake
+    }
+
+    # Execute saga step
+    result = await _delete_telegram_supergroup(context)
+
+    # Verify
+    assert result['telegram_deleted'] is True
+    assert fake_telegram.was_called('leave_group')
+
+@pytest.mark.asyncio
+async def test_delete_telegram_group_no_port():
+    """Test saga handles missing port gracefully."""
+    context = {
+        'telegram_group_id': 123,
+        # No port in context!
+    }
+
+    result = await _delete_telegram_supergroup(context)
+
+    # Should skip deletion, not crash
+    assert result['telegram_deleted'] is False
+```
+
+### Key Principles
+
+| Principle | Description |
+|-----------|-------------|
+| **Never import adapters in saga** | Use port from context instead |
+| **TYPE_CHECKING imports only** | Avoid circular dependencies |
+| **Handle missing port gracefully** | Log warning, don't crash |
+| **SagaService owns port injection** | Centralized configuration |
+| **Test with FakeAdapters** | Unit tests inject fake ports |
+
+### Checklist: Port Injection for Sagas
+
+- [ ] Port defined in domain (`app/{domain}/ports/{service}_port.py`)
+- [ ] SagaService receives port in `__init__`
+- [ ] Context builder injects port into context
+- [ ] Saga step gets port from context
+- [ ] TYPE_CHECKING import for port type
+- [ ] Graceful handling when port is None
+- [ ] FakeAdapter created for testing
+- [ ] Unit tests use fake port injection
 
 ---
 

@@ -45,6 +45,9 @@ from app.infra.saga import saga_events
 # Type checking imports
 if TYPE_CHECKING:
     from app.services.infrastructure.projection_rebuilder_service import ProjectionRebuilderService
+    from app.company.ports.telegram_groups_port import TelegramGroupsPort
+    from app.customs.ports.kontur_declarant_port import KonturDeclarantPort
+    from app.infra.event_bus.event_bus import EventBus
 
 log = logging.getLogger("wellwon.saga_service")
 
@@ -114,7 +117,10 @@ class SagaService:
             event_store: Optional[KurrentDBEventStore] = None,
             instance_id: Optional[str] = None,
             lock_manager: Optional[DistributedLockManager] = None,
-            projection_rebuilder: Optional['ProjectionRebuilderService'] = None
+            projection_rebuilder: Optional['ProjectionRebuilderService'] = None,
+            # Port injection for Clean Architecture
+            telegram_groups_port: Optional['TelegramGroupsPort'] = None,
+            kontur_port: Optional['KonturDeclarantPort'] = None,
     ):
         self.event_bus = event_bus
         self.command_bus = command_bus
@@ -123,6 +129,10 @@ class SagaService:
         self.instance_id = instance_id or 'default'
         self.lock_manager = lock_manager
         self.projection_rebuilder = projection_rebuilder
+
+        # Ports for saga context injection (Clean Architecture)
+        self._telegram_groups_port = telegram_groups_port
+        self._kontur_port = kontur_port
 
         # Validate rebuilder if provided
         if projection_rebuilder:
@@ -377,25 +387,7 @@ class SagaService:
             SagaTriggerConfig(
                 event_types=["CompanyCreated"],
                 saga_class=GroupCreationSaga,
-                context_builder=lambda event: {
-                    # Core IDs
-                    'company_id': event.get('aggregate_id') or event.get('company_id'),
-                    'created_by': event.get('created_by') or event.get('user_id'),
-                    # Enriched company data
-                    'company_name': event.get('name', 'Company'),
-                    'company_type': event.get('company_type', 'company'),
-                    # Saga orchestration options (from enriched event)
-                    'create_telegram_group': event.get('create_telegram_group', False),
-                    'telegram_group_title': event.get('telegram_group_title'),
-                    'telegram_group_description': event.get('telegram_group_description'),
-                    'create_chat': event.get('create_chat', True),
-                    'link_chat_id': event.get('link_chat_id'),
-                    # CQRS metadata
-                    'correlation_id': event.get('correlation_id', event.get('event_id')),
-                    'causation_id': event.get('event_id'),
-                    'original_event_type': event.get('event_type'),
-                    'triggered_from': 'saga_service'
-                },
+                context_builder=lambda event: self._build_group_creation_context(event),
                 dedupe_key_builder=lambda event: f"group_creation:{event.get('aggregate_id') or event.get('company_id')}",
                 dedupe_window_seconds=300,
                 conflict_key_builder=lambda event: f"company:{event.get('aggregate_id') or event.get('company_id')}",
@@ -418,8 +410,33 @@ class SagaService:
 
         log.info(f"Configured {len(self._trigger_configs)} saga trigger topics")
 
+    def _build_group_creation_context(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Build context for GroupCreationSaga with port injection."""
+        return {
+            # Core IDs
+            'company_id': event.get('aggregate_id') or event.get('company_id'),
+            'created_by': event.get('created_by') or event.get('user_id'),
+            # Enriched company data
+            'company_name': event.get('name', 'Company'),
+            'client_type': event.get('client_type', 'company'),
+            # Saga orchestration options (from enriched event)
+            'create_telegram_group': event.get('create_telegram_group', False),
+            'telegram_group_title': event.get('telegram_group_title'),
+            'telegram_group_description': event.get('telegram_group_description'),
+            'create_chat': event.get('create_chat', True),
+            'link_chat_id': event.get('link_chat_id'),
+            # CQRS metadata
+            'correlation_id': event.get('correlation_id', event.get('event_id')),
+            'causation_id': event.get('event_id'),
+            'original_event_type': event.get('event_type'),
+            'triggered_from': 'saga_service',
+            # PORT INJECTION for Clean Architecture
+            'telegram_groups_port': self._telegram_groups_port,
+            'event_bus': self.event_bus,
+        }
+
     def _build_deletion_saga_context(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """Build context for GroupDeletionSaga"""
+        """Build context for GroupDeletionSaga with port injection."""
         preserve_company = event.get('preserve_company', False)
 
         log.debug(
@@ -442,7 +459,10 @@ class SagaService:
             'correlation_id': event.get('correlation_id', event.get('event_id')),
             'causation_id': event.get('event_id'),
             'original_event_type': event.get('event_type'),
-            'triggered_from': 'saga_service'
+            'triggered_from': 'saga_service',
+            # PORT INJECTION for Clean Architecture
+            'telegram_groups_port': self._telegram_groups_port,
+            'event_bus': self.event_bus,
         }
 
         return context
@@ -2101,7 +2121,10 @@ def create_saga_service(
         event_store: Optional[KurrentDBEventStore] = None,
         instance_id: Optional[str] = None,
         lock_manager: Optional[DistributedLockManager] = None,
-        projection_rebuilder: Optional['ProjectionRebuilderService'] = None
+        projection_rebuilder: Optional['ProjectionRebuilderService'] = None,
+        # Port injection for Clean Architecture
+        telegram_groups_port: Optional['TelegramGroupsPort'] = None,
+        kontur_port: Optional['KonturDeclarantPort'] = None,
 ) -> SagaService:
     """Factory function to create a configured saga service."""
     return SagaService(
@@ -2111,7 +2134,9 @@ def create_saga_service(
         event_store=event_store,
         instance_id=instance_id,
         lock_manager=lock_manager,
-        projection_rebuilder=projection_rebuilder
+        projection_rebuilder=projection_rebuilder,
+        telegram_groups_port=telegram_groups_port,
+        kontur_port=kontur_port,
     )
 
 # =============================================================================

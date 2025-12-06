@@ -53,7 +53,7 @@ class GetCompanyByVatQuery(Query):
 class GetCompanyByNameQuery(Query):
     """Get company by name (for duplicate check)"""
     name: str
-    company_type: Optional[str] = Field(None, description="Filter by type: company, project, individual")
+    client_type: Optional[str] = Field(None, description="Filter by type: company, project")
     exact_match: bool = Field(default=True, description="Use exact match (case-insensitive) or partial match")
 
 
@@ -111,7 +111,7 @@ class CompanyDetail(BaseModel):
     """Company details for API response"""
     id: uuid.UUID
     name: str
-    company_type: str
+    client_type: str
     created_by: uuid.UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -152,7 +152,7 @@ class CompanySummary(BaseModel):
     """Company summary for list views"""
     id: uuid.UUID
     name: str
-    company_type: str
+    client_type: str
     vat: Optional[str] = None
     city: Optional[str] = None
     user_count: int = 0
@@ -169,7 +169,7 @@ class UserCompanyInfo(BaseModel):
     is_active: bool = True
     # Company details
     company_name: Optional[str] = None
-    company_type: Optional[str] = None
+    client_type: Optional[str] = None
 
 
 class CompanyUserInfo(BaseModel):

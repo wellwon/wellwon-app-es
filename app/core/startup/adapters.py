@@ -7,7 +7,7 @@
 import os
 import logging
 from app.core.fastapi_types import FastAPI
-from app.config.kontur_config import is_kontur_configured
+from app.config.kontur_config import is_kontur_configured, get_kontur_config
 from app.infra.kontur.adapter import get_kontur_adapter
 
 logger = logging.getLogger("wellwon.startup.adapters")
@@ -31,9 +31,24 @@ async def initialize_adapters(app: FastAPI) -> None:
 
     # Kontur Declarant adapter (customs)
     if is_kontur_configured():
-        kontur_adapter = get_kontur_adapter()
+        # Get cache manager from app state (initialized in persistence startup)
+        cache_manager = getattr(app.state, 'cache_manager', None)
+
+        # Initialize adapter with cache manager for session storage
+        kontur_adapter = get_kontur_adapter(cache_manager=cache_manager)
         app.state.kontur_adapter = kontur_adapter
-        logger.info("Kontur Declarant adapter initialized")
+
+        # Pre-authenticate if credentials are configured
+        kontur_config = get_kontur_config()
+        if kontur_config.has_credentials():
+            try:
+                await kontur_adapter.authenticate()
+                logger.info("Kontur Declarant adapter initialized and authenticated")
+            except Exception as e:
+                logger.warning(f"Kontur authentication failed at startup: {e}")
+                logger.info("Will retry authentication on first API call")
+        else:
+            logger.info("Kontur Declarant adapter initialized (no credentials for auto-auth)")
     else:
         logger.warning("Kontur not configured - customs declaration features disabled")
         logger.info("To enable: Set KONTUR_API_KEY environment variable")

@@ -21,8 +21,8 @@ class OrganizationsClient(BaseClient):
     - POST /getOrCreateCommonOrgByInn - Get or create by INN (Russian tax ID)
     """
 
-    def __init__(self, http_client, config):
-        super().__init__(http_client, config, category="organizations")
+    def __init__(self, http_client, config, session_refresh_callback=None):
+        super().__init__(http_client, config, category="organizations", session_refresh_callback=session_refresh_callback)
 
     async def create_or_update(self, org: CommonOrg) -> Optional[CommonOrg]:
         """

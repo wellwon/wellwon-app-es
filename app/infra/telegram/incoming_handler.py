@@ -813,7 +813,18 @@ class TelegramIncomingHandler:
     async def _handle_inbox_read_event(self, read_event: 'ReadEventInfo') -> bool:
         """
         Handle when YOU read messages on Telegram.
-        Syncs your read status to WellWon.
+
+        Two purposes:
+        1. Sync your read status to WellWon (you read messages from Telegram users)
+        2. CRITICAL: Also triggers blue checkmarks for messages sent FROM WellWon (via bot)!
+
+        Why #2 is needed:
+        - When you send from WellWon, the bot sends to Telegram
+        - You read the bot's message in Telegram -> Inbox event
+        - This confirms you read messages up to that point -> blue checkmarks!
+
+        This is different from Outbox which fires when OTHERS read YOUR messages.
+        In single-user scenario (same user in Telegram and WellWon), Inbox is more reliable.
         """
         try:
             topic_id = getattr(read_event, 'topic_id', None)
@@ -835,20 +846,34 @@ class TelegramIncomingHandler:
                 read_event.max_id
             )
 
-            if not wellwon_message_id:
-                log.debug(
-                    f"No WellWon message found for Telegram message {read_event.max_id} "
-                    f"in chat {read_event.chat_id}"
-                )
-                return False
-
             # 3. Get the user who read (from the MTProto session - this is the logged-in user)
             user_id = await self._get_mtproto_user_id()
             if not user_id:
                 log.warning("Could not determine MTProto user ID for read event")
                 return False
 
-            # 4. Dispatch MarkMessagesAsReadCommand with source='telegram'
+            # 4. CRITICAL: Update telegram_read_at for blue checkmarks!
+            # Even if specific message not found (race condition), update ALL messages
+            # This handles case when Inbox event arrives before message is saved
+            if wellwon_message_id:
+                await self._update_telegram_read_at(chat_id, wellwon_message_id)
+            else:
+                # Message not found - likely race condition, update all messages in chat
+                log.info(
+                    f"[BLUE-CHECK-INBOX] Message mapping not found for tg_msg={read_event.max_id}, "
+                    f"updating ALL messages in chat {chat_id}"
+                )
+                await self._update_all_telegram_read_at(chat_id)
+
+            # If no specific message found, still continue to sync read status
+            # Use a fallback: get the latest message in the chat
+            if not wellwon_message_id:
+                wellwon_message_id = await self._get_latest_message_id(chat_id)
+                if not wellwon_message_id:
+                    log.debug(f"No messages found in chat {chat_id}")
+                    return True  # Blue checkmarks already updated above
+
+            # 5. Dispatch MarkMessagesAsReadCommand with source='telegram'
             # Handle optimistic concurrency conflicts gracefully - if another
             # concurrent read event already updated, that's fine
             from app.chat.commands import MarkMessagesAsReadCommand
@@ -886,6 +911,113 @@ class TelegramIncomingHandler:
         except Exception as e:
             log.error(f"Error handling Telegram read event: {e}", exc_info=True)
             return False
+
+    async def _update_telegram_read_at(self, chat_id: UUID, wellwon_message_id: int) -> None:
+        """
+        Update telegram_read_at for messages up to the given ID.
+
+        This sets blue checkmarks for messages that were confirmed read in Telegram.
+        Works for both:
+        - Outbox events (others read your messages)
+        - Inbox events (you read messages, including from bot/WellWon)
+        """
+        try:
+            from app.infra.read_repos.message_scylla_repo import MessageScyllaRepo
+            from datetime import datetime, timezone
+
+            message_repo = MessageScyllaRepo()
+            telegram_read_at = datetime.now(timezone.utc)
+
+            log.info(f"[BLUE-CHECK-INBOX] Updating telegram_read_at for messages up to {wellwon_message_id}")
+
+            await message_repo.update_telegram_read_status(
+                channel_id=chat_id,
+                last_read_message_id=wellwon_message_id,
+                telegram_read_at=telegram_read_at,
+            )
+
+            # Also publish event to WSE for real-time UI update
+            if self._event_bus:
+                participant_ids = await self._get_chat_participant_ids(chat_id)
+                event_dict = {
+                    "event_id": str(uuid4()),
+                    "event_type": "MessagesReadOnTelegram",
+                    "aggregate_id": str(chat_id),
+                    "aggregate_type": "Chat",
+                    "chat_id": str(chat_id),
+                    "last_read_message_id": wellwon_message_id,
+                    "telegram_read_at": telegram_read_at.isoformat(),
+                    "timestamp": telegram_read_at.isoformat(),
+                    "participant_ids": participant_ids,
+                    "source": "inbox",  # Mark as from inbox event
+                }
+                await self._event_bus.publish("transport.chat-events", event_dict)
+
+            log.info(f"[BLUE-CHECK-INBOX] ScyllaDB and WSE updated for chat {chat_id}")
+
+        except Exception as e:
+            log.warning(f"[BLUE-CHECK-INBOX] Failed to update telegram_read_at: {e}")
+
+    async def _update_all_telegram_read_at(self, chat_id: UUID) -> None:
+        """
+        Update telegram_read_at for ALL messages in a chat.
+
+        Used when specific message mapping not found (race condition).
+        """
+        try:
+            from app.infra.read_repos.message_scylla_repo import MessageScyllaRepo
+            from datetime import datetime, timezone
+
+            message_repo = MessageScyllaRepo()
+            telegram_read_at = datetime.now(timezone.utc)
+
+            log.info(f"[BLUE-CHECK-INBOX] Updating telegram_read_at for ALL messages in chat {chat_id}")
+
+            await message_repo.update_all_telegram_read_status(
+                channel_id=chat_id,
+                telegram_read_at=telegram_read_at,
+            )
+
+            # Also publish event to WSE for real-time UI update
+            if self._event_bus:
+                participant_ids = await self._get_chat_participant_ids(chat_id)
+                event_dict = {
+                    "event_id": str(uuid4()),
+                    "event_type": "MessagesReadOnTelegram",
+                    "aggregate_id": str(chat_id),
+                    "aggregate_type": "Chat",
+                    "chat_id": str(chat_id),
+                    "last_read_message_id": None,  # All messages
+                    "telegram_read_at": telegram_read_at.isoformat(),
+                    "timestamp": telegram_read_at.isoformat(),
+                    "participant_ids": participant_ids,
+                    "source": "inbox_all",  # Mark as from inbox event (all messages)
+                }
+                await self._event_bus.publish("transport.chat-events", event_dict)
+
+            log.info(f"[BLUE-CHECK-INBOX] All messages in chat {chat_id} marked as read on Telegram")
+
+        except Exception as e:
+            log.warning(f"[BLUE-CHECK-INBOX] Failed to update all telegram_read_at: {e}")
+
+    async def _get_latest_message_id(self, chat_id: UUID) -> Optional[int]:
+        """Get the latest message Snowflake ID in a chat."""
+        try:
+            from app.infra.read_repos.message_scylla_repo import MessageScyllaRepo
+
+            message_repo = MessageScyllaRepo()
+            messages = await message_repo.get_messages(
+                channel_id=chat_id,
+                limit=1,
+            )
+
+            if messages:
+                return messages[0].get('message_id')
+            return None
+
+        except Exception as e:
+            log.warning(f"Failed to get latest message for chat {chat_id}: {e}")
+            return None
 
     async def _lookup_chat_by_telegram_id(self, telegram_chat_id: int) -> Optional[UUID]:
         """Lookup WellWon chat by Telegram chat ID only (no topic)."""

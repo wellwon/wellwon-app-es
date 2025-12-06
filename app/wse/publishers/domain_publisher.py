@@ -669,7 +669,7 @@ class WSEDomainPublisher:
         return {
             "company_id": event.get("aggregate_id") or event.get("company_id"),
             "name": event.get("name"),
-            "company_type": event.get("company_type"),
+            "client_type": event.get("client_type"),
             "vat": event.get("vat"),
             "city": event.get("city"),
             "is_active": event.get("is_active", True),

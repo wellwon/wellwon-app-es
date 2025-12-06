@@ -3,7 +3,7 @@
 # Description: Base client for all Kontur API clients with full reliability stack
 # =============================================================================
 
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, Callable, Awaitable
 import re
 import httpx
 
@@ -25,6 +25,7 @@ from app.infra.kontur.exceptions import (
     KonturNetworkError,
     KonturTimeoutError,
     KonturAPIError,
+    KonturSessionExpiredError,
 )
 
 log = get_logger("wellwon.infra.kontur.client")
@@ -61,7 +62,8 @@ class BaseClient:
         self,
         http_client: httpx.AsyncClient,
         config: KonturConfig,
-        category: str
+        category: str,
+        session_refresh_callback: Optional[Callable[[], Awaitable[None]]] = None
     ):
         """
         Initialize base client with reliability patterns.
@@ -70,10 +72,12 @@ class BaseClient:
             http_client: Shared httpx.AsyncClient instance
             config: Kontur configuration
             category: Client category (for logging and metrics)
+            session_refresh_callback: Async callback to refresh session on 401
         """
         self.http = http_client
         self.config = config
         self.category = category
+        self._session_refresh_callback = session_refresh_callback
 
         # Cache manager (will be injected if available)
         self.cache = None
@@ -171,7 +175,8 @@ class BaseClient:
         cache_key: Optional[str] = None,
         cache_ttl: Optional[int] = None,
         files: Optional[Dict] = None,
-        response_type: str = "json"
+        response_type: str = "json",
+        _retry_on_401: bool = True
     ) -> Optional[Any]:
         """
         Execute HTTP request with full reliability stack.
@@ -186,6 +191,7 @@ class BaseClient:
             use_upload_timeout: Use upload timeout (300s)
             cache_key: Cache key for this request
             cache_ttl: Cache TTL in seconds
+            _retry_on_401: Internal flag to prevent infinite retry loop
 
         Returns:
             Parsed JSON response or None
@@ -204,18 +210,39 @@ class BaseClient:
         if self.rate_limiter and self.config.enable_rate_limiting:
             await self.rate_limiter.wait_and_acquire()
 
-        # 3. Circuit breaker + Retry + Execute
-        result = await self._execute_with_reliability(
-            method=method,
-            path=path,
-            json=json,
-            params=params,
-            timeout=timeout,
-            use_long_timeout=use_long_timeout,
-            use_upload_timeout=use_upload_timeout,
-            files=files,
-            response_type=response_type
-        )
+        # 3. Circuit breaker + Retry + Execute (with 401 session refresh)
+        try:
+            result = await self._execute_with_reliability(
+                method=method,
+                path=path,
+                json=json,
+                params=params,
+                timeout=timeout,
+                use_long_timeout=use_long_timeout,
+                use_upload_timeout=use_upload_timeout,
+                files=files,
+                response_type=response_type
+            )
+        except KonturSessionExpiredError:
+            # Session expired - try to refresh and retry once
+            if _retry_on_401 and self._session_refresh_callback:
+                log.info("Session expired, refreshing and retrying...")
+                await self._session_refresh_callback()
+                return await self._request(
+                    method=method,
+                    path=path,
+                    json=json,
+                    params=params,
+                    timeout=timeout,
+                    use_long_timeout=use_long_timeout,
+                    use_upload_timeout=use_upload_timeout,
+                    cache_key=cache_key,
+                    cache_ttl=cache_ttl,
+                    files=files,
+                    response_type=response_type,
+                    _retry_on_401=False  # Prevent infinite loop
+                )
+            raise
 
         # 4. Update cache on success
         if result and cache_key and self.cache and self.config.enable_cache:
@@ -375,7 +402,8 @@ class BaseClient:
         if status_code == 400:
             raise KonturBadRequestError(f"Bad request to {path}: {error_text}")
         elif status_code == 401:
-            raise KonturAuthenticationError(f"Authentication failed for {path}: {error_text}")
+            # Session expired - raise specific error for retry logic
+            raise KonturSessionExpiredError(f"Session expired for {path}: {error_text}")
         elif status_code == 403:
             raise KonturAuthorizationError(f"Access forbidden to {path}: {error_text}")
         elif status_code == 404:

@@ -254,6 +254,30 @@ export async function updateSupergroup(
   }
 }
 
+export interface GenerateInviteLinkResponse {
+  success: boolean;
+  invite_link?: string;
+  error?: string;
+}
+
+/**
+ * Generate a new invite link for a Telegram group.
+ * This creates a new link via MTProto and saves it to the database.
+ */
+export async function generateInviteLink(groupId: number): Promise<GenerateInviteLinkResponse> {
+  try {
+    const { data } = await API.post<GenerateInviteLinkResponse>(
+      `/telegram/group/${groupId}/generate-invite-link`
+    );
+    return data;
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.response?.data?.detail || error.message || 'Failed to generate invite link'
+    };
+  }
+}
+
 export async function deleteSupergroup(supergroupId: number): Promise<boolean> {
   try {
     await API.delete(`/telegram/supergroups/${supergroupId}`);
@@ -305,5 +329,44 @@ export async function updateMemberRole(
     return data.success;
   } catch {
     return false;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Client Invitation to Group
+// -----------------------------------------------------------------------------
+
+export interface InviteToGroupRequest {
+  contact: string;  // Phone (+79001234567) or @username
+  client_name: string;
+}
+
+export interface InviteToGroupResponse {
+  success: boolean;
+  status: string;  // 'success', 'already_member', 'not_found', 'privacy_restricted', 'rate_limit'
+  telegram_user_id?: number;
+  error?: string;
+}
+
+/**
+ * Invite external client to Telegram group by phone or @username.
+ * Works directly with supergroupId, no chatId required.
+ */
+export async function inviteToGroup(
+  groupId: number,
+  request: InviteToGroupRequest
+): Promise<InviteToGroupResponse> {
+  try {
+    const { data } = await API.post<InviteToGroupResponse>(
+      `/telegram/groups/${groupId}/invite`,
+      request
+    );
+    return data;
+  } catch (error: any) {
+    return {
+      success: false,
+      status: error.response?.data?.detail || 'error',
+      error: error.response?.data?.detail || error.message || 'Failed to invite client'
+    };
   }
 }

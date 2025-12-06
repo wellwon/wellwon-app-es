@@ -533,3 +533,49 @@ export async function uploadVoiceMessage(
   );
   return data;
 }
+
+// -----------------------------------------------------------------------------
+// Client Invitation Operations
+// -----------------------------------------------------------------------------
+
+export interface InviteClientRequest {
+  contact: string;  // Phone (+79001234567) or @username
+  client_name: string;
+}
+
+export interface InviteClientResponse {
+  status: string;  // 'success', 'already_member'
+  message: string;
+}
+
+export interface InviteLinkResponse {
+  invite_link: string | null;
+  telegram_supergroup_id: number | null;
+  has_telegram: boolean;
+}
+
+/**
+ * Get Telegram invite link for chat's linked group.
+ * Returns invite_link if the chat is linked to a Telegram group.
+ */
+export async function getInviteLink(chatId: string): Promise<InviteLinkResponse> {
+  const { data } = await API.get<InviteLinkResponse>(`/chats/${chatId}/invite-link`);
+  return data;
+}
+
+/**
+ * Invite external client to chat's Telegram group.
+ * Automatically resolves contact (phone or @username) and invites to group.
+ *
+ * @throws Error with detail: 'not_linked' - Chat not linked to Telegram
+ * @throws Error with detail: 'user_not_found' - Contact not registered on Telegram
+ * @throws Error with detail: 'privacy_restricted' - User blocked invitations
+ * @throws Error with detail: 'rate_limit' - Telegram rate limit hit
+ */
+export async function inviteClient(
+  chatId: string,
+  request: InviteClientRequest
+): Promise<InviteClientResponse> {
+  const { data } = await API.post<InviteClientResponse>(`/chats/${chatId}/invite-client`, request);
+  return data;
+}

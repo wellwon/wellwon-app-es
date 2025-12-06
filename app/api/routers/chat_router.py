@@ -34,6 +34,7 @@ from app.chat.commands import (
     StopTypingCommand,
     LinkTelegramChatCommand,
     UnlinkTelegramChatCommand,
+    InviteClientCommand,
 )
 from app.chat.exceptions import (
     UserNotParticipantError,
@@ -1127,3 +1128,144 @@ async def get_template_by_id(
         raise HTTPException(status_code=404, detail="Template not found")
 
     return template
+
+
+# =============================================================================
+# Client Invitation Endpoints
+# =============================================================================
+
+class InviteClientRequest(BaseModel):
+    """Request to invite client to Telegram group"""
+    contact: str = Field(..., min_length=1, max_length=100, description="Phone (+79001234567) or @username")
+    client_name: str = Field(..., min_length=1, max_length=255, description="Client name for contact import")
+
+
+class InviteClientResponse(BaseModel):
+    """Response from client invitation"""
+    status: str  # 'success', 'already_member'
+    message: str
+
+
+@router.post("/{chat_id}/invite-client", response_model=InviteClientResponse)
+async def invite_client(
+    chat_id: UUID,
+    body: InviteClientRequest,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    command_bus=Depends(get_command_bus),
+):
+    """
+    Invite external client to chat's Telegram group.
+
+    Automatically resolves contact (phone or @username) and invites to group.
+
+    Possible error responses:
+    - 400: Chat not linked to Telegram
+    - 400: user_not_found - Contact not registered on Telegram
+    - 400: privacy_restricted - User blocked invitations
+    - 400: rate_limit - Telegram rate limit hit
+    - 400: permission_denied - Bot lacks invite permission
+    """
+    user_id = uuid.UUID(current_user["user_id"])
+
+    log.info(f"Inviting client {body.contact} to chat {chat_id}")
+
+    command = InviteClientCommand(
+        chat_id=chat_id,
+        contact=body.contact,
+        client_name=body.client_name,
+        invited_by=user_id,
+    )
+
+    try:
+        await command_bus.send(command)
+        return InviteClientResponse(
+            status="success",
+            message=f"Client {body.contact} invited successfully"
+        )
+    except ValueError as e:
+        error_msg = str(e)
+        # Parse error reason from handler
+        if "not linked to Telegram" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="not_linked"
+            )
+        elif "user_not_found" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="user_not_found"
+            )
+        elif "privacy_restricted" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="privacy_restricted"
+            )
+        elif "rate_limit" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="rate_limit"
+            )
+        elif "permission_denied" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="permission_denied"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_msg
+            )
+
+
+class InviteLinkResponse(BaseModel):
+    """Response containing invite link for chat's Telegram group"""
+    invite_link: Optional[str]
+    telegram_supergroup_id: Optional[int]
+    has_telegram: bool
+
+
+@router.get("/{chat_id}/invite-link", response_model=InviteLinkResponse)
+async def get_invite_link(
+    chat_id: UUID,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    query_bus=Depends(get_query_bus),
+):
+    """
+    Get Telegram invite link for chat's linked group.
+
+    Returns invite_link if the chat is linked to a Telegram group.
+    Returns has_telegram=false if no Telegram group is linked.
+    """
+    from app.infra.read_repos.chat_read_repo import ChatReadRepo
+    from app.infra.read_repos.company_read_repo import CompanyReadRepo
+
+    # Get chat to find telegram_supergroup_id
+    chat = await ChatReadRepo.get_chat_by_id(chat_id)
+    if not chat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat not found"
+        )
+
+    # Check if chat has Telegram link
+    if not chat.telegram_chat_id:
+        return InviteLinkResponse(
+            invite_link=None,
+            telegram_supergroup_id=None,
+            has_telegram=False
+        )
+
+    # Get supergroup to find invite_link
+    supergroup = await CompanyReadRepo.get_telegram_supergroup_by_id(chat.telegram_chat_id)
+    if not supergroup:
+        return InviteLinkResponse(
+            invite_link=None,
+            telegram_supergroup_id=chat.telegram_chat_id,
+            has_telegram=True
+        )
+
+    return InviteLinkResponse(
+        invite_link=supergroup.invite_link,
+        telegram_supergroup_id=supergroup.id,
+        has_telegram=True
+    )

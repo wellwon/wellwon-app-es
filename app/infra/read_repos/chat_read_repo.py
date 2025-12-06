@@ -597,3 +597,78 @@ class ChatReadRepo:
         )
 
         return [dict(row) for row in rows]
+
+    # =========================================================================
+    # Telegram Group Members Operations
+    # =========================================================================
+
+    @staticmethod
+    async def upsert_telegram_group_member(
+        supergroup_id: int,
+        telegram_user_id: int,
+        first_name: str,
+        last_name: Optional[str] = None,
+        username: Optional[str] = None,
+        status: str = "member",
+        joined_at: Optional[datetime] = None,
+    ) -> None:
+        """
+        Upsert a Telegram group member.
+
+        Used when clients are invited to groups via InviteClientCommand.
+        Also used by incoming_handler when users join via invite link.
+
+        Args:
+            supergroup_id: Telegram supergroup ID (BIGINT)
+            telegram_user_id: User's Telegram ID (BIGINT)
+            first_name: User's first name
+            last_name: User's last name (optional)
+            username: User's @username (optional)
+            status: member, administrator, creator, left, kicked
+            joined_at: When user joined (defaults to now)
+        """
+        await pg_client.execute(
+            """
+            INSERT INTO telegram_group_members (
+                supergroup_id, telegram_user_id, first_name, last_name,
+                username, status, joined_at, is_active, last_seen
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, NOW())
+            ON CONFLICT (supergroup_id, telegram_user_id) DO UPDATE SET
+                first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name,
+                username = COALESCE(EXCLUDED.username, telegram_group_members.username),
+                status = EXCLUDED.status,
+                is_active = true,
+                last_seen = NOW()
+            """,
+            supergroup_id, telegram_user_id, first_name, last_name,
+            username, status, joined_at or datetime.utcnow()
+        )
+
+    @staticmethod
+    async def get_telegram_group_members(
+        supergroup_id: int,
+        active_only: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Get all members of a Telegram supergroup"""
+        active_filter = "AND is_active = true" if active_only else ""
+
+        rows = await pg_client.fetch(
+            f"""
+            SELECT
+                telegram_user_id,
+                first_name,
+                last_name,
+                username,
+                status,
+                joined_at,
+                last_seen,
+                is_active
+            FROM telegram_group_members
+            WHERE supergroup_id = $1 {active_filter}
+            ORDER BY joined_at DESC
+            """,
+            supergroup_id
+        )
+
+        return [dict(row) for row in rows]

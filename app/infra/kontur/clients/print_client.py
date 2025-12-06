@@ -20,8 +20,8 @@ class PrintClient(BaseClient):
     - Generate PDF for printing/submission
     """
 
-    def __init__(self, http_client, config):
-        super().__init__(http_client, config, category="print")
+    def __init__(self, http_client, config, session_refresh_callback=None):
+        super().__init__(http_client, config, category="print", session_refresh_callback=session_refresh_callback)
 
     async def print_html(
         self,

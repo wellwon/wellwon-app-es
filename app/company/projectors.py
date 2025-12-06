@@ -59,7 +59,7 @@ class CompanyProjector:
         await self.company_read_repo.insert_company(
             company_id=company_id,
             name=event_data['name'],
-            company_type=event_data.get('company_type', 'company'),
+            client_type=event_data.get('client_type', 'company'),
             created_by=uuid.UUID(event_data['created_by']),
             vat=event_data.get('vat'),
             ogrn=event_data.get('ogrn'),
@@ -92,7 +92,7 @@ class CompanyProjector:
         await self.company_read_repo.update_company(
             company_id=company_id,
             name=event_data.get('name'),
-            company_type=event_data.get('company_type'),
+            client_type=event_data.get('client_type'),
             vat=event_data.get('vat'),
             ogrn=event_data.get('ogrn'),
             kpp=event_data.get('kpp'),

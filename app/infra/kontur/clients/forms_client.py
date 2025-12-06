@@ -25,8 +25,8 @@ class FormsClient(BaseClient):
     - Set contractors from CommonOrgs
     """
 
-    def __init__(self, http_client, config):
-        super().__init__(http_client, config, category="forms")
+    def __init__(self, http_client, config, session_refresh_callback=None):
+        super().__init__(http_client, config, category="forms", session_refresh_callback=session_refresh_callback)
 
     async def get_form_json(
         self,

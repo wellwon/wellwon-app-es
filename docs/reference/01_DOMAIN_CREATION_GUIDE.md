@@ -2,7 +2,7 @@
 
 **WellWon Platform v1.0 - Complete Step-by-Step Reference**
 
-**Last Updated:** 2025-12-01
+**Last Updated:** 2025-12-06
 
 This is the authoritative guide for creating new domains in WellWon. Follow this guide exactly to ensure consistency with existing architecture and best practices.
 
@@ -83,6 +83,9 @@ app/{domain_name}/
 ├── projectors.py                 # Event projectors (@sync_projection/@async_projection)
 ├── read_models.py                # Read model schemas (Pydantic)
 ├── queries.py                    # Query definitions (read operations)
+├── ports/                         # External service ports (Hexagonal Architecture)
+│   ├── __init__.py               # EMPTY as per convention
+│   └── {service}_port.py         # Protocol definitions for external APIs
 ├── command_handlers/             # Modular command handlers
 │   ├── __init__.py
 │   ├── lifecycle_handlers.py    # Creation, deletion handlers
@@ -107,8 +110,11 @@ app/{domain_name}/
 | `projectors.py` | Event handlers updating read models | @sync_projection | ✅ YES | `broker_account` |
 | `read_models.py` | Read-side database schemas | Pydantic v2 | ✅ YES | `broker_account` |
 | `value_objects.py` | Immutable domain objects | @dataclass frozen | Optional | `automation` |
+| `ports/` | External service interfaces (Protocol) | Hexagonal Architecture | Optional* | `customs`, `chat` |
 | `command_handlers/` | Command handler classes | BaseCommandHandler | ✅ YES | `broker_account` |
 | `query_handlers/` | Query handler classes | BaseQueryHandler | ✅ YES | `broker_account` |
+
+*`ports/` is required if your domain calls external APIs (Kontur, Telegram, DaData, etc.)
 
 **⚠️ 2025-12-01 BREAKING CHANGES**:
 - `commands.py` - NOW inherits from `Command` (Pydantic v2), NOT @dataclass
@@ -639,7 +645,113 @@ entity = await self.query_bus.query(GetEntityByIdQuery(id=command.entity_id))
 
 ---
 
-### Step 6: Create Projectors
+### Step 6: Create Ports (If Calling External APIs)
+
+**Files:** `ports/__init__.py`, `ports/{service}_port.py`
+
+If your domain needs to call external APIs (Kontur, Telegram, DaData, etc.), you MUST define **Ports** following Hexagonal Architecture.
+
+**See:** [PORTS_AND_ADAPTERS_GUIDE.md](./PORTS_AND_ADAPTERS_GUIDE.md) for full details.
+
+#### 6.1 Port Definition (Protocol)
+
+Ports define the **interface** your domain requires from infrastructure. The adapter implements this interface.
+
+```python
+# app/{domain}/ports/{service}_port.py
+from __future__ import annotations
+
+from typing import Protocol, Optional, List, Dict, Any, runtime_checkable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.{domain}.models import SomeDto
+
+@runtime_checkable
+class MyExternalServicePort(Protocol):
+    """
+    Port: External Service API
+
+    Defined by: {Domain} Domain
+    Implemented by: MyServiceAdapter (in app/infra/{service}/adapter.py)
+    """
+
+    async def do_something(self, param: str) -> Optional['SomeDto']:
+        """Execute an operation on external service."""
+        ...
+
+    async def list_items(self, filter: str = None) -> List[Dict[str, Any]]:
+        """List items from external service."""
+        ...
+```
+
+#### 6.2 Empty __init__.py
+
+```python
+# app/{domain}/ports/__init__.py
+# EMPTY - as per WellWon convention (use direct imports)
+```
+
+#### 6.3 Port Injection in Handler
+
+```python
+# app/{domain}/command_handlers/my_handlers.py
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.{domain}.ports.my_service_port import MyExternalServicePort
+    from app.infra.cqrs.handler_dependencies import HandlerDependencies
+
+@command_handler(MyCommand)
+class MyHandler(BaseCommandHandler):
+
+    def __init__(self, deps: 'HandlerDependencies'):
+        super().__init__(deps.event_bus, deps.event_store)
+        # Port injection - handler uses interface, not concrete adapter
+        self._external_service: 'MyExternalServicePort' = deps.my_service_port
+
+    async def handle(self, command: MyCommand) -> UUID:
+        # Use port (Clean Architecture - no infrastructure dependency)
+        result = await self._external_service.do_something(command.param)
+
+        if not result:
+            raise MyDomainException("External service call failed")
+
+        # Continue with business logic...
+```
+
+#### 6.4 Add Port to HandlerDependencies
+
+```python
+# app/infra/cqrs/handler_dependencies.py
+if TYPE_CHECKING:
+    from app.{domain}.ports.my_service_port import MyExternalServicePort
+
+@dataclass
+class HandlerDependencies:
+    # ... existing fields ...
+    my_service_port: Optional['MyExternalServicePort'] = None
+```
+
+**Key Principles:**
+- Port is defined in **domain** (what domain needs)
+- Adapter is in **infrastructure** (how it's done)
+- Handler receives port via **HandlerDependencies**
+- Use **TYPE_CHECKING** imports to avoid circular dependencies
+- Use **Protocol** (not ABC) for structural subtyping
+
+**When to Create Ports:**
+- Calling external REST APIs (Kontur, DaData, etc.)
+- Calling messaging APIs (Telegram)
+- Any infrastructure call the domain needs
+
+**When NOT to Create Ports:**
+- Internal queries (use QueryBus)
+- Database access (use repositories)
+- Event publishing (use EventBus)
+
+---
+
+### Step 7: Create Projectors
 
 **File:** `projectors.py`
 
@@ -769,7 +881,7 @@ await pg.execute("""
 
 ---
 
-### Step 7: Register Domain in Domain Registry
+### Step 8: Register Domain in Domain Registry
 
 **File:** `app/infra/worker_core/event_processor/domain_registry.py`
 
@@ -866,7 +978,7 @@ In `app/config/eventbus_transport_config.py`:
 4. ✅ Add TopicConfig for your transport topic
 5. ✅ Consumer group should be `event-processor-workers`
 
-### Step 8: Create Queries and Query Handlers
+### Step 9: Create Queries and Query Handlers
 
 **File:** `queries.py`
 
@@ -953,7 +1065,7 @@ class GetAccountByIdHandler:
 
 ---
 
-### Step 9: Database Migrations
+### Step 10: Database Migrations
 
 Create database schema for read models.
 

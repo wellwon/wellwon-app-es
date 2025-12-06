@@ -27,7 +27,7 @@ from app.infra.persistence.scylladb import generate_snowflake_id
 
 if TYPE_CHECKING:
     from app.infra.cqrs.handler_dependencies import HandlerDependencies
-    from app.infra.telegram.adapter import TelegramAdapter
+    from app.chat.ports.telegram_messaging_port import TelegramMessagingPort
 
 log = logging.getLogger("wellwon.chat.handlers.message")
 
@@ -53,7 +53,8 @@ class SendMessageHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
+        # Port injection: telegram_adapter implements TelegramMessagingPort
+        self._telegram: Optional['TelegramMessagingPort'] = getattr(deps, 'telegram_adapter', None)
         self.redis_client = getattr(deps, 'redis_client', None)
 
     async def handle(self, command: SendMessageCommand) -> Tuple[int, Optional[str]]:
@@ -130,7 +131,7 @@ class SendMessageHandler(BaseCommandHandler):
         )
 
         # Bidirectional sync: Send to Telegram if message is from WellWon (web or api), not from Telegram
-        if command.source in ("web", "api") and self.telegram_adapter:
+        if command.source in ("web", "api") and self._telegram:
             await self._sync_to_telegram(command, chat_aggregate, snowflake_id)
 
         log.info(f"Message sent: snowflake_id={snowflake_id} to chat {command.chat_id}")
@@ -160,20 +161,20 @@ class SendMessageHandler(BaseCommandHandler):
 
             # Send based on message type (use API-formatted chat_id)
             if command.message_type == "text":
-                result = await self.telegram_adapter.send_message(
+                result = await self._telegram.send_message(
                     chat_id=telegram_chat_id_for_api,
                     text=command.content,
                     topic_id=telegram_topic_id,
                 )
             elif command.message_type == "voice" and command.file_url:
-                result = await self.telegram_adapter.send_voice(
+                result = await self._telegram.send_voice(
                     chat_id=telegram_chat_id_for_api,
                     voice_url=command.file_url,
                     duration=command.voice_duration,
                     topic_id=telegram_topic_id,
                 )
             elif command.file_url:
-                result = await self.telegram_adapter.send_file(
+                result = await self._telegram.send_file(
                     chat_id=telegram_chat_id_for_api,
                     file_url=command.file_url,
                     file_name=command.file_name,
@@ -273,7 +274,8 @@ class EditMessageHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
+        # Port injection: telegram_adapter implements TelegramMessagingPort
+        self._telegram: Optional['TelegramMessagingPort'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: EditMessageCommand) -> uuid.UUID:
         log.info(f"Editing message {command.message_id} in chat {command.chat_id}")
@@ -298,7 +300,7 @@ class EditMessageHandler(BaseCommandHandler):
         )
 
         # Bidirectional sync: Edit in Telegram if message has telegram_message_id
-        if telegram_message_id and telegram_chat_id and self.telegram_adapter:
+        if telegram_message_id and telegram_chat_id and self._telegram:
             await self._sync_edit_to_telegram(telegram_chat_id, telegram_message_id, command.new_content)
 
         log.info(f"Message edited: {command.message_id}, telegram_message_id={telegram_message_id}")
@@ -313,7 +315,7 @@ class EditMessageHandler(BaseCommandHandler):
 
             log.info(f"Syncing message edit to Telegram: chat_id={telegram_chat_id}, message_id={telegram_message_id}")
 
-            success = await self.telegram_adapter.edit_message(
+            success = await self._telegram.edit_message(
                 chat_id=telegram_chat_id,
                 message_id=telegram_message_id,
                 text=new_content
@@ -343,7 +345,8 @@ class DeleteMessageHandler(BaseCommandHandler):
             transport_topic="transport.chat-events",
             event_store=deps.event_store
         )
-        self.telegram_adapter: Optional['TelegramAdapter'] = getattr(deps, 'telegram_adapter', None)
+        # Port injection: telegram_adapter implements TelegramMessagingPort
+        self._telegram: Optional['TelegramMessagingPort'] = getattr(deps, 'telegram_adapter', None)
 
     async def handle(self, command: DeleteMessageCommand) -> uuid.UUID:
         log.info(f"Deleting message {command.message_id} in chat {command.chat_id}")
@@ -369,7 +372,7 @@ class DeleteMessageHandler(BaseCommandHandler):
         )
 
         # Bidirectional sync: Delete from Telegram if message has telegram_message_id
-        if telegram_message_id and telegram_chat_id and self.telegram_adapter:
+        if telegram_message_id and telegram_chat_id and self._telegram:
             await self._sync_delete_to_telegram(telegram_chat_id, telegram_message_id)
 
         log.info(f"Message deleted: {command.message_id}, telegram_message_id={telegram_message_id}")
@@ -384,7 +387,7 @@ class DeleteMessageHandler(BaseCommandHandler):
 
             log.info(f"Syncing message deletion to Telegram: chat_id={telegram_chat_id}, message_id={telegram_message_id}")
 
-            success = await self.telegram_adapter.delete_message(
+            success = await self._telegram.delete_message(
                 chat_id=telegram_chat_id,
                 message_id=telegram_message_id
             )

@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { FormSection } from '@/components/design-system/FormSection';
 import { GlassCard, GlassButton } from '@/components/design-system';
 import * as companyApi from '@/api/company';
+import { inviteClient, getInviteLink } from '@/api/chat';
 import { useRealtimeChatContext } from '@/contexts/RealtimeChatContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { logger } from '@/utils/logger';
@@ -57,7 +58,9 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
   const [foundDuplicateCompany, setFoundDuplicateCompany] = useState<companyApi.CompanyDetail | null>(null);
   const [telegramGroupData, setTelegramGroupData] = useState({
     title: '',
-    description: 'Рабочая группа WellWon Logistics'
+    description: 'Рабочая группа WellWon Logistics',
+    clientPhone: '',
+    clientUsername: '',
   });
   const [companyFormData, setCompanyFormData] = useState<CompanyFormData>({
     vat: '',
@@ -574,7 +577,11 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
     }
 
     // Показываем процесс создания компании внутри модала
-    const steps = ['Проверка дубликатов', 'Создание компании', 'Создание Telegram группы', 'Привязка чата'];
+    // Add invite step if client contact is provided
+    const hasClientContact = telegramGroupData.clientPhone?.trim() || telegramGroupData.clientUsername?.trim();
+    const steps = hasClientContact
+      ? ['Проверка дубликатов', 'Создание компании', 'Создание Telegram группы', 'Привязка чата', 'Приглашение клиента']
+      : ['Проверка дубликатов', 'Создание компании', 'Создание Telegram группы', 'Привязка чата'];
     setProcessSteps(steps);
     setStepStatuses(steps.map(() => 'pending'));
     setCurrentStep(0);
@@ -600,7 +607,9 @@ export const AdminFormsModal: React.FC<AdminFormsModalProps> = ({
       setProcessError('');
       setTelegramGroupData({
         title: '',
-        description: 'Рабочая группа WellWon Logistics'
+        description: 'Рабочая группа WellWon Logistics',
+        clientPhone: '',
+        clientUsername: '',
       });
       if (formType === 'company-registration') {
         setCompanyFormData({

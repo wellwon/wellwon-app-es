@@ -25,8 +25,8 @@ class TemplatesClient(BaseClient):
     Note: Templates rarely change, so aggressive caching (24h) is used.
     """
 
-    def __init__(self, http_client, config):
-        super().__init__(http_client, config, category="templates")
+    def __init__(self, http_client, config, session_refresh_callback=None):
+        super().__init__(http_client, config, category="templates", session_refresh_callback=session_refresh_callback)
 
     async def list_templates(self) -> List[JsonTemplate]:
         """
